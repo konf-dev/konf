@@ -1,0 +1,8 @@
+tools:
+  memory:
+    backend: smrti
+    config:
+      dsn: "postgresql://postgres:konf@localhost/konf"
+  llm:
+    provider: openai
+    model: qwen3:8b

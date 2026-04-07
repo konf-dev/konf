@@ -1,0 +1,12 @@
+workflow: remember
+description: "Store a memory in the knowledge graph"
+register_as_tool: true
+capabilities: ["memory:store"]
+nodes:
+  store:
+    do: memory:store
+    input:
+      nodes:
+        - content: "{{ message }}"
+          node_type: "memory"
+    return: true

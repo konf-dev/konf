@@ -1,0 +1,5 @@
+[database]
+url = "postgresql://postgres:konf@localhost/konf"
+
+[server]
+port = 8000

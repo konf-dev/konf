@@ -1,0 +1,11 @@
+workflow: recall
+description: "Search memories"
+register_as_tool: true
+capabilities: ["memory:search"]
+nodes:
+  search:
+    do: memory:search
+    input:
+      query: "{{ message }}"
+      limit: 5
+    return: true

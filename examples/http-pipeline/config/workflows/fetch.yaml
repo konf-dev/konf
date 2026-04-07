@@ -1,5 +1,5 @@
 workflow: fetch_data
-description: "Fetch data from an API and extract a field"
+description: "Fetch data from an API and return it"
 register_as_tool: true
 capabilities: ["http:get"]
 nodes:
@@ -7,10 +7,4 @@ nodes:
     do: http:get
     with:
       url: "https://httpbin.org/json"
-    then: extract
-  extract:
-    do: json_get
-    input:
-      data: "{{ fetch.body }}"
-      path: "slideshow.title"
     return: true
