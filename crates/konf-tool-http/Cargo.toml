@@ -1,0 +1,19 @@
+[package]
+name = "konf-tool-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "HTTP tools (http:get, http:post) for the Konf platform"
+
+[dependencies]
+konflux-core = { path = "../konflux-core" }
+reqwest = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

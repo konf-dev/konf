@@ -1,0 +1,15 @@
+[package]
+name = "konf-tool-embed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+konflux-core = { path = "../konflux-core" }
+fastembed = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }

@@ -1,0 +1,56 @@
+[package]
+name = "konf-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "HTTP server for the Konf agentic AI platform — a thin transport shell"
+
+[dependencies]
+# Platform (bootstrap + runtime)
+konf-init = { path = "../konf-init" }
+konf-runtime = { path = "../konf-runtime" }
+konflux-core = { path = "../konflux-core" }
+
+# MCP server (optional)
+konf-mcp = { path = "../konf-mcp", optional = true }
+
+# Web
+axum = { workspace = true }
+tower-http = { workspace = true }
+tokio = { workspace = true }
+
+# Streaming
+async-stream = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+
+# Scheduling (optional — server-only, requires Postgres)
+sqlx = { workspace = true, optional = true }
+
+# Config
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Auth
+jsonwebtoken = { workspace = true }
+reqwest = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Types
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+[features]
+default = ["mcp", "scheduling"]
+mcp = ["konf-mcp"]
+scheduling = ["sqlx"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+serde_yaml = { workspace = true }

@@ -1,0 +1,28 @@
+[package]
+name = "konf-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "MCP server for the Konf platform — exposes tools, resources, and prompts to MCP clients"
+
+[[bin]]
+name = "konf-mcp"
+path = "src/main.rs"
+
+[lib]
+name = "konf_mcp"
+path = "src/lib.rs"
+
+[dependencies]
+konf-init = { path = "../konf-init" }
+konf-runtime = { path = "../konf-runtime" }
+konflux-core = { path = "../konflux-core" }
+
+rmcp = { version = "1.3", features = ["server", "transport-io"] }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }

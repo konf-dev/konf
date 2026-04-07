@@ -1,0 +1,39 @@
+name: Bug Report
+description: Report a bug in Konf
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: What happened? What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Konf Version
+      placeholder: "0.1.0"
+  - type: dropdown
+    id: crate
+    attributes:
+      label: Affected Crate
+      options:
+        - konflux-core
+        - konf-runtime
+        - konf-init
+        - konf-mcp
+        - konf-backend
+        - konf-tool-http
+        - konf-tool-llm
+        - konf-tool-embed
+        - konf-tool-mcp
+        - konf-tool-memory
+        - Other

@@ -1,0 +1,41 @@
+[package]
+name = "konf-init"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Init system for the Konf platform — reads config, boots engine, registers tools"
+
+[dependencies]
+# Engine + Runtime
+konflux-core = { path = "../konflux-core" }
+konf-runtime = { path = "../konf-runtime" }
+
+# Tool crates
+konf-tool-http = { path = "../konf-tool-http" }
+konf-tool-llm = { path = "../konf-tool-llm" }
+konf-tool-embed = { path = "../konf-tool-embed" }
+konf-tool-mcp = { path = "../konf-tool-mcp" }
+konf-tool-memory = { path = "../konf-tool-memory" }
+
+# Config
+figment = { workspace = true }
+arc-swap = { workspace = true }
+notify = "7"
+
+# Common
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+tokio = { workspace = true }
+sqlx = { workspace = true, optional = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[features]
+default = ["postgres"]
+postgres = ["sqlx"]

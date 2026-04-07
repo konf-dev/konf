@@ -1,0 +1,8 @@
+workflow: chat
+nodes:
+  respond:
+    do: ai:complete
+    with:
+      system: "{{ input.system_prompt }}"
+      prompt: "{{ input.message }}"
+    return: true

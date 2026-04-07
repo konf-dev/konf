@@ -1,0 +1,38 @@
+[package]
+name = "konflux-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "YAML workflow execution engine with capability lattice"
+
+[lib]
+name = "konflux"
+
+[dependencies]
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+minijinja = { workspace = true }
+uuid = { workspace = true }
+tracing = { version = "0.1", features = ["attributes"] }
+futures = { workspace = true }
+
+# Optional telemetry (for Langfuse, Jaeger, Datadog via OTEL collector)
+tracing-opentelemetry = { version = "0.27", optional = true }
+opentelemetry = { version = "0.27", optional = true }
+opentelemetry-otlp = { version = "0.27", optional = true }
+
+[features]
+default = []
+telemetry = ["tracing-opentelemetry", "opentelemetry", "opentelemetry-otlp"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -1,0 +1,16 @@
+workflow: context_assembly
+nodes:
+  search_memory:
+    do: memory:search
+    with:
+      query: "{{ input.message }}"
+      limit: 15
+    then: assemble
+
+  assemble:
+    do: echo
+    with:
+      memory_results: "{{ search_memory }}"
+      message: "{{ input.message }}"
+      user_id: "{{ input.user_id }}"
+    return: true

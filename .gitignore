@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+*.swp
+*.swo
+*~
+.DS_Store
+.env
+.env.local
+.idea/
+.vscode/
+*.iml
+.fastembed_cache/
