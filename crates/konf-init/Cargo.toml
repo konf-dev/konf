@@ -21,7 +21,7 @@ konf-tool-memory = { path = "../konf-tool-memory" }
 # Config
 figment = { workspace = true }
 arc-swap = { workspace = true }
-notify = "7"
+notify = "8"
 
 # Common
 async-trait = { workspace = true }
