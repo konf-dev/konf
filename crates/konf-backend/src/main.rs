@@ -35,6 +35,10 @@ async fn main() -> anyhow::Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("./config"));
 
+    if std::env::var("KONF_DEV_MODE").is_ok() {
+        tracing::warn!("*** DEV MODE ENABLED — JWT auth bypassed. Do NOT use in production. ***");
+    }
+
     let instance = konf_init::boot(&config_dir).await?;
 
     // 3. Set up auth
@@ -50,9 +54,30 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // 5. Build app state
+    // Use custom chat workflow from config if available, otherwise fall back to embedded template
+    let chat_workflow_path = config_dir.join("workflows").join("chat.yaml");
+    let default_workflow = if chat_workflow_path.exists() {
+        std::fs::read_to_string(&chat_workflow_path)
+            .unwrap_or_else(|_| templates::CHAT_WORKFLOW.to_string())
+    } else {
+        // Check if any workflow file exists and use the first one
+        let workflows_dir = config_dir.join("workflows");
+        if workflows_dir.is_dir() {
+            std::fs::read_dir(&workflows_dir).ok()
+                .and_then(|entries| {
+                    entries.filter_map(|e| e.ok())
+                        .find(|e| e.path().extension().map_or(false, |ext| ext == "yaml" || ext == "yml"))
+                        .and_then(|e| std::fs::read_to_string(e.path()).ok())
+                })
+                .unwrap_or_else(|| templates::CHAT_WORKFLOW.to_string())
+        } else {
+            templates::CHAT_WORKFLOW.to_string()
+        }
+    };
+
     let app_state = api::chat::AppState {
         runtime: instance.runtime.clone(),
-        default_workflow_yaml: templates::CHAT_WORKFLOW.to_string(),
+        default_workflow_yaml: default_workflow,
         default_capabilities: vec![
             konf_runtime::scope::CapabilityGrant::new("*"),
         ],

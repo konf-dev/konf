@@ -1,0 +1,11 @@
+workflow: greet
+description: "Greet a user using only builtin tools"
+register_as_tool: true
+capabilities: []
+nodes:
+  respond:
+    do: echo
+    with:
+      greeting: "Hello from Konf!"
+      status: "workflow executed successfully"
+    return: true
