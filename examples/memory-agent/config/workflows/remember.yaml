@@ -5,8 +5,10 @@ capabilities: ["memory:store"]
 nodes:
   store:
     do: memory:store
-    input:
+    with:
       nodes:
-        - content: "{{ message }}"
+        - content: "A memory stored via Konf workflow"
           node_type: "memory"
+          metadata:
+            source: "konf-example"
     return: true

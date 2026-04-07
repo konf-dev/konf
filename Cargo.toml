@@ -81,3 +81,12 @@ tempfile = "3"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Local overrides for development — patch external git deps to local checkouts
+[patch."ssh://git@github.com/konf-dev/smrti.git"]
+konf-tool-memory-smrti = { path = "../smrti/konf-tool-memory-smrti" }
+smrti-core = { path = "../smrti/smrti-core" }
+
+# The smrti bridge crate depends on konf-tool-memory via SSH — patch to local
+[patch."ssh://git@github.com/konf-dev/konf.git"]
+konf-tool-memory = { path = "crates/konf-tool-memory" }

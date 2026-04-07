@@ -163,12 +163,27 @@ async fn register_tools(engine: &Engine, tools: &ToolsConfig) -> anyhow::Result<
     // (e.g., konf-tool-memory-smrti from konf-dev/smrti) and add a match arm here.
     if let Some(ref mem_config) = tools.memory {
         match mem_config.backend.as_str() {
+            #[cfg(feature = "memory-smrti")]
+            "smrti" => {
+                let backend = konf_tool_memory_smrti::connect(&mem_config.config).await?;
+                konf_tool_memory::register(engine, backend).await?;
+                info!("Memory backend: smrti (Postgres + pgvector)");
+            }
             other => {
-                anyhow::bail!(
-                    "Unknown memory backend: '{other}'. \
-                     No memory backends are compiled in. \
-                     Add a backend crate (e.g., konf-tool-memory-smrti) as a dependency."
-                );
+                let mut available = Vec::new();
+                #[cfg(feature = "memory-smrti")]
+                available.push("smrti");
+                if available.is_empty() {
+                    anyhow::bail!(
+                        "Unknown memory backend: '{other}'. \
+                         No memory backends are compiled in. \
+                         Add a backend crate (e.g., konf-tool-memory-smrti) as a dependency."
+                    );
+                } else {
+                    anyhow::bail!(
+                        "Unknown memory backend: '{other}'. Available: {}", available.join(", ")
+                    );
+                }
             }
         }
     }

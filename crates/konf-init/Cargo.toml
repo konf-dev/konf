@@ -18,6 +18,9 @@ konf-tool-embed = { path = "../konf-tool-embed" }
 konf-tool-mcp = { path = "../konf-tool-mcp" }
 konf-tool-memory = { path = "../konf-tool-memory" }
 
+# Memory backends (external, feature-gated)
+konf-tool-memory-smrti = { git = "ssh://git@github.com/konf-dev/smrti.git", optional = true }
+
 # Config
 figment = { workspace = true }
 arc-swap = { workspace = true }
@@ -37,5 +40,6 @@ anyhow = { workspace = true }
 tempfile = { workspace = true }
 
 [features]
-default = ["postgres"]
+default = ["postgres", "memory-smrti"]
 postgres = ["sqlx"]
+memory-smrti = ["dep:konf-tool-memory-smrti"]
