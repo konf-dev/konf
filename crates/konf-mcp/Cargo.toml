@@ -15,7 +15,7 @@ name = "konf_mcp"
 path = "src/lib.rs"
 
 [dependencies]
-konf-init = { path = "../konf-init" }
+konf-init = { path = "../konf-init", default-features = false, features = ["postgres"] }
 konf-runtime = { path = "../konf-runtime" }
 konflux-core = { path = "../konflux-core" }
 

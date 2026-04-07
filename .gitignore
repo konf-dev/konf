@@ -10,3 +10,4 @@
 .vscode/
 *.iml
 .fastembed_cache/
+.cargo/

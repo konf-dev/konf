@@ -170,7 +170,7 @@ async fn register_tools(engine: &Engine, tools: &ToolsConfig) -> anyhow::Result<
                 info!("Memory backend: smrti (Postgres + pgvector)");
             }
             other => {
-                let mut available = Vec::new();
+                let mut available: Vec<&str> = Vec::new();
                 #[cfg(feature = "memory-smrti")]
                 available.push("smrti");
                 if available.is_empty() {
