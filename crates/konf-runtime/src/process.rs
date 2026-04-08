@@ -24,6 +24,7 @@ pub enum RunStatus {
     Running,
     Completed {
         duration_ms: u64,
+        output: serde_json::Value,
     },
     Failed {
         error: String,

@@ -56,12 +56,12 @@ fn test_update() {
     table.insert(run);
 
     let updated = table.update(&run_id, |r| {
-        *r.status.lock().unwrap() = RunStatus::Completed { duration_ms: 100 };
+        *r.status.lock().unwrap() = RunStatus::Completed { duration_ms: 100, output: serde_json::Value::Null };
     });
     assert!(updated);
 
     let status = table.get(&run_id, |r| r.status.lock().unwrap().clone());
-    assert!(matches!(status, Some(RunStatus::Completed { duration_ms: 100 })));
+    assert!(matches!(status, Some(RunStatus::Completed { duration_ms: 100, output: serde_json::Value::Null })));
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn test_active_count() {
     let table = ProcessTable::new();
     table.insert(make_run("konf:test", RunStatus::Running, None));
     table.insert(make_run("konf:test", RunStatus::Running, None));
-    table.insert(make_run("konf:test", RunStatus::Completed { duration_ms: 100 }, None));
+    table.insert(make_run("konf:test", RunStatus::Completed { duration_ms: 100, output: serde_json::Value::Null }, None));
 
     assert_eq!(table.active_count(), 2);
 }
@@ -160,13 +160,13 @@ fn test_gc_removes_old_completed() {
     table.insert(make_run("konf:test", RunStatus::Running, None));
 
     // Completed with old timestamp — should be gc'd
-    let old_run = make_run("konf:test", RunStatus::Completed { duration_ms: 100 }, None);
+    let old_run = make_run("konf:test", RunStatus::Completed { duration_ms: 100, output: serde_json::Value::Null }, None);
     let old_id = old_run.id;
     *old_run.completed_at.lock().unwrap() = Some(Utc::now() - chrono::Duration::hours(2));
     table.insert(old_run);
 
     // Completed with recent timestamp — should survive
-    let recent_run = make_run("konf:test", RunStatus::Completed { duration_ms: 200 }, None);
+    let recent_run = make_run("konf:test", RunStatus::Completed { duration_ms: 200, output: serde_json::Value::Null }, None);
     let recent_id = recent_run.id;
     *recent_run.completed_at.lock().unwrap() = Some(Utc::now());
     table.insert(recent_run);
@@ -182,7 +182,7 @@ fn test_gc_removes_old_completed() {
 fn test_run_status_is_terminal() {
     assert!(!RunStatus::Pending.is_terminal());
     assert!(!RunStatus::Running.is_terminal());
-    assert!(RunStatus::Completed { duration_ms: 0 }.is_terminal());
+    assert!(RunStatus::Completed { duration_ms: 0, output: serde_json::Value::Null }.is_terminal());
     assert!(RunStatus::Failed { error: "err".into(), duration_ms: 0 }.is_terminal());
     assert!(RunStatus::Cancelled { reason: "test".into(), duration_ms: 0 }.is_terminal());
 }

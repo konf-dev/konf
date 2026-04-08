@@ -225,7 +225,7 @@ impl Runtime {
                 *run.completed_at.lock().unwrap_or_else(|p| p.into_inner()) = Some(now);
                 let duration_ms = (now - run.started_at).num_milliseconds().max(0) as u64;
                 let new_status = match &result {
-                    Ok(_) => RunStatus::Completed { duration_ms },
+                    Ok(output) => RunStatus::Completed { duration_ms, output: output.clone() },
                     Err(e) if is_cancellation => RunStatus::Cancelled {
                         reason: e.to_string(),
                         duration_ms,
@@ -280,7 +280,7 @@ impl Runtime {
         loop {
             let status = self.table.get(&run_id, |run| run.status.lock().unwrap_or_else(|p| p.into_inner()).clone());
             match status {
-                Some(RunStatus::Completed { .. }) => return Ok(Value::Null), // output is in stream
+                Some(RunStatus::Completed { output, .. }) => return Ok(output),
                 Some(RunStatus::Failed { error, .. }) => {
                     return Err(RuntimeError::Engine(konflux::KonfluxError::Execution(
                         konflux::error::ExecutionError::NodeFailed {
@@ -483,7 +483,7 @@ impl Runtime {
                 *run.completed_at.lock().unwrap_or_else(|p| p.into_inner()) = Some(now);
                 let duration_ms = (now - run.started_at).num_milliseconds().max(0) as u64;
                 let new_status = match &final_status {
-                    Some((_, _, true)) => RunStatus::Completed { duration_ms },
+                    Some((_, _, true)) => RunStatus::Completed { duration_ms, output: Value::Null },
                     Some(("workflow_cancelled", _, _)) => RunStatus::Cancelled {
                         reason: "cancelled".into(),
                         duration_ms,
