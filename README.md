@@ -10,7 +10,7 @@
 Self-hostable, local-first AI agent platform.
 Products are configurations, not code.
 
-[Architecture](docs/specs/konf-architecture.md) · [Quickstart](docs/guides/quickstart.md) · [Contributing](CONTRIBUTING.md)
+[Quickstart](docs/getting-started/quickstart.md) · [Product Guide](docs/product-guide/creating-a-product.md) · [Architecture](docs/architecture/overview.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -20,7 +20,16 @@ Products are configurations, not code.
 
 Konf is an operating system for AI agents. It provides workflow execution, tool management, memory storage, and security — all configurable through YAML. No application code needed.
 
-The same engine runs on a phone, a laptop, a homelab server, or a cloud cluster.
+The same engine runs on a phone, a laptop, a homelab server, or a cloud cluster. An agent's behavior, tools, memory, and security are defined entirely through configuration. Switching LLM providers, memory backends, or adding new tools is a config change, not a code change.
+
+## Who Is This For?
+
+| You are a... | You want to... | Start here |
+|--------------|---------------|------------|
+| **Product builder** | Build an AI product using YAML config | [Product Guide](docs/product-guide/creating-a-product.md) · [Products](products/) |
+| **Operator** | Deploy and manage a Konf instance | [Admin Guide](docs/admin-guide/deployment.md) |
+| **Infrastructure contributor** | Contribute to the Rust codebase | [Architecture](docs/architecture/overview.md) · [Contributing](CONTRIBUTING.md) |
+| **Curious** | Understand how Konf works | [Core Concepts](docs/getting-started/concepts.md) |
 
 ## Architecture
 
@@ -67,25 +76,51 @@ The same engine runs on a phone, a laptop, a homelab server, or a cloud cluster.
 Memory backends are external:
 - [konf-dev/smrti](https://github.com/konf-dev/smrti) — Postgres + pgvector graph memory
 
+## Products
+
+A **product** is a complete AI agent defined entirely through config files — no code. See [products/](products/) for reference products and a starter template.
+
+```
+products/assistant/
+├── config/
+│   ├── tools.yaml          # Which tools to use
+│   ├── models.yaml         # LLM provider and model
+│   ├── project.yaml        # Product metadata
+│   └── workflows/
+│       └── chat.yaml       # Workflow: search memory → respond
+└── prompts/
+    └── system.md           # Assistant personality
+```
+
+## Extensibility
+
+Tools are added, not coded. Three tiers:
+
+| Tier | Mechanism | Who Can Add | Examples |
+|------|-----------|-------------|---------|
+| Compiled Rust | In-process | Infra | memory, LLM, HTTP |
+| WASM Plugins | Sandboxed runtime | Admin | Custom transforms (planned) |
+| MCP Servers | Out-of-process | Admin / User | Gmail, Calendar, Notion |
+
+The agent can't tell the difference. See [sdk/](sdk/) for details.
+
 ## Quick Start
 
 ```bash
-# Clone
+# Clone and build
 git clone https://github.com/konf-dev/konf.git
 cd konf
-
-# Build
 cargo build --workspace
 
 # Run tests
 cargo test --workspace
 
-# Start with Docker
+# Start with Docker (includes Postgres)
 docker compose up -d
 curl http://localhost:8000/v1/health
 ```
 
-See [docs/guides/quickstart.md](docs/guides/quickstart.md) for detailed setup.
+See [docs/getting-started/quickstart.md](docs/getting-started/quickstart.md) for detailed setup.
 
 ## License
 

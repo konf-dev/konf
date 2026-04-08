@@ -148,7 +148,7 @@ Add it to konf-init's dependencies and boot sequence. Full access to namespace i
 3. Add to konf-init as feature-gated dependency
 4. Configure in tools.yaml: `memory: { backend: mybackend, config: { ... } }`
 
-See [memory-backends.md](../specs/memory-backends.md) for the trait definition and examples.
+See [memory-backends.md](../architecture/memory-backends.md) for the trait definition and examples.
 
 ---
 

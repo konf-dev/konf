@@ -44,7 +44,7 @@ pub trait Tool: Send + Sync {
 }
 ```
 
-See [konf-engine-spec.md](konf-engine-spec.md) for full definitions of `ToolInfo`, `ToolAnnotations`, `ToolContext`, and `ToolError`.
+See [engine.md](engine.md) for full definitions of `ToolInfo`, `ToolAnnotations`, `ToolContext`, and `ToolError`.
 
 ---
 
@@ -226,9 +226,9 @@ The agent sees a flat list. It doesn't know which tools are Rust, which are MCP,
 
 ## Related Specs
 
-- [konf-engine-spec](konf-engine-spec.md) — Tool/Resource/Prompt traits, ToolInfo, ToolContext, ToolError
-- [konf-architecture](konf-architecture.md) — platform-wide architecture, crate map
+- [engine](engine.md) — Tool/Resource/Prompt traits, ToolInfo, ToolContext, ToolError
+- [overview](overview.md) — platform-wide architecture, crate map
 - [memory-backends](memory-backends.md) — MemoryBackend trait, backend implementations
-- [konf-mcp-spec](konf-mcp-spec.md) — MCP client (konf-tool-mcp) details
-- [konf-init-spec](konf-init-spec.md) — boot sequence, tool registration
+- [mcp](mcp.md) — MCP client (konf-tool-mcp) details
+- [init](init.md) — boot sequence, tool registration
 - [configuration-strategy](configuration-strategy.md) — tools.yaml format

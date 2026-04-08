@@ -3,7 +3,7 @@
 **Status:** Authoritative
 **Scope:** Namespace hierarchy, capability lattice, actor roles, audit logging
 
-> **Note:** Multi-tenancy is enforced at the tool level via VirtualizedTool namespace injection, not at the database level. This makes it backend-agnostic — any memory backend (Postgres, SurrealDB, SQLite) works with the same permission model. See [konf-architecture.md](konf-architecture.md) for platform context.
+> **Note:** Multi-tenancy is enforced at the tool level via VirtualizedTool namespace injection, not at the database level. This makes it backend-agnostic — any memory backend (Postgres, SurrealDB, SQLite) works with the same permission model. See [overview.md](overview.md) for platform context.
 
 ---
 
@@ -318,7 +318,7 @@ Document every default and every implicit behavior:
 - No backend-specific code changes needed for multi-tenancy — the Tool layer handles it
 
 ### konf-runtime
-- `ExecutionScope` includes `actor: Actor { id, role }` for identity tracking (see konf-runtime-spec.md)
+- `ExecutionScope` includes `actor: Actor { id, role }` for identity tracking (see runtime.md)
 - Audit log writes on every tool invocation that modifies data — **owned by konf-runtime** (writes to `audit_log` table)
 - Runtime event journal writes operational events (writes to `runtime_events` table)
 - Process table entries include `actor.role` for monitoring scoping

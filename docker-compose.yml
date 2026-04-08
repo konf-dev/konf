@@ -9,7 +9,7 @@ services:
       KONF__AUTH__SUPABASE_URL: http://localhost:9999
       KONF__MCP_ENABLED: "true"
     volumes:
-      - ./config:/config:ro
+      - ./products/assistant/config:/config:ro
     depends_on:
       postgres:
         condition: service_healthy

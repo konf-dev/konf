@@ -358,7 +358,7 @@ impl Tool for WorkflowTool {
 
 konf-init creates `WorkflowTool` instances for each eligible workflow and registers them in the engine.
 
-See [konf-engine-spec.md](konf-engine-spec.md) for workflow-as-tool composition details.
+See [engine.md](engine.md) for workflow-as-tool composition details.
 
 ---
 

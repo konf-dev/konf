@@ -214,9 +214,9 @@ Note: konf-backend does NOT depend on any konf-tool-* crates or smrti. All tool 
 
 ## Related Specs
 
-- [konf-architecture](konf-architecture.md) — crate map, backend as shell
-- [konf-init-spec](konf-init-spec.md) — boot sequence, KonfInstance
-- [konf-mcp-spec](konf-mcp-spec.md) — MCP server mounted at `/mcp`
-- [konf-runtime-spec](konf-runtime-spec.md) — Runtime API, streaming
+- [overview](overview.md) — crate map, backend as shell
+- [init](init.md) — boot sequence, KonfInstance
+- [mcp](mcp.md) — MCP server mounted at `/mcp`
+- [runtime](runtime.md) — Runtime API, streaming
 - [multi-tenancy](multi-tenancy.md) — auth → ExecutionScope mapping
 - [configuration-strategy](configuration-strategy.md) — konf.toml, tools.yaml

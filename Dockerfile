@@ -21,5 +21,6 @@ RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/
 RUN useradd -r -s /bin/false konf
 USER konf
 COPY --from=builder /app/target/release/konf-backend /usr/local/bin/
+COPY products/ /etc/konf/products/
 EXPOSE 8000
 CMD ["konf-backend"]

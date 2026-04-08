@@ -72,6 +72,18 @@ jobs:
           cargo build --bin konf-backend --release
           cargo build --bin konf-mcp --release
 
+  validate-products:
+    name: Validate Products
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate product configs are valid YAML
+        run: |
+          for f in $(find products -name '*.yaml' -o -name '*.yml'); do
+            echo "Validating $f"
+            python3 -c "import yaml; yaml.safe_load(open('$f'))"
+          done
+
   deny:
     name: Deny (licenses + advisories)
     runs-on: ubuntu-latest

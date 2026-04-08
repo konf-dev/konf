@@ -247,8 +247,8 @@ Now Instance A's agents can call `workflow:summarize` which actually executes on
 
 ## Related Specs
 
-- [konf-architecture](konf-architecture.md) — platform-wide architecture, MCP as IPC
-- [konf-engine-spec](konf-engine-spec.md) — Tool/Resource/Prompt traits
-- [konf-tools-spec](konf-tools-spec.md) — McpToolWrapper as a tool source
-- [konf-init-spec](konf-init-spec.md) — boot sequence (konf-mcp uses konf-init)
-- [konf-backend-spec](konf-backend-spec.md) — mounts konf-mcp SSE handler
+- [overview](overview.md) — platform-wide architecture, MCP as IPC
+- [engine](engine.md) — Tool/Resource/Prompt traits
+- [tools](tools.md) — McpToolWrapper as a tool source
+- [init](init.md) — boot sequence (konf-mcp uses konf-init)
+- [backend](backend.md) — mounts konf-mcp SSE handler

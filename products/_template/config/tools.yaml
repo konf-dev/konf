@@ -1,0 +1,4 @@
+tools:
+  llm:
+    provider: openai
+    model: "${KONF_MODEL:-qwen3:8b}"

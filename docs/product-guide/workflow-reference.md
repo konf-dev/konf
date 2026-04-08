@@ -228,6 +228,6 @@ Other workflows can call this as `workflow:summarize`.
 
 ## Related Specs
 
-- [konf-engine-spec](konf-engine-spec.md) — Engine execution model, streaming, capability validation
-- [konf-tools-spec](konf-tools-spec.md) — Tool names and schemas
-- [konf-architecture](konf-architecture.md) — Workflows as composable tools
+- [engine](../architecture/engine.md) — Engine execution model, streaming, capability validation
+- [tools](../architecture/tools.md) — Tool names and schemas
+- [overview](../architecture/overview.md) — Workflows as composable tools

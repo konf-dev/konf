@@ -171,9 +171,9 @@ let result = instance.runtime.run(&workflow, input, scope, session_id).await?;
 
 ## Related Specs
 
-- [konf-architecture](konf-architecture.md) — crate map, init system role
-- [konf-engine-spec](konf-engine-spec.md) — Engine struct, registries
-- [konf-tools-spec](konf-tools-spec.md) — tool crate `register()` functions
-- [konf-runtime-spec](konf-runtime-spec.md) — Runtime creation, optional journal
+- [overview](overview.md) — crate map, init system role
+- [engine](engine.md) — Engine struct, registries
+- [tools](tools.md) — tool crate `register()` functions
+- [runtime](runtime.md) — Runtime creation, optional journal
 - [memory-backends](memory-backends.md) — MemoryBackend trait, backend connect() functions
 - [configuration-strategy](configuration-strategy.md) — config file formats, validation, hot-reload

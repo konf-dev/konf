@@ -2,6 +2,15 @@
 
 Thank you for your interest in contributing to Konf!
 
+## How You Can Contribute
+
+| Contribution | Where | Guide |
+|-------------|-------|-------|
+| **Infrastructure** (Rust crates) | `crates/` | [Architecture docs](docs/architecture/overview.md) |
+| **Products** (reference configs) | `products/` | [Product Guide](docs/product-guide/creating-a-product.md) |
+| **Documentation** | `docs/` | [Docs index](docs/README.md) |
+| **Plugins** (WASM, future) | `sdk/` | [SDK README](sdk/README.md) |
+
 ## Reporting Bugs
 
 Open a [bug report](https://github.com/konf-dev/konf/issues/new?template=bug.yml) with steps to reproduce.
@@ -48,6 +57,15 @@ Use [conventional commits](https://www.conventionalcommits.org/):
 - `docs: update architecture spec` — documentation
 - `refactor: extract tool registry` — code improvement
 - `test: add memory backend tests` — test additions
+
+## Product Contributions
+
+Products are pure configuration — no Rust code needed. To contribute a reference product:
+
+1. Copy `products/_template/` to `products/your-product/`
+2. Define your tools, workflows, and prompts
+3. Add a README explaining what the product does
+4. Submit a pull request
 
 ## MSRV
 

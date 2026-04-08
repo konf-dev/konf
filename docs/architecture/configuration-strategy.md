@@ -3,7 +3,7 @@
 **Status:** Authoritative
 **Scope:** Platform config (konf.toml), product config (tools.yaml, workflows/, prompts/), hot-reload
 
-> **Note:** Configuration is loaded by konf-init during boot. See [konf-init-spec.md](konf-init-spec.md) for the boot sequence and [konf-architecture.md](konf-architecture.md) for platform context.
+> **Note:** Configuration is loaded by konf-init during boot. See [init.md](init.md) for the boot sequence and [overview.md](overview.md) for platform context.
 
 ---
 

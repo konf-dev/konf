@@ -1,7 +1,7 @@
 # Detailed Implementation Plan
 
 **Status:** Completed (all phases executed, monorepo consolidated at konf-dev/konf)
-**Architecture:** [konf-architecture.md](../specs/konf-architecture.md)
+**Architecture:** [overview.md](../architecture/overview.md)
 **Roadmap:** [master-plan.md](master-plan.md)
 
 No backward compatibility. Old code/structure is deleted, not preserved.

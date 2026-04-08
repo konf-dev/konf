@@ -347,7 +347,7 @@ This ensures the caller has all capabilities the workflow requires. Tool-level c
 
 At execution time, `VirtualizedTool` wraps each tool with parameter bindings from the capability grant. This injects values like `namespace` into tool input before the tool sees it — the LLM cannot override injected parameters. Child workflows created via `child_scope()` can only attenuate capabilities (make them more specific), never amplify.
 
-See [multi-tenancy.md](multi-tenancy.md) for the full capability lattice specification and [konf-runtime-spec.md](konf-runtime-spec.md) for VirtualizedTool implementation details.
+See [multi-tenancy.md](multi-tenancy.md) for the full capability lattice specification and [runtime.md](runtime.md) for VirtualizedTool implementation details.
 
 ### Per-Execution Tool Filtering
 
@@ -417,7 +417,7 @@ All builtins are stateless, side-effect-free, and safe to retry.
 
 ## Related Specs
 
-- [konf-architecture](konf-architecture.md) — platform-wide architecture
-- [konf-tools-spec](konf-tools-spec.md) — tool protocol and plugin crates
-- [konf-runtime-spec](konf-runtime-spec.md) — process management, ExecutionScope, WorkflowTool
+- [overview](overview.md) — platform-wide architecture
+- [tools](tools.md) — tool protocol and plugin crates
+- [runtime](runtime.md) — process management, ExecutionScope, WorkflowTool
 - [multi-tenancy](multi-tenancy.md) — capability lattice, namespace hierarchy

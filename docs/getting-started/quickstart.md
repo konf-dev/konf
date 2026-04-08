@@ -152,12 +152,12 @@ smrti (Sanskrit: "that which is remembered") is the graph memory engine. It is a
 - Session state (ephemeral key-value scratchpad)
 - Event sourcing (append-only log for audit)
 
-The `konf-tool-memory-smrti` bridge crate (also in the smrti repo) implements the `MemoryBackend` trait for smrti. See [memory-backends.md](../specs/memory-backends.md).
+The `konf-tool-memory-smrti` bridge crate (also in the smrti repo) implements the `MemoryBackend` trait for smrti. See [memory-backends.md](../architecture/memory-backends.md).
 
 ---
 
 ## Next Steps
 
-- Read [konf-architecture.md](../specs/konf-architecture.md) for the full platform design
-- Read [integration.md](integration.md) for how crates connect
+- Read [overview.md](../architecture/overview.md) for the full platform design
+- Read [integration.md](../admin-guide/integration.md) for how crates connect
 - Check [master-plan.md](../plans/master-plan.md) for the implementation roadmap

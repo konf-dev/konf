@@ -1,0 +1,11 @@
+name: assistant
+description: "Personal assistant with memory and tool use"
+version: "0.1.0"
+
+triggers:
+  chat:
+    workflow: chat
+    capabilities:
+      - "memory:*"
+      - "ai:complete"
+      - "http:get"

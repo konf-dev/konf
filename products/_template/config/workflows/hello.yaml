@@ -1,0 +1,8 @@
+workflow: hello
+description: "Simple echo workflow — replace with your own"
+nodes:
+  greet:
+    do: echo
+    with:
+      message: "Hello from Konf!"
+    return: true

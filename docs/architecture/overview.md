@@ -274,14 +274,14 @@ nodes:
 
 | Spec | What it covers |
 |------|----------------|
-| [konf-engine-spec](konf-engine-spec.md) | Engine internals: Tool/Resource/Prompt traits, workflow execution, capability validation |
-| [konf-tools-spec](konf-tools-spec.md) | Tool protocol, plugin crate structure, tool sources |
-| [konf-mcp-spec](konf-mcp-spec.md) | MCP server (konf-mcp) and MCP client (konf-tool-mcp) |
-| [konf-init-spec](konf-init-spec.md) | Init system: config loading, boot sequence, KonfInstance |
-| [konf-backend-spec](konf-backend-spec.md) | HTTP server shell: REST API, auth, scheduling |
+| [engine](engine.md) | Engine internals: Tool/Resource/Prompt traits, workflow execution, capability validation |
+| [tools](tools.md) | Tool protocol, plugin crate structure, tool sources |
+| [mcp](mcp.md) | MCP server (konf-mcp) and MCP client (konf-tool-mcp) |
+| [init](init.md) | Init system: config loading, boot sequence, KonfInstance |
+| [backend](backend.md) | HTTP server shell: REST API, auth, scheduling |
 | [memory-backends](memory-backends.md) | MemoryBackend trait, implementations (smrti, SurrealDB, SQLite) |
-| [konf-runtime-spec](konf-runtime-spec.md) | Process management, ExecutionScope, capabilities, streaming |
+| [runtime](runtime.md) | Process management, ExecutionScope, capabilities, streaming |
 | [multi-tenancy](multi-tenancy.md) | Namespace hierarchy, capability lattice, actor roles |
 | [configuration-strategy](configuration-strategy.md) | Platform vs product config, hot-reload, validation |
-| [workflow-yaml-schema](workflow-yaml-schema.md) | YAML format for defining workflows (nodes, edges, conditions, retries) |
+| [workflow-reference](../product-guide/workflow-reference.md) | YAML format for defining workflows (nodes, edges, conditions, retries) |
 | [session-state](session-state.md) | Ephemeral KV store for agent working memory |
