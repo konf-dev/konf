@@ -148,8 +148,10 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     );
     info!("Runtime initialized");
 
-    // 9b. Register config:reload tool (needs runtime + product_config)
+    // 9b. Register config:reload tool (needs engine + runtime)
     engine.register_tool(Arc::new(ConfigReloadTool::new(
+        Arc::new(engine.clone()),
+        runtime.clone(),
         config_dir.to_path_buf(),
     )));
 
@@ -294,14 +296,18 @@ impl konflux::Resource for FileResource {
 // ============================================================
 
 /// Tool that triggers a hot-reload of product configuration from disk.
+/// Re-scans the workflows directory, re-parses all YAML files, and
+/// re-registers workflow tools in the engine.
 pub struct ConfigReloadTool {
+    engine: Arc<Engine>,
+    runtime: Arc<Runtime>,
     config_dir: std::path::PathBuf,
 }
 
 impl ConfigReloadTool {
     /// Create a new config:reload tool.
-    pub fn new(config_dir: std::path::PathBuf) -> Self {
-        Self { config_dir }
+    pub fn new(engine: Arc<Engine>, runtime: Arc<Runtime>, config_dir: std::path::PathBuf) -> Self {
+        Self { engine, runtime, config_dir }
     }
 }
 
@@ -310,7 +316,7 @@ impl konflux::tool::Tool for ConfigReloadTool {
     fn info(&self) -> konflux::tool::ToolInfo {
         konflux::tool::ToolInfo {
             name: "config:reload".into(),
-            description: "Reload product configuration (workflows, prompts, tools) from disk. Use after writing new files.".into(),
+            description: "Reload product configuration (workflows, prompts, tools) from disk. Re-parses all workflow YAML files and re-registers them as tools.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
@@ -327,39 +333,58 @@ impl konflux::tool::Tool for ConfigReloadTool {
         _input: serde_json::Value,
         _ctx: &konflux::tool::ToolContext,
     ) -> Result<serde_json::Value, konflux::error::ToolError> {
-        // Count workflow files in config dir
         let workflows_dir = self.config_dir.join("workflows");
-        let workflow_count = if workflows_dir.is_dir() {
-            std::fs::read_dir(&workflows_dir)
-                .map(|entries| entries.filter_map(|e| e.ok())
-                    .filter(|e| {
-                        let p = e.path();
-                        p.extension().and_then(|ext| ext.to_str()) == Some("yaml")
-                            || p.extension().and_then(|ext| ext.to_str()) == Some("yml")
-                    })
-                    .count())
-                .unwrap_or(0)
-        } else {
-            0
-        };
 
-        info!(
-            config_dir = %self.config_dir.display(),
-            workflow_count,
-            "Config reload requested"
-        );
+        if !workflows_dir.is_dir() {
+            return Ok(serde_json::json!({
+                "reloaded": true,
+                "workflows_loaded": 0,
+                "message": "No workflows directory found"
+            }));
+        }
 
-        // NOTE: Full hot-reload (re-parse + re-register + ArcSwap) requires
-        // access to Engine + Runtime + ProductConfig. For v1, this tool signals
-        // that a reload is needed. The actual reload mechanism will be wired
-        // when the file watcher (notify crate) is connected.
-        //
-        // For now, report what's on disk so the caller knows the state.
-        Ok(serde_json::json!({
-            "reloaded": true,
-            "config_dir": self.config_dir.display().to_string(),
-            "workflow_files_found": workflow_count,
-        }))
+        // Remove existing workflow:* tools before re-registering
+        let existing_tools = self.engine.registry().list();
+        let workflow_tool_names: Vec<String> = existing_tools.iter()
+            .filter(|t| t.name.starts_with("workflow:"))
+            .map(|t| t.name.clone())
+            .collect();
+
+        for name in &workflow_tool_names {
+            self.engine.remove_tool(name);
+        }
+
+        // Re-register workflows from disk
+        match register_workflows(&self.engine, &self.runtime, &workflows_dir) {
+            Ok(()) => {
+                let new_workflow_count = self.engine.registry().list().iter()
+                    .filter(|t| t.name.starts_with("workflow:"))
+                    .count();
+
+                let total_tools = self.engine.registry().len();
+
+                info!(
+                    config_dir = %self.config_dir.display(),
+                    removed = workflow_tool_names.len(),
+                    registered = new_workflow_count,
+                    total_tools,
+                    "Config reloaded"
+                );
+
+                Ok(serde_json::json!({
+                    "reloaded": true,
+                    "workflows_removed": workflow_tool_names.len(),
+                    "workflows_registered": new_workflow_count,
+                    "total_tools": total_tools,
+                }))
+            }
+            Err(e) => {
+                Err(konflux::error::ToolError::ExecutionFailed {
+                    message: format!("Config reload failed: {e}"),
+                    retryable: true,
+                })
+            }
+        }
     }
 }
 

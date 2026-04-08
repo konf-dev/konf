@@ -120,8 +120,15 @@ impl Engine {
     // ---- Tool registry ----
 
     /// Register a tool. Thread-safe — can be called from any thread.
+    /// If a tool with the same name already exists, it is replaced.
     pub fn register_tool(&self, tool: Arc<dyn Tool>) {
         self.tools.write().unwrap_or_else(|p| p.into_inner()).register(tool);
+    }
+
+    /// Remove a tool by name. Returns true if the tool was present.
+    /// Used by config:reload to remove stale workflow tools before re-registering.
+    pub fn remove_tool(&self, name: &str) -> bool {
+        self.tools.write().unwrap_or_else(|p| p.into_inner()).remove(name)
     }
 
     /// Snapshot the registry for executor use (cheap Arc clone of inner data).
