@@ -2041,6 +2041,7 @@ dependencies = [
  "konf-tool-mcp",
  "konf-tool-memory",
  "konf-tool-memory-smrti",
+ "konf-tool-shell",
  "konflux-core",
  "notify",
  "serde",
@@ -2125,6 +2126,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 
@@ -2166,6 +2168,19 @@ dependencies = [
  "konf-tool-memory",
  "serde_json",
  "smrti-core",
+ "tracing",
+]
+
+[[package]]
+name = "konf-tool-shell"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "konflux-core",
+ "serde",
+ "serde_json",
+ "tokio",
  "tracing",
 ]
 
