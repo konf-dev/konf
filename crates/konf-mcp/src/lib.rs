@@ -20,7 +20,6 @@ use rmcp::model::{
     RawResource,
     ServerCapabilities,
     Tool as McpTool,
-    ToolAnnotations as McpToolAnnotations,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::model::{AnnotateAble, ErrorData};
@@ -71,17 +70,14 @@ impl KonfMcpServer {
 fn tool_info_to_mcp(info: &ToolInfo) -> McpTool {
     let schema_obj = info.input_schema.as_object().cloned().unwrap_or_default();
 
+    // NOTE: Do NOT add .with_annotations() here.
+    // Claude Code silently drops ALL tools when annotations are present
+    // in the tools/list response (anthropics/claude-code#25081).
     McpTool::new(
         info.name.clone(),
         info.description.clone(),
         Arc::new(schema_obj),
-    ).with_annotations(McpToolAnnotations::from_raw(
-        None,
-        Some(info.annotations.read_only),
-        Some(info.annotations.destructive),
-        Some(info.annotations.idempotent),
-        Some(info.annotations.open_world),
-    ))
+    )
 }
 
 /// Build a ToolContext for an MCP tool call.
@@ -223,7 +219,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tool_info_to_mcp_annotation_mapping() {
+    fn test_tool_info_to_mcp_no_annotations() {
+        // Annotations are intentionally NOT included in MCP responses
+        // because Claude Code silently drops all tools when annotations
+        // are present (anthropics/claude-code#25081).
         let info = ToolInfo {
             name: "test_tool".into(),
             description: "A test tool".into(),
@@ -241,11 +240,7 @@ mod tests {
 
         let mcp_tool = tool_info_to_mcp(&info);
         assert_eq!(mcp_tool.name.as_ref(), "test_tool");
-        let ann = mcp_tool.annotations.as_ref().unwrap();
-        assert_eq!(ann.read_only_hint, Some(true));
-        assert_eq!(ann.destructive_hint, Some(false));
-        assert_eq!(ann.idempotent_hint, Some(true));
-        assert_eq!(ann.open_world_hint, Some(false));
+        assert!(mcp_tool.annotations.is_none());
     }
 
     #[test]

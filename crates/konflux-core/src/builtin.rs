@@ -32,7 +32,7 @@ impl Tool for EchoTool {
         ToolInfo {
             name: "echo".into(),
             description: "Returns the input as-is.".into(),
-            input_schema: json!({}),
+            input_schema: json!({"type": "object"}),
             output_schema: None,
             capabilities: vec![],
             supports_streaming: false,
@@ -154,7 +154,7 @@ impl Tool for LogTool {
         ToolInfo {
             name: "log".into(),
             description: "Log a message and return the input.".into(),
-            input_schema: json!({}),
+            input_schema: json!({"type": "object"}),
             output_schema: None,
             capabilities: vec![],
             supports_streaming: false,
