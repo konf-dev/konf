@@ -51,34 +51,22 @@ Layer 3: End User
   Analogy: user with their home directory and dotfiles
 ```
 
-### Tool Extensibility — Three Tiers
+### Tool Extensibility — One Interface, Many Adapters
 
 Nobody writes code against Konf. Tools are added, not coded.
 
-```
-Tier 1: Compiled Rust (in-process)
-  Who adds: Infra only (part of the binary)
-  Latency: ~0ms
-  Analogy: built-in kernel drivers
-  Examples: workflow validation, config reload, memory backends
+Every tool implements the same `Tool` trait. The engine dispatches all tools identically — it doesn't know or care how a tool is implemented. An **adapter** wraps an execution environment behind this interface.
 
-Tier 2: WASM plugins (sandboxed, loadable)
-  Who adds: Admin (drops .wasm file in plugins/)
-  Latency: ~1-5ms
-  Analogy: loadable kernel modules (.ko)
-  Examples: custom data transforms, domain-specific tools, marketplace tools
-  Language: Rust, Go, C, Python (componentize-py), JS — anything that compiles to WASM
-  Sandboxed: runs in wasmtime/wasmer, capability-constrained
+Konf ships several adapters, but the architecture supports any number:
 
-Tier 3: MCP servers (out-of-process)
-  Who adds: Admin or User (config change)
-  Latency: ~10-200ms (IPC or network)
-  Analogy: userspace daemons
-  Examples: Gmail, Calendar, Notion, custom scripts, any MCP-compatible service
-  Language: anything (Python fastmcp, Node, Go, Rust — whatever)
-```
+| Adapter | How it works | Who can add tools | Status |
+|---------|-------------|-------------------|--------|
+| Compiled Rust | In-process, part of binary | Infra (requires compilation) | Available |
+| MCP client | Out-of-process, stdio/SSE | Admin or User (config change) | Available |
+| HTTP | Network call to external API | Admin (config change) | Available |
+| WASM | Sandboxed runtime (wasmtime) | Admin (drops `.wasm` file) | Planned |
 
-Key rule: **the agent can't tell the difference.** All three tiers present the same Tool interface. Same metadata, same invocation path.
+The architecture is open — anyone can write a new adapter (gRPC, Unix sockets, FFI, Python subprocess, etc.) by implementing the `Tool` trait. There is no fixed number of adapters.
 
 ### User Personalization = User Environment
 
@@ -197,10 +185,10 @@ Based on this model, the gaps in the current codebase:
 ### Needs building:
 - [ ] Self-modification tools (workflow validate/write/reload, config management)
 - [ ] User environment schema (how preferences/credentials/tool activation are stored)
-- [ ] WASM plugin runtime (wasmtime integration, plugin loading, capability sandboxing)
+- [ ] WASM adapter (wasmtime integration, plugin loading, capability sandboxing)
 - [ ] Formal API spec (OpenAPI or equivalent, transport-independent)
 - [ ] Service packaging (systemd unit, launchd plist, Windows service wrapper)
-- [ ] Tool marketplace / registry (discover and install MCP servers + WASM plugins)
+- [ ] Tool marketplace / registry (discover and install tools from any adapter)
 - [ ] Admin console (Appsmith or equivalent, already specced)
 - [ ] OpenTelemetry export (G3 from master plan)
 
@@ -208,6 +196,6 @@ Based on this model, the gaps in the current codebase:
 
 ## 4. Design Principles (additions to existing 10)
 
-11. **Tools are added, not coded** — No stakeholder writes code against Konf. Infra ships compiled tools. Admin adds WASM plugins and MCP servers via config. Users authenticate into tools.
+11. **Tools are added, not coded** — No stakeholder writes code against Konf. Tools are added via adapters (compiled Rust, MCP, WASM, HTTP, or any future adapter). The architecture supports any number of adapters — there is no fixed set.
 12. **The API is the product** — Every transport (HTTP, MCP, library) is a view of the same API. The API contract is defined independently of how you reach it.
 13. **User environment, not user settings** — Users don't have a settings page. They have a namespace with their environment (preferences, credentials, tool activation). Workflows read from it.

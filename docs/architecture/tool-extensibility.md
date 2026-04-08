@@ -1,91 +1,13 @@
-# Tool Extensibility Model
+# Tool Extensibility
 
-> Scope: the three-tier architecture for adding tools to Konf.
+**Status:** Authoritative
+**Scope:** How tools are added to Konf — one interface, many adapters
 
-## The OS Analogy
+---
 
-Konf treats tools like an operating system treats code execution:
+## One Interface
 
-| OS concept | Konf equivalent | Trust level |
-|------------|-----------------|-------------|
-| Built-in drivers | Tier 1: Compiled Rust | Highest — infra only |
-| Loadable kernel modules | Tier 2: WASM plugins | Medium — admin can add |
-| Userspace daemons | Tier 3: MCP servers | Lowest — admin/user can add |
-
-The agent cannot tell which tier a tool belongs to. Every tool implements the same `Tool` trait and appears identical in workflow YAML.
-
-## Tier 1: Compiled Rust (In-Process)
-
-Built-in tools compiled directly into the Konf binary:
-
-- `memory:*` — backed by `konf-tool-memory`
-- `ai:complete` — backed by `konf-tool-llm`
-- `http:*` — backed by `konf-tool-http`
-- `embed:text` — backed by `konf-tool-embed`
-- `echo` — built into `konflux-core`
-
-These run in-process with zero serialization overhead. Only the Konf team adds Tier 1 tools — they require a code change and a new release.
-
-### Cross-Platform Compilation
-
-The same codebase compiles for multiple targets using Cargo feature flags:
-
-```toml
-[features]
-default = ["full"]
-full = ["memory", "llm", "http", "embed", "mcp"]
-edge = ["llm", "http"]       # minimal build for edge/embedded
-```
-
-An edge deployment can exclude memory and MCP support, producing a smaller binary.
-
-## Tier 2: WASM Plugins (Sandboxed, Future)
-
-WASM plugins run inside a `wasmtime` sandbox with explicit capability grants:
-
-```yaml
-# Future config (not yet implemented)
-plugins:
-  sentiment:
-    wasm: ./plugins/sentiment.wasm
-    capabilities:
-      - "ai:complete"       # plugin can call the LLM
-    memory_limit: 64MB
-    timeout_ms: 5000
-```
-
-Key properties:
-- **Sandboxed** — no filesystem, network, or syscall access unless explicitly granted.
-- **Capability-restricted** — a WASM plugin receives only the capabilities listed in its config. It cannot exceed the product's own capability set.
-- **Portable** — compiled once, runs on any platform Konf supports.
-- **Admin-installed** — only platform admins can add WASM plugins.
-
-The plugin's exported functions are registered as tools (e.g., `wasm:sentiment:analyze`) and appear in the same tool registry as Tier 1 and Tier 3 tools.
-
-## Tier 3: MCP Servers (Out-of-Process)
-
-MCP (Model Context Protocol) servers run as child processes:
-
-```yaml
-mcp_servers:
-  github:
-    command: npx
-    args: ["-y", "@modelcontextprotocol/server-github"]
-    env:
-      GITHUB_TOKEN: "${GITHUB_TOKEN}"
-```
-
-Key properties:
-- **Out-of-process** — communicate via stdio using the MCP protocol.
-- **Ecosystem access** — any MCP-compatible server works (GitHub, Slack, filesystem, etc.).
-- **Lifecycle managed** — Konf starts servers on demand and terminates them with the product.
-- **Capability-gated** — MCP tools are subject to the same capability checks as built-in tools.
-
-Tools appear as `mcp:<server>:<tool_name>` in workflows.
-
-## Why the Agent Cannot Tell the Difference
-
-All three tiers implement the same interface:
+Every tool in Konf implements the same trait:
 
 ```rust
 #[async_trait]
@@ -96,23 +18,154 @@ pub trait Tool: Send + Sync {
 }
 ```
 
-The workflow engine dispatches `do: memory:search` and `do: mcp:github:list_issues` through identical codepaths. The `VirtualizedTool` wrapper handles namespace injection and capability checking regardless of tier.
+The engine dispatches `do: memory:search` and `do: mcp:github:list_issues` through identical codepaths. The `VirtualizedTool` wrapper handles namespace injection and capability checking regardless of how the tool is implemented.
 
 This means:
-- Workflow authors do not care where a tool is implemented.
-- A Tier 3 MCP tool can be promoted to Tier 1 (compiled Rust) without changing any workflow YAML.
-- Security policies apply uniformly across all tiers.
+- The agent cannot tell how a tool is implemented. It sees the same metadata, same schema, same invocation.
+- Workflow authors don't care where a tool runs. `do: tool_name` works the same whether the tool is compiled Rust, a WASM module, an MCP server, or something else entirely.
+- A tool can be moved between adapters without changing any workflow YAML.
+- Security policies apply uniformly across all adapters.
+
+---
+
+## Tool Adapters
+
+An adapter wraps an execution environment behind the Tool trait. Konf ships several, but the architecture supports any number — anyone can write a new adapter.
+
+### Shipped Adapters
+
+| Adapter | How it works | Who can add tools | Status |
+|---------|-------------|-------------------|--------|
+| **Compiled Rust** | In-process, part of the binary | Infra (requires compilation) | Available |
+| **MCP client** | Out-of-process, stdio/SSE | Admin or User (config change) | Available |
+| **HTTP** | Network call to external API | Admin (config change) | Available |
+| **WASM** | Sandboxed runtime (wasmtime) | Admin (drops `.wasm` file) | Planned |
+
+### Possible Future Adapters
+
+The architecture imposes no limit. Examples of adapters anyone could build:
+
+- gRPC adapter — wraps a gRPC service as a Tool
+- Unix socket adapter — IPC via domain sockets
+- Python subprocess — runs a Python script, captures output
+- FFI adapter — calls a shared library (.so/.dylib)
+- Konf-to-Konf — one Konf instance's tools exposed to another (already works via MCP)
+
+Each adapter is just a struct that implements `Tool`. The engine doesn't know or care about the implementation.
+
+---
+
+## Shipped Adapter Details
+
+### Compiled Rust (In-Process)
+
+Built-in tools compiled into the Konf binary. Located in `crates/konf-tool-*`.
+
+| Crate | Tools |
+|-------|-------|
+| `konf-tool-memory` | memory:store, memory:search, memory:delete, memory:traverse |
+| `konf-tool-llm` | ai:complete |
+| `konf-tool-http` | http:get, http:post |
+| `konf-tool-embed` | embed:text |
+| `konf-tool-mcp` | MCP client (connects to MCP servers) |
+| `konflux-core` | echo (builtin) |
+
+Adding a compiled tool requires modifying the Rust codebase and recompiling. This is the only adapter type that requires code changes.
+
+Cross-platform builds use feature flags:
+
+```toml
+[features]
+default = ["full"]
+full = ["memory", "llm", "http", "embed", "mcp"]
+edge = ["llm", "http"]       # minimal build for edge/embedded
+```
+
+### MCP Client (Out-of-Process)
+
+MCP servers run as child processes or connect over SSE. Configured in `tools.yaml`:
+
+```yaml
+mcp_servers:
+  github:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_TOKEN: "${GITHUB_TOKEN}"
+```
+
+- Communicate via stdio using the MCP protocol
+- Lifecycle managed by Konf (started on demand, terminated with the product)
+- Any MCP-compatible server works — the ecosystem is large and growing
+- Tools appear as `mcp:<server>:<tool_name>` in workflows
+
+### WASM (Sandboxed, Planned)
+
+WASM plugins run inside a `wasmtime` sandbox with explicit capability grants:
+
+```yaml
+# Planned config (not yet implemented)
+plugins:
+  sentiment:
+    wasm: ./plugins/sentiment.wasm
+    capabilities:
+      - "ai:complete"
+    memory_limit: 64MB
+    timeout_ms: 5000
+```
+
+Why WASM is interesting as an adapter:
+- **Sandboxed** — no filesystem, network, or syscall access unless explicitly granted
+- **Capability-restricted** — receives only the capabilities listed in its config
+- **Portable** — compiled once, runs on any platform Konf supports
+- **Hot-loadable** — load/unload without restarting Konf
+- **Language-agnostic** — Rust, Go, C, Python (componentize-py), JS all compile to WASM
+
+---
+
+## Cross-Platform Compilation
+
+Same Rust codebase, different targets with feature flags:
+
+```
+Same source → x86_64-linux (server)
+            → aarch64-linux (ARM/RPi)
+            → aarch64-apple (macOS)
+            → aarch64-ios (iOS framework)
+            → aarch64-android (Android NDK)
+```
+
+What changes per platform:
+
+| Concern | Server/Desktop | Mobile |
+|---------|---------------|--------|
+| Memory backend | Postgres, SurrealDB | SQLite |
+| LLM | Remote API | Local (llama.cpp) or remote |
+| MCP servers | Spawn child processes | Can't spawn arbitrary processes |
+| WASM plugins | wasmtime | wasmtime (works on mobile) |
+| Transport | HTTP server + MCP | In-process library API |
+
+The engine (`konflux`) and runtime don't change. Only `konf-init` wires different adapters based on the target.
+
+---
 
 ## Summary
 
 ```
-┌─────────────────────────────────────────────┐
-│              Workflow Engine                 │
-│         (same Tool trait for all)            │
-├──────────┬──────────────┬───────────────────┤
-│ Tier 1   │ Tier 2       │ Tier 3            │
-│ Rust     │ WASM         │ MCP               │
-│ in-proc  │ sandboxed    │ out-of-proc       │
-│ infra    │ admin        │ admin/user        │
-└──────────┴──────────────┴───────────────────┘
+┌───────────────────────────────────────────────┐
+│              Workflow Engine                   │
+│         (one Tool trait for all)               │
+├───────────┬──────┬──────┬──────┬──────────────┤
+│ Compiled  │ MCP  │ HTTP │ WASM │  ... any     │
+│ Rust      │      │      │      │  future      │
+│           │      │      │      │  adapter     │
+└───────────┴──────┴──────┴──────┴──────────────┘
 ```
+
+---
+
+## Related Specs
+
+- [overview](overview.md) — OS analogy, crate map
+- [tools](tools.md) — Tool trait, plugin crate structure
+- [mcp](mcp.md) — MCP server and client

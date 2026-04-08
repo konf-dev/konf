@@ -27,7 +27,7 @@
 - [Init](architecture/init.md) — Config loading, boot sequence
 - [MCP](architecture/mcp.md) — MCP server and client
 - [Tools](architecture/tools.md) — Tool protocol, plugin crate structure
-- [Tool Extensibility](architecture/tool-extensibility.md) — Three-tier model (Rust/WASM/MCP)
+- [Tool Extensibility](architecture/tool-extensibility.md) — One interface, many adapters
 - [Memory Backends](architecture/memory-backends.md) — MemoryBackend trait, implementations
 - [Multi-Tenancy](architecture/multi-tenancy.md) — Namespace hierarchy, capability lattice
 - [Configuration Strategy](architecture/configuration-strategy.md) — Platform vs product config

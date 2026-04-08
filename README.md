@@ -94,15 +94,18 @@ products/assistant/
 
 ## Extensibility
 
-Tools are added, not coded. Three tiers:
+Tools are added, not coded. Every tool implements the same `Tool` trait — the engine dispatches all tools identically regardless of how they're implemented.
 
-| Tier | Mechanism | Who Can Add | Examples |
-|------|-----------|-------------|---------|
-| Compiled Rust | In-process | Infra | memory, LLM, HTTP |
-| WASM Plugins | Sandboxed runtime | Admin | Custom transforms (planned) |
-| MCP Servers | Out-of-process | Admin / User | Gmail, Calendar, Notion |
+Konf ships several **adapters** that wrap different execution environments behind this interface:
 
-The agent can't tell the difference. See [sdk/](sdk/) for details.
+| Adapter | How it works | Who can add tools | Status |
+|---------|-------------|-------------------|--------|
+| Compiled Rust | In-process | Infra | Available |
+| MCP client | Out-of-process (stdio/SSE) | Admin / User | Available |
+| HTTP | Network call | Admin | Available |
+| WASM | Sandboxed runtime | Admin | Planned |
+
+The architecture is open — anyone can write a new adapter. See [sdk/](sdk/) for details.
 
 ## Quick Start
 
