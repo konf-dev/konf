@@ -81,9 +81,13 @@ fn tool_info_to_mcp(info: &ToolInfo) -> McpTool {
 }
 
 /// Build a ToolContext for an MCP tool call.
-fn mcp_tool_context(tool_name: &str) -> konflux::tool::ToolContext {
+fn mcp_tool_context(_tool_name: &str) -> konflux::tool::ToolContext {
+    // TODO: Replace with per-session capability grants when MCP auth is implemented.
+    // For now, MCP clients get infra-level access (all capabilities).
+    // This is acceptable for the architect use case (trusted, single-user)
+    // but must be scoped before multi-tenant MCP access.
     konflux::tool::ToolContext {
-        capabilities: vec![tool_name.to_string()],
+        capabilities: vec!["*".into()],
         workflow_id: "mcp".into(),
         node_id: "mcp_call".into(),
         metadata: std::collections::HashMap::new(),
