@@ -153,7 +153,7 @@ pub struct ToolsConfig {
 /// Shell sandbox configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ShellConfig {
-    /// Docker container name for shell:exec.
+    /// Docker container name for shell_exec.
     pub container: String,
     /// Default per-command timeout in milliseconds.
     #[serde(default = "default_shell_timeout_ms")]

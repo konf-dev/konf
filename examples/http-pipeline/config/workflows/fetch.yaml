@@ -1,10 +1,10 @@
 workflow: fetch_data
 description: "Fetch data from an API and return it"
 register_as_tool: true
-capabilities: ["http:get"]
+capabilities: ["http_get"]
 nodes:
   fetch:
-    do: http:get
+    do: http_get
     with:
       url: "https://httpbin.org/json"
     return: true

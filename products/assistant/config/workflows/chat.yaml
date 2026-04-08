@@ -1,14 +1,14 @@
 workflow: chat
 description: "Search memory for context, then respond with LLM"
-capabilities: ["memory:search", "memory:store", "ai:complete"]
+capabilities: ["memory_search", "memory_store", "ai_complete"]
 nodes:
   search:
-    do: memory:search
+    do: memory_search
     input:
       query: "{{message}}"
     then: respond
   respond:
-    do: ai:complete
+    do: ai_complete
     input:
       prompt: "{{message}}"
       context: "{{search.results}}"

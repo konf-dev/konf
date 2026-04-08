@@ -106,7 +106,7 @@ nodes:
     return: true
 ```
 
-This workflow is automatically registered as `workflow:hello` and can be called via the chat API or MCP.
+This workflow is automatically registered as `workflow_hello` and can be called via the chat API or MCP.
 
 ---
 

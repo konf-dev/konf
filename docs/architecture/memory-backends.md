@@ -106,7 +106,7 @@ impl Tool for SearchTool {
     fn info(&self) -> ToolInfo {
         let modes = self.backend.supported_search_modes();
         ToolInfo {
-            name: "memory:search".into(),
+            name: "memory_search".into(),
             description: "Search the knowledge graph for relevant information.".into(),
             input_schema: json!({
                 "type": "object",
@@ -139,7 +139,7 @@ The `input_schema` dynamically reflects the backend's capabilities — the agent
 
 Multi-tenancy is enforced at the tool level, not the backend level:
 
-1. Product config grants capabilities with bindings: `{ pattern: "memory:*", bindings: { namespace: "konf:product:${user_id}" } }`
+1. Product config grants capabilities with bindings: `{ pattern: "memory_*", bindings: { namespace: "konf:product:${user_id}" } }`
 2. `VirtualizedTool` wraps each memory tool, injecting `namespace` into input before the tool sees it
 3. The backend receives `namespace` as a parameter and filters by it
 4. The LLM cannot override the injected namespace — bindings overwrite any existing keys
@@ -244,7 +244,7 @@ memory:
 
 # Future: per-tool backend overrides
 # overrides:
-#   state:set:
+#   state_set:
 #     backend: another-backend
 #     config: { ... }
 ```
@@ -255,25 +255,25 @@ Currently, all memory tools use the same backend. Multi-backend overrides are a 
 
 ## Capability Requirements
 
-Memory and state tools use **different capability prefixes**. A grant of `memory:*` does NOT cover `state:*` tools and vice versa. This is intentional — graph memory and session state are separate security domains.
+Memory and state tools use **different capability prefixes**. A grant of `memory_*` does NOT cover `state_*` tools and vice versa. This is intentional — graph memory and session state are separate security domains.
 
 | Tool | Required capability | Prefix |
 |------|-------------------|--------|
-| `memory:search` | `memory:search` or `memory:*` | `memory:` |
-| `memory:store` | `memory:store` or `memory:*` | `memory:` |
-| `state:set` | `state:set` or `state:*` | `state:` |
-| `state:get` | `state:get` or `state:*` | `state:` |
-| `state:delete` | `state:delete` or `state:*` | `state:` |
-| `state:list` | `state:list` or `state:*` | `state:` |
-| `state:clear` | `state:clear` or `state:*` | `state:` |
+| `memory_search` | `memory_search` or `memory_*` | `memory:` |
+| `memory_store` | `memory_store` or `memory_*` | `memory:` |
+| `state_set` | `state_set` or `state_*` | `state:` |
+| `state_get` | `state_get` or `state_*` | `state:` |
+| `state_delete` | `state_delete` or `state_*` | `state:` |
+| `state_list` | `state_list` or `state_*` | `state:` |
+| `state_clear` | `state_clear` or `state_*` | `state:` |
 
 **Common grant patterns:**
-- Full memory + state access: `["memory:*", "state:*"]`
-- Read-only memory: `["memory:search"]`
-- Full state, no memory: `["state:*"]`
+- Full memory + state access: `["memory_*", "state_*"]`
+- Read-only memory: `["memory_search"]`
+- Full state, no memory: `["state_*"]`
 - Everything: `["*"]`
 
-> **Warning:** Granting only `memory:*` will NOT allow the agent to use session state. Always include `state:*` if your workflows use `state:set`/`state:get`.
+> **Warning:** Granting only `memory_*` will NOT allow the agent to use session state. Always include `state_*` if your workflows use `state_set`/`state_get`.
 
 ---
 
@@ -281,7 +281,7 @@ Memory and state tools use **different capability prefixes**. A grant of `memory
 
 The `MemoryBackendExt` trait defines optional operations: `traverse`, `aggregate`, `update_node`, `retract_node`, `add_edges`, `retract_edge`, `merge_nodes`. These are **not registered as tools by default** — the base `register()` function only registers the 7 core tools listed above.
 
-To expose extended operations as tools, a backend crate can provide an additional registration function that creates tools for each supported operation. konf-init calls this only if the backend reports support. Tools like `memory:traverse` (requiring `memory:traverse` capability) become available only when the backend implements them.
+To expose extended operations as tools, a backend crate can provide an additional registration function that creates tools for each supported operation. konf-init calls this only if the backend reports support. Tools like `memory_traverse` (requiring `memory_traverse` capability) become available only when the backend implements them.
 
 This is a future extension point. The core 7 tools cover the most common agent workflows. Extended operations are for advanced use cases like graph exploration and batch processing.
 

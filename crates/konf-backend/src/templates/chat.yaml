@@ -1,7 +1,7 @@
 workflow: chat
 nodes:
   respond:
-    do: ai:complete
+    do: ai_complete
     with:
       system: "{{ input.system_prompt }}"
       prompt: "{{ input.message }}"

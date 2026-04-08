@@ -123,12 +123,12 @@ The runtime enforces capability grants before tool dispatch (already designed). 
 ```yaml
 # Product agent's scope:
 capabilities:
-  - pattern: "memory:*"
+  - pattern: "memory_*"
     bindings: { namespace: "konf:unspool:*" }  # wildcard = all users in product
 
 # User agent's scope:
 capabilities:
-  - pattern: "memory:*"
+  - pattern: "memory_*"
     bindings: { namespace: "konf:unspool:user_123" }  # exact = one user only
 ```
 
@@ -204,7 +204,7 @@ scope:
   capabilities: [...]
 ```
 
-When an agent calls a tool, the runtime attaches `agent_id` and `agent_role` to the tool context metadata. If the tool modifies data (memory:store, config:update), the audit log records who did it.
+When an agent calls a tool, the runtime attaches `agent_id` and `agent_role` to the tool context metadata. If the tool modifies data (memory_store, config:update), the audit log records who did it.
 
 **Agent roles map to the same hierarchy:**
 - `infra_agent` → can access `konf:*`

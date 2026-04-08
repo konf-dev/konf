@@ -2,7 +2,7 @@
 //!
 //! This crate provides:
 //! - The `MemoryBackend` trait — the VFS abstraction for pluggable storage
-//! - Tool shells (memory:search, memory:store, state:*) that delegate to a backend
+//! - Tool shells (memory_search, memory_store, state_*) that delegate to a backend
 //! - Registration function to wire tools into the engine
 //!
 //! Backend implementations (smrti, SurrealDB, SQLite) live in separate crates.
@@ -91,7 +91,7 @@ pub trait MemoryBackend: Send + Sync {
     async fn state_clear(&self, session_id: &str, namespace: Option<&str>) -> Result<Value, MemoryError>;
 
     /// Which search modes this backend supports (e.g. \["text", "vector", "hybrid"\]).
-    /// Used to dynamically build the input schema for memory:search.
+    /// Used to dynamically build the input schema for memory_search.
     fn supported_search_modes(&self) -> Vec<String>;
 }
 
@@ -155,19 +155,19 @@ mod tests {
         rt.block_on(register(&engine, backend)).unwrap();
 
         let registry = engine.registry();
-        assert!(registry.contains("memory:search"));
-        assert!(registry.contains("memory:store"));
-        assert!(registry.contains("state:set"));
-        assert!(registry.contains("state:get"));
-        assert!(registry.contains("state:delete"));
-        assert!(registry.contains("state:list"));
-        assert!(registry.contains("state:clear"));
+        assert!(registry.contains("memory_search"));
+        assert!(registry.contains("memory_store"));
+        assert!(registry.contains("state_set"));
+        assert!(registry.contains("state_get"));
+        assert!(registry.contains("state_delete"));
+        assert!(registry.contains("state_list"));
+        assert!(registry.contains("state_clear"));
         assert_eq!(registry.len(), 7);
     }
 
     fn test_ctx() -> konflux::tool::ToolContext {
         konflux::tool::ToolContext {
-            capabilities: vec!["memory:*".into()],
+            capabilities: vec!["memory_*".into()],
             workflow_id: "test".into(),
             node_id: "test".into(),
             metadata: std::collections::HashMap::new(),

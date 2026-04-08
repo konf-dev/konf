@@ -1,9 +1,9 @@
 workflow: chat
 description: "Store the user's message as a memory"
-capabilities: ["memory:store"]
+capabilities: ["memory_store"]
 nodes:
   store:
-    do: memory:store
+    do: memory_store
     with:
       nodes:
         - content: "User said something"

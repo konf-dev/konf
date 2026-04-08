@@ -32,13 +32,13 @@ curl -N -X POST http://localhost:8000/v1/chat \
   -d '{"message": "I learned that Konf uses a capability lattice for security"}'
 
 # Search memories (switch to recall workflow — needs endpoint for workflow selection)
-# For now, memories can be searched via the memory:search tool in the LLM chat workflow
+# For now, memories can be searched via the memory_search tool in the LLM chat workflow
 ```
 
 ## What it proves
 
 - Persistent memory across server restarts (Postgres-backed)
 - smrti memory backend registered from tools.yaml
-- memory:store and memory:search tools work
+- memory_store and memory_search tools work
 - Namespace isolation (each user gets their own memory space)
 - Event journal records all operations

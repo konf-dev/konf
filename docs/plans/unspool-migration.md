@@ -69,11 +69,11 @@ workflows:
       - workflows/chat.yaml
     stream: true
     capabilities:
-      - ai:complete
+      - ai_complete
       - ai:stream
-      - memory:search
-      - memory:store
-      - memory:traverse
+      - memory_search
+      - memory_store
+      - memory_traverse
       - memory:aggregate
       - profile:get
       - history:recent
@@ -87,18 +87,18 @@ workflows:
     workflow: workflows/extraction.yaml
     debounce: 180s
     capabilities:
-      - ai:complete
-      - memory:search
-      - memory:store
+      - ai_complete
+      - memory_search
+      - memory_store
 
   synthesis:
     trigger: cron
     schedule: "0 3 * * *"
     workflow: workflows/synthesis.yaml
     capabilities:
-      - ai:complete
-      - memory:search
-      - memory:store
+      - ai_complete
+      - memory_search
+      - memory_store
       - memory:retract
 
   maintenance:
@@ -106,7 +106,7 @@ workflows:
     schedule: "0 * * * *"
     workflow: workflows/scheduled/maintenance.yaml
     capabilities:
-      - memory:search
+      - memory_search
       - memory:aggregate
       - schedule:execute
 
@@ -114,9 +114,9 @@ workflows:
     trigger: session_start
     workflow: workflows/proactive.yaml
     capabilities:
-      - memory:search
+      - memory_search
       - memory:aggregate
-      - ai:complete
+      - ai_complete
       - profile:get
 
 scheduler:
@@ -130,7 +130,7 @@ cache:
 ## Validation checklist
 
 - [ ] Chat: send message, get streamed response with context from memory
-- [ ] Tool calling: agent calls memory:search, memory:store during chat
+- [ ] Tool calling: agent calls memory_search, memory_store during chat
 - [ ] Extraction: after chat, extraction workflow triggers (debounced 180s)
 - [ ] Extraction dedup: duplicate nodes not created (semantic similarity check)
 - [ ] Synthesis: nightly run archives done items, merges duplicates, decays edges

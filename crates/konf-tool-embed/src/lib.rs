@@ -12,7 +12,7 @@ use tracing::info;
 use konflux::error::ToolError;
 use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
 
-/// The `ai:embed` tool — generates embeddings locally.
+/// The `ai_embed` tool — generates embeddings locally.
 ///
 /// `TextEmbedding` is not `Clone`/`Send` across await, so we wrap in `Arc<Mutex>`.
 pub struct EmbedTool {
@@ -33,7 +33,7 @@ impl EmbedTool {
 impl Tool for EmbedTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "ai:embed".into(),
+            name: "ai_embed".into(),
             description: "Generate text embeddings locally (no API call).".into(),
             input_schema: json!({
                 "type": "object",
@@ -46,7 +46,7 @@ impl Tool for EmbedTool {
                     }
                 }
             }),
-            capabilities: vec!["ai:embed".into()],
+            capabilities: vec!["ai_embed".into()],
             supports_streaming: false,
             output_schema: None,
             annotations: ToolAnnotations { read_only: true, idempotent: true, ..Default::default() },
@@ -95,7 +95,7 @@ impl Tool for EmbedTool {
             "embeddings": embeddings,
             "dimensions": embeddings.first().map(|e| e.len()).unwrap_or(0),
             "count": embeddings.len(),
-            "_meta": { "tool": "ai:embed", "duration_ms": duration_ms }
+            "_meta": { "tool": "ai_embed", "duration_ms": duration_ms }
         }))
     }
 }
@@ -105,10 +105,10 @@ pub fn register_embed_tools(engine: &konflux::Engine) {
     match EmbedTool::new() {
         Ok(tool) => {
             engine.register_tool(Arc::new(tool));
-            info!("ai:embed tool registered");
+            info!("ai_embed tool registered");
         }
         Err(e) => {
-            tracing::warn!(error = %e, "Failed to load embedding model, ai:embed unavailable");
+            tracing::warn!(error = %e, "Failed to load embedding model, ai_embed unavailable");
         }
     }
 }
@@ -132,15 +132,15 @@ mod tests {
         // EmbedTool::new() downloads a model (~50MB), so we test info without constructing
         // To test the actual tool, use an integration test with model available
         let info = konflux::tool::ToolInfo {
-            name: "ai:embed".into(),
+            name: "ai_embed".into(),
             description: "Generate text embeddings locally (no API call).".into(),
             input_schema: serde_json::json!({}),
             output_schema: None,
-            capabilities: vec!["ai:embed".into()],
+            capabilities: vec!["ai_embed".into()],
             supports_streaming: false,
             annotations: konflux::tool::ToolAnnotations { read_only: true, idempotent: true, ..Default::default() },
         };
-        assert_eq!(info.name, "ai:embed");
+        assert_eq!(info.name, "ai_embed");
         assert!(info.annotations.read_only);
         assert!(info.annotations.idempotent);
         assert!(!info.annotations.open_world);

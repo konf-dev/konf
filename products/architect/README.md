@@ -12,13 +12,13 @@ The architect is not a traditional product with hardcoded workflows. It's a **ca
 Your AI client (Claude Code, etc.)
     │
     └── MCP ──► konf-mcp ──► All registered tools
-                              ├── yaml:validate_workflow
-                              ├── system:introspect
-                              ├── config:reload
-                              ├── shell:exec (sandboxed)
-                              ├── memory:search (if configured)
-                              ├── ai:complete
-                              └── http:get/post
+                              ├── yaml_validate_workflow
+                              ├── system_introspect
+                              ├── config_reload
+                              ├── shell_exec (sandboxed)
+                              ├── memory_search (if configured)
+                              ├── ai_complete
+                              └── http_get/post
 ```
 
 The AI client provides the reasoning loop. Konf provides the tools and enforces safety (capability lattice, namespace isolation, resource limits).
@@ -44,11 +44,11 @@ The AI client provides the reasoning loop. Konf provides the tools and enforces 
 
 ## What the AI Can Do
 
-- Inspect available tools (`system:introspect`)
-- Generate and validate workflow YAML (`yaml:validate_workflow`)
-- Write files to the sandbox (`shell:exec`)
-- Hot-reload config after changes (`config:reload`)
-- Checkpoint and rollback via git (`shell:exec` with git commands)
+- Inspect available tools (`system_introspect`)
+- Generate and validate workflow YAML (`yaml_validate_workflow`)
+- Write files to the sandbox (`shell_exec`)
+- Hot-reload config after changes (`config_reload`)
+- Checkpoint and rollback via git (`shell_exec` with git commands)
 
 ## What the AI Cannot Do
 

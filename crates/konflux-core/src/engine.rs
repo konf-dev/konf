@@ -126,7 +126,7 @@ impl Engine {
     }
 
     /// Remove a tool by name. Returns true if the tool was present.
-    /// Used by config:reload to remove stale workflow tools before re-registering.
+    /// Used by config_reload to remove stale workflow tools before re-registering.
     pub fn remove_tool(&self, name: &str) -> bool {
         self.tools.write().unwrap_or_else(|p| p.into_inner()).remove(name)
     }

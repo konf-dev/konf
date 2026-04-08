@@ -1,10 +1,10 @@
 workflow: remember
 description: "Store a memory in the knowledge graph"
 register_as_tool: true
-capabilities: ["memory:store"]
+capabilities: ["memory_store"]
 nodes:
   store:
-    do: memory:store
+    do: memory_store
     with:
       nodes:
         - content: "A memory stored via Konf workflow"

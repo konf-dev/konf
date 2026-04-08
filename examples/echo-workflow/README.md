@@ -20,6 +20,6 @@ curl -N -X POST http://localhost:8000/v1/chat \
 ## What it proves
 
 - Workflow YAML parsing from config/workflows/
-- Workflow registers as a tool (workflow:greet)
+- Workflow registers as a tool (workflow_greet)
 - SSE streaming: start → events → done
 - Builtin echo tool executes

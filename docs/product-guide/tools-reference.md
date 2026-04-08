@@ -21,74 +21,74 @@ nodes:
       message: "Hello from Konf!"
 ```
 
-### memory:store
+### memory_store
 
 | Field | Value |
 |-------|-------|
-| **Name** | `memory:store` |
+| **Name** | `memory_store` |
 | **Description** | Store a piece of knowledge in the memory backend. |
 | **Input** | `content: string`, `metadata: object` (optional), `namespace: string` (injected) |
 | **Enable** | `tools.memory` section in `tools.yaml` |
 
-### memory:search
+### memory_search
 
 | Field | Value |
 |-------|-------|
-| **Name** | `memory:search` |
+| **Name** | `memory_search` |
 | **Description** | Semantic search over stored memories. Returns ranked results. |
 | **Input** | `query: string`, `limit: int` (default 10), `min_similarity: float` (default 0.7) |
 | **Enable** | `tools.memory` section in `tools.yaml` |
 
-### memory:delete
+### memory_delete
 
 | Field | Value |
 |-------|-------|
-| **Name** | `memory:delete` |
+| **Name** | `memory_delete` |
 | **Description** | Delete a memory entry by ID. |
 | **Input** | `id: string` |
 | **Enable** | `tools.memory` section in `tools.yaml` |
 
-### memory:traverse
+### memory_traverse
 
 | Field | Value |
 |-------|-------|
-| **Name** | `memory:traverse` |
+| **Name** | `memory_traverse` |
 | **Description** | Graph traversal over related memory entries. |
 | **Input** | `start_id: string`, `depth: int` (default 2), `relation_type: string` (optional) |
 | **Enable** | `tools.memory` section in `tools.yaml` |
 
-### ai:complete
+### ai_complete
 
 | Field | Value |
 |-------|-------|
-| **Name** | `ai:complete` |
+| **Name** | `ai_complete` |
 | **Description** | Generate a completion from the configured LLM. |
 | **Input** | `prompt: string`, `context: string` (optional), `system: string` (optional), `temperature: float` (optional) |
 | **Enable** | `tools.llm` section in `tools.yaml` |
 
-### http:get
+### http_get
 
 | Field | Value |
 |-------|-------|
-| **Name** | `http:get` |
+| **Name** | `http_get` |
 | **Description** | Make an HTTP GET request. |
 | **Input** | `url: string`, `headers: object` (optional) |
 | **Enable** | `tools.http` section in `tools.yaml` |
 
-### http:post
+### http_post
 
 | Field | Value |
 |-------|-------|
-| **Name** | `http:post` |
+| **Name** | `http_post` |
 | **Description** | Make an HTTP POST request. |
 | **Input** | `url: string`, `body: object`, `headers: object` (optional) |
 | **Enable** | `tools.http` section in `tools.yaml` |
 
-### embed:text
+### embed_text
 
 | Field | Value |
 |-------|-------|
-| **Name** | `embed:text` |
+| **Name** | `embed_text` |
 | **Description** | Generate an embedding vector for the given text. |
 | **Input** | `text: string`, `model: string` (optional, uses default) |
 | **Enable** | `tools.embed` section in `tools.yaml` |
@@ -146,16 +146,16 @@ All memory tools receive `namespace` automatically from the runtime scope. The L
 
 ```yaml
 tools:
-  memory:                    # enables memory:* tools
+  memory:                    # enables memory_* tools
     backend: smrti
     config:
       dsn: "postgresql://..."
-  llm:                       # enables ai:complete
+  llm:                       # enables ai_complete
     provider: openai
     model: "qwen3:8b"
-  http:                      # enables http:get, http:post
+  http:                      # enables http_get, http_post
     enabled: true
-  embed:                     # enables embed:text
+  embed:                     # enables embed_text
     enabled: true
 
 mcp_servers:                 # enables mcp:* tools

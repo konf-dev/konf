@@ -72,7 +72,7 @@ Primary key: `(namespace, session_id, key)`.
 # In a workflow — expires in 1 hour
 nodes:
   save_plan:
-    do: state:set
+    do: state_set
     input:
       key: "plan"
       value: { steps: ["step1", "step2"] }
@@ -80,7 +80,7 @@ nodes:
       ttl_seconds: 3600
 
   save_prefs:
-    do: state:set
+    do: state_set
     input:
       key: "preferences"
       value: { format: "markdown" }

@@ -26,9 +26,9 @@ fn matches_filter(pattern: &str, tool_name: &str) -> bool {
     if pattern == "*" {
         return true;
     }
-    if let Some(prefix) = pattern.strip_suffix(":*") {
+    if let Some(prefix) = pattern.strip_suffix("_*") {
         return tool_name.starts_with(prefix)
-            && tool_name.get(prefix.len()..prefix.len() + 1) == Some(":");
+            && tool_name.get(prefix.len()..prefix.len() + 1) == Some("_");
     }
     pattern == tool_name
 }
@@ -37,14 +37,14 @@ fn matches_filter(pattern: &str, tool_name: &str) -> bool {
 impl Tool for IntrospectTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "system:introspect".into(),
+            name: "system_introspect".into(),
             description: "List all registered tools with their names, descriptions, input schemas, and annotations.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "filter": {
                         "type": "string",
-                        "description": "Optional glob pattern to filter tools (e.g. 'memory:*' or 'ai:complete')"
+                        "description": "Optional glob pattern to filter tools (e.g. 'memory_*' or 'ai_complete')"
                     }
                 }
             }),
@@ -111,7 +111,7 @@ mod tests {
         let tool = IntrospectTool::new(make_engine());
         let info = tool.info();
 
-        assert_eq!(info.name, "system:introspect");
+        assert_eq!(info.name, "system_introspect");
         assert!(info.capabilities.is_empty());
         assert!(info.annotations.read_only);
         assert!(info.annotations.idempotent);
@@ -129,7 +129,7 @@ mod tests {
         impl Tool for DummyTool {
             fn info(&self) -> ToolInfo {
                 ToolInfo {
-                    name: "test:dummy".into(),
+                    name: "test_dummy".into(),
                     description: "A dummy tool".into(),
                     input_schema: json!({"type": "object"}),
                     output_schema: None,
@@ -156,16 +156,16 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(introspect.invoke(json!({}), &ctx)).unwrap();
         assert_eq!(result["count"], 1);
-        assert_eq!(result["tools"][0]["name"], "test:dummy");
+        assert_eq!(result["tools"][0]["name"], "test_dummy");
     }
 
     #[test]
     fn test_matches_filter() {
-        assert!(matches_filter("memory:*", "memory:search"));
-        assert!(matches_filter("memory:*", "memory:store"));
-        assert!(!matches_filter("memory:*", "ai:complete"));
+        assert!(matches_filter("memory_*", "memory_search"));
+        assert!(matches_filter("memory_*", "memory_store"));
+        assert!(!matches_filter("memory_*", "ai_complete"));
         assert!(matches_filter("*", "anything"));
-        assert!(matches_filter("ai:complete", "ai:complete"));
-        assert!(!matches_filter("ai:complete", "ai:other"));
+        assert!(matches_filter("ai_complete", "ai_complete"));
+        assert!(!matches_filter("ai_complete", "ai_other"));
     }
 }

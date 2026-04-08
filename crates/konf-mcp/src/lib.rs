@@ -225,11 +225,11 @@ mod tests {
     #[test]
     fn test_tool_info_to_mcp_annotation_mapping() {
         let info = ToolInfo {
-            name: "test:tool".into(),
+            name: "test_tool".into(),
             description: "A test tool".into(),
             input_schema: serde_json::json!({"type": "object", "properties": {}}),
             output_schema: None,
-            capabilities: vec!["test:tool".into()],
+            capabilities: vec!["test_tool".into()],
             supports_streaming: false,
             annotations: konflux::tool::ToolAnnotations {
                 read_only: true,
@@ -240,7 +240,7 @@ mod tests {
         };
 
         let mcp_tool = tool_info_to_mcp(&info);
-        assert_eq!(mcp_tool.name.as_ref(), "test:tool");
+        assert_eq!(mcp_tool.name.as_ref(), "test_tool");
         let ann = mcp_tool.annotations.as_ref().unwrap();
         assert_eq!(ann.read_only_hint, Some(true));
         assert_eq!(ann.destructive_hint, Some(false));

@@ -48,11 +48,11 @@ impl KonfMcpServer {
 ### What's exposed
 
 **Tools** — all registered tools:
-- Memory tools: `memory:search`, `memory:store`, `state:*`
-- LLM tools: `ai:complete`
-- HTTP tools: `http:get`, `http:post`
-- Embed tools: `ai:embed`
-- Workflow tools: `workflow:chat`, `workflow:summarize`, etc.
+- Memory tools: `memory_search`, `memory_store`, `state_*`
+- LLM tools: `ai_complete`
+- HTTP tools: `http_get`, `http_post`
+- Embed tools: `ai_embed`
+- Workflow tools: `workflow_chat`, `workflow_summarize`, etc.
 - MCP-forwarded tools: `brave:search`, `github:create_issue`, etc.
 
 Each tool's `ToolInfo` is translated to MCP's tool definition format. Annotations map directly:
@@ -238,10 +238,10 @@ mcp_servers:
   - name: instance-b
     transport: sse
     url: "http://instance-b:3001/mcp"
-    capabilities: ["workflow:*"]
+    capabilities: ["workflow_*"]
 ```
 
-Now Instance A's agents can call `workflow:summarize` which actually executes on Instance B. Transparent to the agent.
+Now Instance A's agents can call `workflow_summarize` which actually executes on Instance B. Transparent to the agent.
 
 ---
 

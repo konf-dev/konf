@@ -18,9 +18,9 @@ workflow: my_workflow          # Required. Unique identifier (becomes workflow I
 version: "1.0"                # Optional. Default: "0.1.0"
 description: "What this does" # Optional. Human-readable description
 capabilities:                  # Optional. Required capability grants for execution
-  - "memory:search"
-  - "ai:complete"
-register_as_tool: true         # Optional. Default: false. If true, registers as workflow:{id} tool
+  - "memory_search"
+  - "ai_complete"
+register_as_tool: true         # Optional. Default: false. If true, registers as workflow_{id} tool
 input_schema:                  # Optional. JSON Schema for workflow input (used by WorkflowTool)
   type: object
   properties:
@@ -41,7 +41,7 @@ nodes:                         # Required. Map of node_id → node definition
 | `version` | string | No | "0.1.0" | Semantic version |
 | `description` | string | No | — | Human-readable description |
 | `capabilities` | string[] | No | [] | Required capability grants |
-| `register_as_tool` | bool | No | false | Register as `workflow:{id}` tool |
+| `register_as_tool` | bool | No | false | Register as `workflow_{id}` tool |
 | `input_schema` | JSON Schema | No | — | Input validation schema |
 | `output_schema` | JSON Schema | No | — | Output schema for downstream tools |
 | `nodes` | map | Yes | — | Node definitions (at least one required) |
@@ -72,7 +72,7 @@ nodes:
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `do` | string | Yes | — | Tool name to invoke (e.g. `echo`, `memory:search`, `ai:complete`) |
+| `do` | string | Yes | — | Tool name to invoke (e.g. `echo`, `memory_search`, `ai_complete`) |
 | `with` | map | No | {} | Static input parameters (not templated) |
 | `input` | map | No | {} | Dynamic input with `{{expression}}` templates |
 | `then` | string or string[] | No | — | Next node(s) on success |
@@ -138,15 +138,15 @@ Nodes form a DAG via `then` edges. The engine:
 ```yaml
 workflow: chat
 description: "Search memory then respond"
-capabilities: ["memory:search", "ai:complete"]
+capabilities: ["memory_search", "ai_complete"]
 nodes:
   search:
-    do: memory:search
+    do: memory_search
     input:
       query: "{{message}}"
     then: respond
   respond:
-    do: ai:complete
+    do: ai_complete
     input:
       prompt: "{{message}}"
       context: "{{search.results}}"
@@ -159,11 +159,11 @@ nodes:
 workflow: parallel_search
 nodes:
   web:
-    do: http:get
+    do: http_get
     input:
       url: "https://api.example.com/search?q={{query}}"
   memory:
-    do: memory:search
+    do: memory_search
     input:
       query: "{{query}}"
   combine:
@@ -181,7 +181,7 @@ nodes:
 workflow: safe_fetch
 nodes:
   fetch:
-    do: http:get
+    do: http_get
     input:
       url: "{{url}}"
     then: process
@@ -207,7 +207,7 @@ nodes:
 workflow: summarize
 description: "Summarize a document into key points"
 register_as_tool: true
-capabilities: ["ai:complete"]
+capabilities: ["ai_complete"]
 input_schema:
   type: object
   properties:
@@ -216,13 +216,13 @@ input_schema:
   required: [document]
 nodes:
   analyze:
-    do: ai:complete
+    do: ai_complete
     input:
       prompt: "Extract {{max_points}} key points from: {{document}}"
     return: true
 ```
 
-Other workflows can call this as `workflow:summarize`.
+Other workflows can call this as `workflow_summarize`.
 
 ---
 

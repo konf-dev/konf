@@ -106,10 +106,10 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
         info!(container = %shell_config.container, "Shell tool registered");
     }
 
-    // system:introspect — always available (read-only metadata)
+    // system_introspect — always available (read-only metadata)
     engine.register_tool(Arc::new(konf_tool_llm::IntrospectTool::new(Arc::new(engine.clone()))));
 
-    // yaml:validate_workflow — always available
+    // yaml_validate_workflow — always available
     engine.register_tool(Arc::new(konf_tool_llm::ValidateWorkflowTool::new(Arc::new(engine.clone()))));
 
     let tool_count = engine.registry().len();
@@ -148,7 +148,7 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     );
     info!("Runtime initialized");
 
-    // 9b. Register config:reload tool (needs engine + runtime)
+    // 9b. Register config_reload tool (needs engine + runtime)
     engine.register_tool(Arc::new(ConfigReloadTool::new(
         Arc::new(engine.clone()),
         runtime.clone(),
@@ -292,7 +292,7 @@ impl konflux::Resource for FileResource {
 }
 
 // ============================================================
-// config:reload Tool
+// config_reload Tool
 // ============================================================
 
 /// Tool that triggers a hot-reload of product configuration from disk.
@@ -305,7 +305,7 @@ pub struct ConfigReloadTool {
 }
 
 impl ConfigReloadTool {
-    /// Create a new config:reload tool.
+    /// Create a new config_reload tool.
     pub fn new(engine: Arc<Engine>, runtime: Arc<Runtime>, config_dir: std::path::PathBuf) -> Self {
         Self { engine, runtime, config_dir }
     }
@@ -315,13 +315,13 @@ impl ConfigReloadTool {
 impl konflux::tool::Tool for ConfigReloadTool {
     fn info(&self) -> konflux::tool::ToolInfo {
         konflux::tool::ToolInfo {
-            name: "config:reload".into(),
+            name: "config_reload".into(),
             description: "Reload product configuration (workflows, prompts, tools) from disk. Re-parses all workflow YAML files and re-registers them as tools.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
             }),
-            capabilities: vec!["config:reload".into()],
+            capabilities: vec!["config_reload".into()],
             supports_streaming: false,
             output_schema: None,
             annotations: konflux::tool::ToolAnnotations::default(),
@@ -343,10 +343,10 @@ impl konflux::tool::Tool for ConfigReloadTool {
             }));
         }
 
-        // Remove existing workflow:* tools before re-registering
+        // Remove existing workflow_* tools before re-registering
         let existing_tools = self.engine.registry().list();
         let workflow_tool_names: Vec<String> = existing_tools.iter()
-            .filter(|t| t.name.starts_with("workflow:"))
+            .filter(|t| t.name.starts_with("workflow_"))
             .map(|t| t.name.clone())
             .collect();
 
@@ -358,7 +358,7 @@ impl konflux::tool::Tool for ConfigReloadTool {
         match register_workflows(&self.engine, &self.runtime, &workflows_dir) {
             Ok(()) => {
                 let new_workflow_count = self.engine.registry().list().iter()
-                    .filter(|t| t.name.starts_with("workflow:"))
+                    .filter(|t| t.name.starts_with("workflow_"))
                     .count();
 
                 let total_tools = self.engine.registry().len();
@@ -450,7 +450,7 @@ fn register_workflows(
             );
 
             engine.register_tool(Arc::new(tool));
-            info!(workflow = %workflow.id, "Registered workflow as tool: workflow:{}", workflow.id);
+            info!(workflow = %workflow.id, "Registered workflow as tool: workflow_{}", workflow.id);
         }
     }
 
@@ -476,8 +476,8 @@ mod tests {
         let tools = ToolsConfig::default();
         register_tools(&engine, &tools).await.unwrap();
         // HTTP tools registered by default
-        assert!(engine.registry().contains("http:get"));
-        assert!(engine.registry().contains("http:post"));
+        assert!(engine.registry().contains("http_get"));
+        assert!(engine.registry().contains("http_post"));
     }
 
     #[test]
@@ -561,12 +561,12 @@ nodes:
         register_workflows(&engine, &runtime, &workflows_dir).unwrap();
 
         // echo_test should be registered as a tool
-        assert!(engine.registry().contains("workflow:echo_test"),
-            "Expected workflow:echo_test in registry, got: {:?}",
+        assert!(engine.registry().contains("workflow_echo_test"),
+            "Expected workflow_echo_test in registry, got: {:?}",
             engine.registry().list().iter().map(|t| &t.name).collect::<Vec<_>>());
 
         // helper should NOT be registered as a tool (no register_as_tool)
-        assert!(!engine.registry().contains("workflow:helper"));
+        assert!(!engine.registry().contains("workflow_helper"));
 
         // Both should be registered as resources
         assert!(engine.resources().get("konf://workflows/echo.yaml").is_some());
@@ -576,7 +576,7 @@ nodes:
     #[test]
     fn test_register_workflows_skips_invalid_yaml() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("bad.yaml"), "not: valid: workflow: yaml: {{{{").unwrap();
+        std::fs::write(dir.path().join("bad.yaml"), "not: valid: workflow_ yaml: {{{{").unwrap();
 
         let engine = Engine::new();
         let rt = tokio::runtime::Runtime::new().unwrap();

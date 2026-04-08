@@ -1,8 +1,8 @@
 #![warn(missing_docs)]
 //! LLM tool — wraps rig for multi-provider LLM with tool calling (ReAct loop).
 //!
-//! The ai:complete tool implements konflux's Tool trait and uses rig internally.
-//! Inner tools (memory:search, http:get, etc.) are bridged from konflux::Tool
+//! The ai_complete tool implements konflux's Tool trait and uses rig internally.
+//! Inner tools (memory_search, http_get, etc.) are bridged from konflux::Tool
 //! to rig::ToolDyn, enabling the LLM to call them during reasoning.
 
 pub mod validate;
@@ -119,10 +119,10 @@ impl rig::tool::ToolDyn for KonfluxToolBridge {
 }
 
 // ============================================================
-// ai:complete Tool
+// ai_complete Tool
 // ============================================================
 
-/// The ai:complete tool — LLM completion with tool calling (ReAct loop).
+/// The ai_complete tool — LLM completion with tool calling (ReAct loop).
 ///
 /// When the LLM requests a tool call, rig dispatches it to the bridged
 /// konflux tools, feeds the result back, and repeats until the LLM
@@ -159,7 +159,7 @@ impl AiCompleteTool {
 impl Tool for AiCompleteTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "ai:complete".into(),
+            name: "ai_complete".into(),
             description: "Generate an LLM completion with optional tool calling (ReAct loop).".into(),
             input_schema: json!({
                 "type": "object",
@@ -180,7 +180,7 @@ impl Tool for AiCompleteTool {
                     "max_tokens": { "type": "integer" }
                 }
             }),
-            capabilities: vec!["ai:complete".into()],
+            capabilities: vec!["ai_complete".into()],
             supports_streaming: true,
             output_schema: None,
             annotations: ToolAnnotations { open_world: true, ..Default::default() },
@@ -214,7 +214,7 @@ impl Tool for AiCompleteTool {
         Ok(json!({
             "text": result,
             "_meta": {
-                "tool": "ai:complete",
+                "tool": "ai_complete",
                 "provider": self.config.provider,
                 "model": self.config.model,
                 "duration_ms": duration_ms,
@@ -289,7 +289,7 @@ async fn call_rig_with_tools(
     }
 }
 
-/// Register the ai:complete tool with the engine, deserializing config from a JSON value.
+/// Register the ai_complete tool with the engine, deserializing config from a JSON value.
 ///
 /// This creates an [`LlmConfig`] from the provided config, collects all currently
 /// registered tools as inner tools for the LLM's ReAct loop, builds the
@@ -307,7 +307,7 @@ pub async fn register(engine: &konflux::Engine, config: &serde_json::Value) -> a
     Ok(())
 }
 
-/// Register the ai:complete tool with inner tools from the engine registry.
+/// Register the ai_complete tool with inner tools from the engine registry.
 pub fn register_llm_tools(engine: &konflux::Engine, config: &LlmConfig) {
     // Collect all currently registered tools as inner tools for the LLM
     let registry = engine.registry();
@@ -353,7 +353,7 @@ mod tests {
         impl Tool for MockTool {
             fn info(&self) -> ToolInfo {
                 ToolInfo {
-                    name: "mock:test".into(),
+                    name: "mock_test".into(),
                     description: "A mock tool".into(),
                     input_schema: json!({}),
                     output_schema: None,
@@ -370,6 +370,6 @@ mod tests {
         let tool = AiCompleteTool::new(LlmConfig::default(), vec![Arc::new(MockTool)]);
         let rig_tools = tool.build_rig_tools();
         assert_eq!(rig_tools.len(), 1);
-        assert_eq!(rig_tools[0].name(), "mock:test");
+        assert_eq!(rig_tools[0].name(), "mock_test");
     }
 }

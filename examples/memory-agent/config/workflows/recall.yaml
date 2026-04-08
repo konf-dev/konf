@@ -1,10 +1,10 @@
 workflow: recall
 description: "Search memories"
 register_as_tool: true
-capabilities: ["memory:search"]
+capabilities: ["memory_search"]
 nodes:
   search:
-    do: memory:search
+    do: memory_search
     input:
       query: "{{ message }}"
       limit: 5

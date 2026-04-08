@@ -88,9 +88,9 @@ triggers:
   chat:
     workflow: chat
     capabilities:
-      - "memory:*"
-      - "ai:complete"
-      - "http:get"
+      - "memory_*"
+      - "ai_complete"
+      - "http_get"
 ```
 
 Triggers map an entry point name to a workflow and the maximum capabilities that workflow receives.
@@ -102,17 +102,17 @@ The search-then-respond pattern:
 ```yaml
 workflow: chat
 description: "Search memory for context, then respond with LLM"
-capabilities: ["memory:search", "memory:store", "ai:complete"]
+capabilities: ["memory_search", "memory_store", "ai_complete"]
 
 nodes:
   search:
-    do: memory:search
+    do: memory_search
     input:
       query: "{{message}}"
     then: respond
 
   respond:
-    do: ai:complete
+    do: ai_complete
     input:
       prompt: "{{message}}"
       context: "{{search.results}}"

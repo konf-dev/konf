@@ -29,9 +29,9 @@ Capabilities can only be **narrowed**, never amplified. A child scope cannot pos
 
 ```
 infra: [*]
-  └── admin: [memory:*, ai:*, http:*, mcp:*]
-        └── product: [memory:*, ai:complete, http:get]
-              └── user: [memory:search, memory:store, ai:complete]
+  └── admin: [memory_*, ai_*, http_*, mcp:*]
+        └── product: [memory_*, ai_complete, http_get]
+              └── user: [memory_search, memory_store, ai_complete]
 ```
 
 ## VirtualizedTool Namespace Injection
@@ -39,7 +39,7 @@ infra: [*]
 When a tool is invoked, the runtime wraps it in a `VirtualizedTool` that automatically injects the caller's namespace into the request. The LLM and workflow author never specify a namespace — they cannot access or even see namespace metadata.
 
 This means:
-- `memory:store` called by `user_123` writes to `konf:assistant:user_123`
+- `memory_store` called by `user_123` writes to `konf:assistant:user_123`
 - The same tool called by `user_456` writes to `konf:assistant:user_456`
 - No prompt injection can change the namespace
 

@@ -44,6 +44,6 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ## What it proves
 
 - LLM tool registers from tools.yaml
-- ai:complete calls ollama via OpenAI-compatible API (rig-core)
+- ai_complete calls ollama via OpenAI-compatible API (rig-core)
 - SSE streams response with tool_start, text_delta, tool_end, done events
 - Works with ollama (local), Anthropic, or OpenAI

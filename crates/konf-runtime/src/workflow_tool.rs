@@ -52,13 +52,13 @@ impl WorkflowTool {
 impl Tool for WorkflowTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: format!("workflow:{}", self.workflow.id),
+            name: format!("workflow_{}", self.workflow.id),
             description: self.workflow.description.clone().unwrap_or_default(),
             input_schema: self.workflow.input_schema.clone().unwrap_or(serde_json::json!({
                 "type": "object"
             })),
             output_schema: self.workflow.output_schema.clone(),
-            capabilities: vec![format!("workflow:{}", self.workflow.id)],
+            capabilities: vec![format!("workflow_{}", self.workflow.id)],
             supports_streaming: true,
             annotations: ToolAnnotations {
                 read_only: false,
@@ -116,11 +116,11 @@ mod tests {
         // We can't easily construct a Workflow without parsing YAML,
         // so test the naming convention and annotations
         let info = ToolInfo {
-            name: "workflow:summarize".into(),
+            name: "workflow_summarize".into(),
             description: "Summarize a document".into(),
             input_schema: serde_json::json!({"type": "object"}),
             output_schema: None,
-            capabilities: vec!["workflow:summarize".into()],
+            capabilities: vec!["workflow_summarize".into()],
             supports_streaming: true,
             annotations: ToolAnnotations {
                 read_only: false,
@@ -129,7 +129,7 @@ mod tests {
                 open_world: true,
             },
         };
-        assert_eq!(info.name, "workflow:summarize");
+        assert_eq!(info.name, "workflow_summarize");
         assert!(info.supports_streaming);
         assert!(info.annotations.open_world);
         assert!(!info.annotations.idempotent);
@@ -139,7 +139,7 @@ mod tests {
     fn test_child_scope_creation() {
         let scope = test_scope();
         let child = scope.child_scope(
-            vec![CapabilityGrant::new("memory:search")],
+            vec![CapabilityGrant::new("memory_search")],
             None,
         );
         assert!(child.is_ok());

@@ -119,7 +119,7 @@ pub struct ExecutionScope {
 
 /// A capability grant with optional parameter bindings.
 pub struct CapabilityGrant {
-    /// Tool name pattern. Supports glob: "memory:*", "ai:complete", "*".
+    /// Tool name pattern. Supports glob: "memory_*", "ai_complete", "*".
     pub pattern: String,
 
     /// Parameters injected into tool input, overriding any LLM-set values.
@@ -300,8 +300,8 @@ pub enum RuntimeError {
 
 `CapabilityGrant::matches(tool_name)` uses the same logic as konflux's `capability.rs`:
 - `"*"` matches everything
-- `"memory:*"` matches `"memory:search"`, `"memory:store"` (requires colon separator)
-- `"memory:search"` matches exactly
+- `"memory_*"` matches `"memory_search"`, `"memory_store"` (requires colon separator)
+- `"memory_search"` matches exactly
 
 When a match is found, the grant's `bindings` are returned and injected into the tool input by `VirtualizedTool`.
 
@@ -312,7 +312,7 @@ When the runtime starts a workflow, it wraps every tool in the engine's registry
 2. If it does, injects the grant's bindings into the tool input
 3. Bindings override any existing keys (prevents LLM from setting namespace)
 
-The LLM calls `memory:search(query="exercise routine")`. The runtime intercepts and calls `memory:search(query="exercise routine", namespace="konf:unspool:user_123")`.
+The LLM calls `memory_search(query="exercise routine")`. The runtime intercepts and calls `memory_search(query="exercise routine", namespace="konf:unspool:user_123")`.
 
 ### Process lifecycle
 
@@ -334,7 +334,7 @@ The LLM calls `memory:search(query="exercise routine")`. The runtime intercepts 
 
 ## Workflow-as-Tool
 
-Any workflow with `register_as_tool: true` in its YAML header can be registered as a tool named `workflow:{id}`. This is handled by `WorkflowTool` in konf-runtime:
+Any workflow with `register_as_tool: true` in its YAML header can be registered as a tool named `workflow_{id}`. This is handled by `WorkflowTool` in konf-runtime:
 
 ```rust
 pub struct WorkflowTool {
@@ -382,8 +382,8 @@ workflow = runtime.parse_yaml(yaml_str)
 scope = ExecutionScope(
     namespace="konf:unspool:user_123",
     capabilities=[
-        CapabilityGrant(pattern="memory:*", bindings={"namespace": "konf:unspool:user_123"}),
-        CapabilityGrant(pattern="ai:complete"),
+        CapabilityGrant(pattern="memory_*", bindings={"namespace": "konf:unspool:user_123"}),
+        CapabilityGrant(pattern="ai_complete"),
     ],
     limits=ResourceLimits(max_steps=500),
     actor=Actor(id="user_123", role="user"),

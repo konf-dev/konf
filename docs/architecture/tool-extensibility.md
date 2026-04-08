@@ -18,7 +18,7 @@ pub trait Tool: Send + Sync {
 }
 ```
 
-The engine dispatches `do: memory:search` and `do: mcp:github:list_issues` through identical codepaths. The `VirtualizedTool` wrapper handles namespace injection and capability checking regardless of how the tool is implemented.
+The engine dispatches `do: memory_search` and `do: mcp:github:list_issues` through identical codepaths. The `VirtualizedTool` wrapper handles namespace injection and capability checking regardless of how the tool is implemented.
 
 This means:
 - The agent cannot tell how a tool is implemented. It sees the same metadata, same schema, same invocation.
@@ -63,10 +63,10 @@ Built-in tools compiled into the Konf binary. Located in `crates/konf-tool-*`.
 
 | Crate | Tools |
 |-------|-------|
-| `konf-tool-memory` | memory:store, memory:search, memory:delete, memory:traverse |
-| `konf-tool-llm` | ai:complete |
-| `konf-tool-http` | http:get, http:post |
-| `konf-tool-embed` | embed:text |
+| `konf-tool-memory` | memory_store, memory_search, memory_delete, memory_traverse |
+| `konf-tool-llm` | ai_complete |
+| `konf-tool-http` | http_get, http_post |
+| `konf-tool-embed` | embed_text |
 | `konf-tool-mcp` | MCP client (connects to MCP servers) |
 | `konflux-core` | echo (builtin) |
 
@@ -109,7 +109,7 @@ plugins:
   sentiment:
     wasm: ./plugins/sentiment.wasm
     capabilities:
-      - "ai:complete"
+      - "ai_complete"
     memory_limit: 64MB
     timeout_ms: 5000
 ```

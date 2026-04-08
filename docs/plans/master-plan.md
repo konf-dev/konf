@@ -12,7 +12,7 @@
 | A-D | **Done** | Core engine, runtime, tools, transports (10 crates, 165 tests) |
 | G1-G2 | **Done** | CI, Docker |
 | **E1** | **Next** | Shell tool + sandbox container — agent gets OS access |
-| **E2** | Next | Extend ai:complete for agent-mode (tool selection in workflow YAML) |
+| **E2** | Next | Extend ai_complete for agent-mode (tool selection in workflow YAML) |
 | **E3** | Next | products/architect — first product bootstraps the ecosystem |
 | E4 | After E3 | SQLite backend — prove portability |
 | E5 | After E3 | WASM adapter — prove open architecture |
@@ -54,7 +54,7 @@ Transform the engine from tool-only to MCP-native with three registries. Extract
 - **Files:** `crates/konf-tool-*`
 
 ### C5: WorkflowTool
-- Workflows with `register_as_tool: true` register as `workflow:{name}` tools
+- Workflows with `register_as_tool: true` register as `workflow_{name}` tools
 - WorkflowTool wraps workflow + runtime, creates child scope
 - **Files:** `crates/konf-runtime/src/workflow_tool.rs`
 
@@ -104,11 +104,11 @@ The next phase shifts from building infrastructure to using it. The architect ag
 
 ### E1: Shell tool + sandbox container
 
-Give agents OS access through a `shell:exec` tool that runs commands inside a sandboxed container. The tool accepts a command string and returns stdout/stderr. The container is ephemeral, network-isolated, and resource-limited. This is the prerequisite for any agent that needs to read files, run tests, or execute builds.
+Give agents OS access through a `shell_exec` tool that runs commands inside a sandboxed container. The tool accepts a command string and returns stdout/stderr. The container is ephemeral, network-isolated, and resource-limited. This is the prerequisite for any agent that needs to read files, run tests, or execute builds.
 
-### E2: Agent-mode ai:complete
+### E2: Agent-mode ai_complete
 
-Extend `ai:complete` to support tool-use loops. The workflow YAML declares which tools the LLM may call during completion. The runtime manages the tool-call/response cycle, enforcing capability checks on every tool invocation. This turns a single-shot LLM call into an agentic loop — controlled by the kernel, not by application code.
+Extend `ai_complete` to support tool-use loops. The workflow YAML declares which tools the LLM may call during completion. The runtime manages the tool-call/response cycle, enforcing capability checks on every tool invocation. This turns a single-shot LLM call into an agentic loop — controlled by the kernel, not by application code.
 
 ### E3: products/architect
 

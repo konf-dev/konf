@@ -43,7 +43,7 @@ Konf adopts the Model Context Protocol's three primitives as first-class concept
 
 | Primitive | Controlled by | Purpose | Examples |
 |-----------|--------------|---------|----------|
-| **Tools** | The model (LLM) | Actions — do something | memory:search, ai:complete, http:get |
+| **Tools** | The model (LLM) | Actions — do something | memory_search, ai_complete, http_get |
 | **Resources** | The application | Context — know something | config files, workflow definitions, memory schema |
 | **Prompts** | The user | Instructions — how to approach something | workflow templates, system prompts |
 
@@ -164,16 +164,16 @@ Konf uses structural security, not prompt-based trust. The LLM never sees or con
    roles:
      user:
        capabilities:
-         - pattern: "memory:*"
+         - pattern: "memory_*"
            bindings: { namespace: "konf:myproduct:${user_id}" }
-         - pattern: "ai:complete"
+         - pattern: "ai_complete"
    ```
 
 2. **Runtime** creates an ExecutionScope for each workflow invocation with the user's capabilities.
 
-3. **VirtualizedTool** wraps each tool, injecting bound parameters (like `namespace`) into the input before the tool sees it. The LLM requests `memory:search(query="exercise")`. The tool receives `memory:search(query="exercise", namespace="konf:myproduct:user_123")`.
+3. **VirtualizedTool** wraps each tool, injecting bound parameters (like `namespace`) into the input before the tool sees it. The LLM requests `memory_search(query="exercise")`. The tool receives `memory_search(query="exercise", namespace="konf:myproduct:user_123")`.
 
-4. **Child workflows** can only attenuate capabilities, never amplify. A workflow with `memory:search` cannot grant `memory:*` to a sub-workflow. This is Fuchsia's capability routing model.
+4. **Child workflows** can only attenuate capabilities, never amplify. A workflow with `memory_search` cannot grant `memory_*` to a sub-workflow. This is Fuchsia's capability routing model.
 
 5. **ResourceLimits** enforce per-scope quotas: max steps, timeout, concurrent nodes, child depth, active runs per namespace.
 
@@ -236,7 +236,7 @@ mcp_servers:
 
 # Per-tool backend overrides (see memory-backends.md for details)
 # overrides:
-#   state:set:
+#   state_set:
 #     backend: redis
 #     config: { dsn: "redis://localhost" }
 ```
@@ -246,14 +246,14 @@ Product workflows (`config/workflows/chat.yaml`):
 workflow: chat
 description: "Handle a user chat message"
 register_as_tool: true
-capabilities: ["memory:*", "ai:complete"]
+capabilities: ["memory_*", "ai_complete"]
 nodes:
   search:
-    do: memory:search
+    do: memory_search
     input:
       query: "{{message}}"
   respond:
-    do: ai:complete
+    do: ai_complete
     input:
       messages:
         - role: system

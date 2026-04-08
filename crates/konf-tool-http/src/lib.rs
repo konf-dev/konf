@@ -1,4 +1,4 @@
-//! HTTP tools (http:get, http:post) for the Konf platform.
+//! HTTP tools (http_get, http_post) for the Konf platform.
 //!
 //! Wraps reqwest for making HTTP requests. Both tools are capped at
 //! MAX_TIMEOUT_SECS to prevent resource exhaustion from LLM-controlled timeouts.
@@ -20,7 +20,7 @@ const MAX_TIMEOUT_SECS: u64 = 300;
 /// Maximum response body size (10 MB) to prevent memory exhaustion.
 const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
 
-/// Register http:get and http:post tools in the engine.
+/// Register http_get and http_post tools in the engine.
 pub async fn register(engine: &Engine, _config: &Value) -> anyhow::Result<()> {
     engine.register_tool(Arc::new(HttpGetTool::new()));
     engine.register_tool(Arc::new(HttpPostTool::new()));
@@ -108,7 +108,7 @@ fn tool_err(e: impl std::fmt::Display) -> ToolError {
 }
 
 // ============================================================
-// http:get
+// http_get
 // ============================================================
 
 /// HTTP GET tool — makes a GET request and returns status, headers, body.
@@ -129,7 +129,7 @@ impl HttpGetTool {
 impl Tool for HttpGetTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "http:get".into(),
+            name: "http_get".into(),
             description: "Make an HTTP GET request and return the response.".into(),
             input_schema: json!({
                 "type": "object",
@@ -141,7 +141,7 @@ impl Tool for HttpGetTool {
                 "required": ["url"]
             }),
             output_schema: None,
-            capabilities: vec!["http:get".into()],
+            capabilities: vec!["http_get".into()],
             supports_streaming: false,
             annotations: ToolAnnotations { open_world: true, idempotent: true, ..Default::default() },
         }
@@ -190,7 +190,7 @@ impl Tool for HttpGetTool {
             "headers": headers,
             "body": body_value,
             "_meta": {
-                "tool": "http:get",
+                "tool": "http_get",
                 "duration_ms": duration_ms,
             }
         }))
@@ -198,7 +198,7 @@ impl Tool for HttpGetTool {
 }
 
 // ============================================================
-// http:post
+// http_post
 // ============================================================
 
 /// HTTP POST tool — makes a POST request with a JSON body.
@@ -219,7 +219,7 @@ impl HttpPostTool {
 impl Tool for HttpPostTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "http:post".into(),
+            name: "http_post".into(),
             description: "Make an HTTP POST request with a JSON body.".into(),
             input_schema: json!({
                 "type": "object",
@@ -232,7 +232,7 @@ impl Tool for HttpPostTool {
                 "required": ["url"]
             }),
             output_schema: None,
-            capabilities: vec!["http:post".into()],
+            capabilities: vec!["http_post".into()],
             supports_streaming: false,
             annotations: ToolAnnotations { open_world: true, ..Default::default() },
         }
@@ -275,7 +275,7 @@ impl Tool for HttpPostTool {
             "status": status,
             "body": body_value,
             "_meta": {
-                "tool": "http:post",
+                "tool": "http_post",
                 "duration_ms": duration_ms,
             }
         }))
@@ -290,7 +290,7 @@ mod tests {
     fn test_http_get_tool_info() {
         let tool = HttpGetTool::new();
         let info = tool.info();
-        assert_eq!(info.name, "http:get");
+        assert_eq!(info.name, "http_get");
         assert!(info.annotations.open_world);
         assert!(info.annotations.idempotent);
         assert!(!info.annotations.destructive);
@@ -300,7 +300,7 @@ mod tests {
     fn test_http_post_tool_info() {
         let tool = HttpPostTool::new();
         let info = tool.info();
-        assert_eq!(info.name, "http:post");
+        assert_eq!(info.name, "http_post");
         assert!(info.annotations.open_world);
         assert!(!info.annotations.idempotent);
     }
@@ -310,8 +310,8 @@ mod tests {
         let engine = Engine::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(register(&engine, &json!({}))).unwrap();
-        assert!(engine.registry().contains("http:get"));
-        assert!(engine.registry().contains("http:post"));
+        assert!(engine.registry().contains("http_get"));
+        assert!(engine.registry().contains("http_post"));
         assert_eq!(engine.registry().len(), 2);
     }
 

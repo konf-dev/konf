@@ -47,7 +47,7 @@ pub fn compile(schema: WorkflowSchema, graph: &DependencyGraph) -> Result<Workfl
 fn compile_node(name: &str, node: &NodeSchema, _schema: &WorkflowSchema) -> Result<Step, ParseError> {
     let tool_id = match &node.do_ {
         Some(DoBlock::Single(tool)) => ToolId::new(tool),
-        Some(DoBlock::Parallel(_)) => ToolId::new(format!("internal:parallel:{}", name)),
+        Some(DoBlock::Parallel(_)) => ToolId::new(format!("internal_parallel_{}", name)),
         None => ToolId::new("echo"), // default to echo for pass-through
     };
 

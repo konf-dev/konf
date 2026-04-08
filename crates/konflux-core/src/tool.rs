@@ -41,7 +41,7 @@ pub trait Tool: Send + Sync {
 /// Fields are MCP-aligned — same metadata regardless of tool source (Rust, MCP, Python).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolInfo {
-    /// Unique tool name, e.g. "memory:search", "ai:complete", "workflow:summarize"
+    /// Unique tool name, e.g. "memory_search", "ai_complete", "workflow_summarize"
     pub name: String,
 
     /// Human-readable description shown to the LLM
@@ -202,7 +202,7 @@ mod tests {
         impl Tool for DummyTool {
             fn info(&self) -> ToolInfo {
                 ToolInfo {
-                    name: "test:dummy".into(),
+                    name: "test_dummy".into(),
                     description: "".into(),
                     input_schema: serde_json::json!({}),
                     output_schema: None,
@@ -219,11 +219,11 @@ mod tests {
         let mut registry = ToolRegistry::new();
         registry.register(Arc::new(DummyTool));
         assert_eq!(registry.len(), 1);
-        assert!(registry.contains("test:dummy"));
+        assert!(registry.contains("test_dummy"));
 
-        assert!(registry.remove("test:dummy"));
+        assert!(registry.remove("test_dummy"));
         assert_eq!(registry.len(), 0);
-        assert!(!registry.contains("test:dummy"));
+        assert!(!registry.contains("test_dummy"));
 
         // Remove non-existent returns false
         assert!(!registry.remove("nonexistent"));

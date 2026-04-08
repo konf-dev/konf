@@ -66,7 +66,7 @@ Client ──POST /v1/chat──► konf-backend
                               │
                          ┌────┴────┐
                     Node A        Node B (concurrent if no dependency)
-                    tool: memory:search    tool: ai:complete
+                    tool: memory_search    tool: ai_complete
                               │                │
                     VirtualizedTool injects    VirtualizedTool injects
                     namespace binding          namespace binding
@@ -117,13 +117,13 @@ Call any API directly from workflow YAML:
 ```yaml
 nodes:
   call_api:
-    do: http:post
+    do: http_post
     input:
       url: "https://api.example.com/data"
       body: { query: "{{message}}" }
 ```
 
-No tool registration needed. The `http:post` tool is already registered.
+No tool registration needed. The `http_post` tool is already registered.
 
 ### Path 3: Rust Crate (deep integration)
 

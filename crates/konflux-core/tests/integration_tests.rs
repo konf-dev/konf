@@ -387,7 +387,7 @@ async fn test_nested_workflow_capabilities() {
     impl Tool for SubWorkflowTool {
         fn info(&self) -> ToolInfo {
             ToolInfo {
-                name: "workflow:execute".into(),
+                name: "workflow_execute".into(),
                 description: "Runs a sub-workflow".into(),
                 input_schema: json!({}),
                 output_schema: None,
@@ -413,7 +413,7 @@ async fn test_nested_workflow_capabilities() {
 workflow: parent
 nodes:
   sub:
-    do: "workflow:execute"
+    do: "workflow_execute"
     grant: ["echo"]
     with:
       yaml: |
@@ -428,7 +428,7 @@ nodes:
 "#;
     
     let workflow = engine.parse_yaml(yaml).unwrap();
-    let caps = vec!["workflow:execute".to_string(), "echo".to_string(), "fail".to_string()];
+    let caps = vec!["workflow_execute".to_string(), "echo".to_string(), "fail".to_string()];
     let res = engine.run(&workflow, json!({}), &caps, HashMap::new(), None, None).await;
     assert!(res.is_err());
     let err = res.unwrap_err().to_string();

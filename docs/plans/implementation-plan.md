@@ -76,7 +76,7 @@ impl Default for ToolAnnotations { /* all false */ }
 - `konf-backend/src/tools/http.rs` (HttpGetTool, HttpPostTool) — `open_world: true, idempotent: true` for GET
 - `konf-backend/src/tools/llm.rs` (AiCompleteTool) — `open_world: true`
 - `konf-backend/src/tools/embed.rs` (EmbedTool) — `read_only: true, idempotent: true`
-- `konf-backend/src/tools/memory.rs` (4 tools) — search: `read_only, idempotent`; store: none; state:set: `idempotent`; state:get: `read_only, idempotent`
+- `konf-backend/src/tools/memory.rs` (4 tools) — search: `read_only, idempotent`; store: none; state_set: `idempotent`; state_get: `read_only, idempotent`
 - `konf-backend/src/tools/mcp.rs` (McpToolWrapper) — map from MCP annotations
 
 Add `remove()` to ToolRegistry (needed for hot-reload tool toggling):
@@ -159,7 +159,7 @@ members = ["konf-tool-http", "konf-tool-llm", "konf-tool-embed", "konf-tool-mcp"
 - **Move** `konf-backend/src/tools/http.rs` → `konf-tools/konf-tool-http/src/lib.rs`
 - **Add** `pub async fn register(engine: &Engine, config: &Value) -> anyhow::Result<()>`
 - **Delete** `konf-backend/src/tools/http.rs`
-- **Tests:** move/create test for http:get and http:post tool info + error cases
+- **Tests:** move/create test for http_get and http_post tool info + error cases
 
 #### konf-tool-llm
 - **Create** `konf-tools/konf-tool-llm/Cargo.toml` — deps: konflux, rig-core, async-trait, serde_json, serde, tracing
@@ -240,7 +240,7 @@ konf-backend's `src/tools/` directory is completely removed.
 - `WorkflowTool { workflow, runtime: Arc<Runtime>, default_scope }` — implements Tool
 - `info()` returns ToolInfo from workflow YAML header (name, description, input_schema, capabilities)
 - `invoke()` creates child scope via `default_scope.child_scope()`, runs workflow via `self.runtime.run()`
-- Name: `workflow:{workflow.id}`
+- Name: `workflow_{workflow.id}`
 
 **Edit** `konf-runtime/src/lib.rs` — add `pub mod workflow_tool;`
 

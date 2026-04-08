@@ -18,6 +18,6 @@ curl http://localhost:8000/v1/health
 ## What's available
 
 - 5 builtin tools: echo, json_get, concat, log, template
-- 2 HTTP tools: http:get, http:post
+- 2 HTTP tools: http_get, http_post
 - Health endpoint (no auth required)
 - No database, no LLM, no auth service needed

@@ -99,8 +99,8 @@ crates/
 
 | Tool | Description | Annotations |
 |------|-------------|-------------|
-| `http:get` | HTTP GET request | open_world, idempotent |
-| `http:post` | HTTP POST request with JSON body | open_world |
+| `http_get` | HTTP GET request | open_world, idempotent |
+| `http_post` | HTTP POST request with JSON body | open_world |
 
 Backed by reqwest. Configurable max timeout (default 30s, capped at 300s). Returns status, headers, body (JSON or string).
 
@@ -108,9 +108,9 @@ Backed by reqwest. Configurable max timeout (default 30s, capped at 300s). Retur
 
 | Tool | Description | Annotations |
 |------|-------------|-------------|
-| `ai:complete` | LLM completion with optional tool-calling loop (ReAct) | open_world, supports_streaming |
+| `ai_complete` | LLM completion with optional tool-calling loop (ReAct) | open_world, supports_streaming |
 
-`ai:complete` supports both batch and streaming modes via the Tool trait's `invoke()` and `invoke_streaming()` methods. The `open_world` annotation reflects the LLM API call itself; tools invoked within the ReAct loop have their own annotations checked independently.
+`ai_complete` supports both batch and streaming modes via the Tool trait's `invoke()` and `invoke_streaming()` methods. The `open_world` annotation reflects the LLM API call itself; tools invoked within the ReAct loop have their own annotations checked independently.
 
 Backed by rig-core. Supports OpenAI, Anthropic, Google, and any OpenAI-compatible API (ollama, vLLM). Provider and model configurable via tools.yaml.
 
@@ -118,7 +118,7 @@ Backed by rig-core. Supports OpenAI, Anthropic, Google, and any OpenAI-compatibl
 
 | Tool | Description | Annotations |
 |------|-------------|-------------|
-| `ai:embed` | Generate text embeddings locally | read_only, idempotent |
+| `ai_embed` | Generate text embeddings locally | read_only, idempotent |
 
 Backed by fastembed (ONNX runtime). Runs locally — no API calls. Model configurable (default: AllMiniLML6V2).
 
@@ -126,13 +126,13 @@ Backed by fastembed (ONNX runtime). Runs locally — no API calls. Model configu
 
 | Tool | Description | Annotations |
 |------|-------------|-------------|
-| `memory:search` | Search the knowledge graph | read_only, idempotent |
-| `memory:store` | Add nodes to the knowledge graph | |
-| `state:set` | Set a session state key (working memory) | idempotent |
-| `state:get` | Get a session state key | read_only, idempotent |
-| `state:delete` | Delete a session state key | destructive |
-| `state:list` | List all session state keys | read_only, idempotent |
-| `state:clear` | Clear all session state | destructive |
+| `memory_search` | Search the knowledge graph | read_only, idempotent |
+| `memory_store` | Add nodes to the knowledge graph | |
+| `state_set` | Set a session state key (working memory) | idempotent |
+| `state_get` | Get a session state key | read_only, idempotent |
+| `state_delete` | Delete a session state key | destructive |
+| `state_list` | List all session state keys | read_only, idempotent |
+| `state_clear` | Clear all session state | destructive |
 
 Backed by a MemoryBackend implementation (see [memory-backends.md](memory-backends.md)). Backend selected via tools.yaml.
 
@@ -202,7 +202,7 @@ custom:
 | Path | Effort | Integration depth | When to use |
 |------|--------|-------------------|-------------|
 | MCP server | Zero Konf code | Auto-discovered tools, MCP annotations | Third-party, any language |
-| HTTP in workflow | Zero registration | `http:post` in YAML | Simple API calls |
+| HTTP in workflow | Zero registration | `http_post` in YAML | Simple API calls |
 | Python function | Config + Python file | Custom tool name, capabilities | Prototyping |
 | Rust crate | New crate in konf-tools | Full integration: streaming, namespace injection | Core tools |
 

@@ -97,7 +97,7 @@ Workflows are stored, not loaded at boot. Resolved on demand when triggered.
 **Triggers:**
 - User sends a message → router picks a workflow
 - Schedule fires → scheduler looks up the workflow
-- Another workflow calls it → `workflow:name` tool resolves at call time
+- Another workflow calls it → `workflow_name` tool resolves at call time
 - External event (webhook, MCP call) → handler resolves workflow
 
 **WorkflowStore backends:**
@@ -132,7 +132,7 @@ When infrastructure breaks, the AI communicates it in emotional terms, not error
 
 LLMs can generate workflow YAML, but the pipeline is: generate → validate → register. Never generate → execute directly.
 
-**`workflow:validate`** takes YAML and returns structured errors:
+**`workflow_validate`** takes YAML and returns structured errors:
 ```json
 {
   "valid": false,
@@ -143,14 +143,14 @@ LLMs can generate workflow YAML, but the pipeline is: generate → validate → 
 }
 ```
 
-The LLM iterates on errors until validation passes. Only then does `workflow:create` register it.
+The LLM iterates on errors until validation passes. Only then does `workflow_create` register it.
 
 **Safety guardrails:**
 - Generated workflows inherit the user's capabilities (can't escalate)
 - Resource quotas cap how many workflows/schedules a user can create
 - Persona evolution is slow (nightly reflect), not reactive (per-message rewrite)
 - No workflow can run faster than the minimum schedule interval (e.g., 1 hour)
-- External tool access (http:get) requires explicit capability grant
+- External tool access (http_get) requires explicit capability grant
 
 ---
 
@@ -159,9 +159,9 @@ The LLM iterates on errors until validation passes. Only then does `workflow:cre
 A child scope can be equal to or more restricted than its parent. Never more permissive.
 
 This is Fuchsia's capability routing model:
-- Product grants user: `["memory:*", "ai:complete", "state:*"]`
-- User's workflow creates sub-workflow: can grant at most `["memory:search"]` — a subset
-- Sub-workflow cannot gain `http:get` if the parent doesn't have it
+- Product grants user: `["memory_*", "ai_complete", "state_*"]`
+- User's workflow creates sub-workflow: can grant at most `["memory_search"]` — a subset
+- Sub-workflow cannot gain `http_get` if the parent doesn't have it
 
 Namespace injection is structural, not prompt-based:
 - VirtualizedTool injects `namespace` parameter before the tool sees input

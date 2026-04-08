@@ -79,7 +79,7 @@ Reload behavior:
 - Swaps product config atomically via ArcSwap
 - Re-registers workflows (add new, update changed, remove deleted)
 - Updates resource registry (config file contents)
-- **Tool toggling:** if a tool section is added/removed in tools.yaml, the corresponding tools are registered/unregistered in the engine's ToolRegistry. The registry supports thread-safe add and remove. This means enabling/disabling tools (e.g. turning off `http:*` for a restricted product) takes effect without restart.
+- **Tool toggling:** if a tool section is added/removed in tools.yaml, the corresponding tools are registered/unregistered in the engine's ToolRegistry. The registry supports thread-safe add and remove. This means enabling/disabling tools (e.g. turning off `http_*` for a restricted product) takes effect without restart.
 - Does NOT reconnect memory backends or restart MCP server processes. To change backend DSN or add a new MCP server, restart is required.
 
 **Why not reconnect backends on reload?** Reconnecting a database or respawning MCP processes mid-flight risks dropping in-progress workflow tool calls. Backends are long-lived connections — changing them is a deployment operation, not a config tweak. Tool toggling (which tools are *available*) is safe because it only affects future workflow starts, not in-progress executions (which have their own per-execution engine snapshot).

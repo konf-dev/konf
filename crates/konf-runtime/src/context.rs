@@ -17,8 +17,8 @@ use konflux::stream::StreamSender;
 /// A tool wrapper that injects bound parameters into input before invocation.
 ///
 /// Example: if bindings = {"namespace": "konf:unspool:user_123"},
-/// the LLM calls `memory:search(query="exercise")` and the actual invocation
-/// becomes `memory:search(query="exercise", namespace="konf:unspool:user_123")`.
+/// the LLM calls `memory_search(query="exercise")` and the actual invocation
+/// becomes `memory_search(query="exercise", namespace="konf:unspool:user_123")`.
 ///
 /// Bindings override any existing keys — the LLM cannot escape its namespace.
 pub struct VirtualizedTool {

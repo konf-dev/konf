@@ -1,4 +1,4 @@
-//! Shell execution tool (`shell:exec`) for the Konf platform.
+//! Shell execution tool (`shell_exec`) for the Konf platform.
 //!
 //! Runs commands inside a Docker sandbox container via `docker exec`.
 //! All commands execute as the `konf-agent` user in the `/workspace` directory.
@@ -28,7 +28,7 @@ fn default_timeout_ms() -> u64 {
     30_000
 }
 
-/// Register the `shell:exec` tool in the engine.
+/// Register the `shell_exec` tool in the engine.
 pub async fn register(engine: &Engine, config: &Value) -> anyhow::Result<()> {
     let shell_config: ShellConfig = serde_json::from_value(config.clone())?;
     let tool = ShellExecTool::new(shell_config.container, shell_config.timeout_ms);
@@ -59,7 +59,7 @@ impl ShellExecTool {
 impl Tool for ShellExecTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "shell:exec".into(),
+            name: "shell_exec".into(),
             description: "Execute a shell command inside the sandboxed container. \
                 Returns stdout, stderr, and exit code."
                 .into(),
@@ -78,7 +78,7 @@ impl Tool for ShellExecTool {
                 "required": ["command"]
             }),
             output_schema: None,
-            capabilities: vec!["shell:exec".into()],
+            capabilities: vec!["shell_exec".into()],
             supports_streaming: false,
             annotations: ToolAnnotations {
                 destructive: true,
@@ -105,7 +105,7 @@ impl Tool for ShellExecTool {
             container = %self.container_name,
             command = %command,
             timeout_ms,
-            "shell:exec invoked"
+            "shell_exec invoked"
         );
 
         let child = tokio::process::Command::new("docker")
@@ -151,7 +151,7 @@ impl Tool for ShellExecTool {
             exit_code,
             stdout_len = stdout.len(),
             stderr_len = stderr.len(),
-            "shell:exec completed"
+            "shell_exec completed"
         );
 
         Ok(json!({
@@ -180,8 +180,8 @@ mod tests {
         let tool = ShellExecTool::new("test-container", 5000);
         let info = tool.info();
 
-        assert_eq!(info.name, "shell:exec");
-        assert_eq!(info.capabilities, vec!["shell:exec"]);
+        assert_eq!(info.name, "shell_exec");
+        assert_eq!(info.capabilities, vec!["shell_exec"]);
         assert!(info.annotations.destructive);
         assert!(!info.annotations.read_only);
         assert!(!info.annotations.idempotent);

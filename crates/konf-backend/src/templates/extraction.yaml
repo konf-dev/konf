@@ -1,14 +1,14 @@
 workflow: extraction
 nodes:
   extract:
-    do: ai:complete
+    do: ai_complete
     with:
       system: "You are an entity extraction system. Extract entities, relationships, and key facts from the conversation. Return JSON with 'nodes' and 'edges' arrays."
       prompt: "{{ input.messages }}"
     then: store
 
   store:
-    do: memory:store
+    do: memory_store
     with:
       nodes: "{{ extract.nodes }}"
     return: true

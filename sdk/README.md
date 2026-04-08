@@ -54,7 +54,7 @@ Whatever adapter backs a tool, the agent sees the same interface:
 
 ```json
 {
-  "name": "memory:search",
+  "name": "memory_search",
   "description": "Search memory for relevant context",
   "inputSchema": { "type": "object", "properties": { "query": { "type": "string" } } }
 }

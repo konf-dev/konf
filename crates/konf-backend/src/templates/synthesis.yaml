@@ -1,7 +1,7 @@
 workflow: synthesis
 nodes:
   search_done:
-    do: memory:search
+    do: memory_search
     with:
       query: "completed items"
       node_type: "action"
@@ -9,7 +9,7 @@ nodes:
     then: analyze
 
   analyze:
-    do: ai:complete
+    do: ai_complete
     with:
       system: "You are a graph maintenance system. Identify nodes that should be archived (done > 7 days), merged (duplicates with cosine similarity > 0.85), or have edges decayed."
       prompt: "{{ search_done }}"
