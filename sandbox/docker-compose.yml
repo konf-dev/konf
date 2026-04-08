@@ -1,0 +1,16 @@
+services:
+  sandbox:
+    build: .
+    container_name: konf-sandbox
+    network_mode: "none"
+    cpus: 2
+    mem_limit: 1g
+    pids_limit: 100
+    volumes:
+      - ./workspace:/workspace
+    stdin_open: true
+    tty: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

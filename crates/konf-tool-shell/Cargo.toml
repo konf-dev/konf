@@ -1,19 +1,16 @@
 [package]
-name = "konf-tool-llm"
+name = "konf-tool-shell"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Shell execution tool (shell:exec) for the Konf platform — runs commands in a Docker sandbox"
 
 [dependencies]
 konflux-core = { path = "../konflux-core" }
-rig-core = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+tokio = { workspace = true }
 anyhow = { workspace = true }
-thiserror = { workspace = true }
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }

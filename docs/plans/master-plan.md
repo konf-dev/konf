@@ -9,13 +9,14 @@
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| A | **Done** | Hardening — konflux + smrti (CancellationToken, hooks, timeouts, thread-safe registry, concurrent tests) |
-| B | **Done** | konf-runtime — process table, capabilities, journal, monitoring (39 tests) |
-| C | **Done** | Engine foundation — ToolInfo enrichment, Resources/Prompts, tool extraction, konf-init |
-| D | **Done** | Transport shells — konf-mcp, konf-backend rewrite, SSE streaming |
-| E | Planned | Alternative backends — SurrealDB, SQLite |
-| F | Planned | Validation — Unspool migration |
-| G | Partial | Production — G1 (CI) **Done**, G2 (Docker) **Done**, G3 (Monitoring+Docs) Planned |
+| A-D | **Done** | Core engine, runtime, tools, transports (10 crates, 165 tests) |
+| G1-G2 | **Done** | CI, Docker |
+| **E1** | **Next** | Shell tool + sandbox container — agent gets OS access |
+| **E2** | Next | Extend ai:complete for agent-mode (tool selection in workflow YAML) |
+| **E3** | Next | products/architect — first product bootstraps the ecosystem |
+| E4 | After E3 | SQLite backend — prove portability |
+| E5 | After E3 | WASM adapter — prove open architecture |
+| G3 | Planned | OpenTelemetry, OpenAPI docs |
 
 > **Monorepo migration complete.** All 10 crates now live under `crates/` in a single Cargo workspace
 > (`konf`). The license is BSL-1.1. smrti remains an external dependency at konf-dev/smrti.
@@ -97,27 +98,29 @@ Build the two transport shells over the booted engine.
 
 ---
 
-## Phase E: Alternative Backends
+## Phase E: The Architect
 
-### E1: konf-tool-memory-surrealdb
-- Implement MemoryBackend for SurrealDB
-- Same code edge (rocksdb://) and cloud (wss://)
-- HNSW vector search, native FTS, graph queries
-- **Files:** `crates/konf-tool-memory-surrealdb/` (new crate)
+The next phase shifts from building infrastructure to using it. The architect agent is the first Konf product — an agent that designs, builds, and maintains other Konf products.
 
-### E2: konf-tool-memory-sqlite
-- Implement MemoryBackend for SQLite + sqlite-vec + FTS5
-- Ultra-lightweight edge, mobile
-- **Files:** `crates/konf-tool-memory-sqlite/` (new crate)
+### E1: Shell tool + sandbox container
 
----
+Give agents OS access through a `shell:exec` tool that runs commands inside a sandboxed container. The tool accepts a command string and returns stdout/stderr. The container is ephemeral, network-isolated, and resource-limited. This is the prerequisite for any agent that needs to read files, run tests, or execute builds.
 
-## Phase F: Validation
+### E2: Agent-mode ai:complete
 
-### F1: Unspool migration
-- Configure Unspool as a Konf product via tools.yaml + workflows/
-- Validate: streaming, tool calling, extraction, namespace isolation, config reload, error recovery
-- See [unspool-migration.md](unspool-migration.md)
+Extend `ai:complete` to support tool-use loops. The workflow YAML declares which tools the LLM may call during completion. The runtime manages the tool-call/response cycle, enforcing capability checks on every tool invocation. This turns a single-shot LLM call into an agentic loop — controlled by the kernel, not by application code.
+
+### E3: products/architect
+
+The first Konf product. The architect agent reads specs, writes YAML workflows, validates them against the engine, and iterates. It bootstraps the ecosystem: every future product can be designed by the architect. This proves that self-modification is safe (YAML only, validated, capability-bounded).
+
+### E4: SQLite backend
+
+Implement `MemoryBackend` for SQLite + sqlite-vec + FTS5. Proves the backend-agnostic storage abstraction with a second concrete implementation. Enables edge and mobile deployments.
+
+### E5: WASM adapter
+
+Prove the open architecture by loading tools from WASM modules. Any language that compiles to WASM can extend Konf without recompilation.
 
 ---
 

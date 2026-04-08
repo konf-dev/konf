@@ -13,6 +13,12 @@ Konf runs the same engine on a phone, a laptop, a homelab server, or a cloud clu
 
 ---
 
+## Why Konf
+
+Konf is not a library or framework — it is infrastructure. It enforces security structurally (not via prompts), attenuates capabilities mathematically (not via API keys), and separates execution mechanisms (Rust) from behavioral policies (YAML). See [Why Konf](why-konf.md) for a detailed comparison with library-based agent frameworks.
+
+---
+
 ## Core Principles
 
 ### Everything is a tool

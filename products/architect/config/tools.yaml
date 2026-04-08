@@ -1,0 +1,9 @@
+tools:
+  llm:
+    provider: openai
+    model: "${KONF_MODEL:-qwen3:8b}"
+  shell:
+    container: konf-sandbox
+    timeout_ms: 30000
+  http:
+    enabled: true

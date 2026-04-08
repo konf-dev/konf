@@ -147,7 +147,20 @@ pub struct ToolsConfig {
     pub http: Option<Value>,
     pub embed: Option<Value>,
     pub mcp_servers: Option<Value>,
+    pub shell: Option<ShellConfig>,
 }
+
+/// Shell sandbox configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ShellConfig {
+    /// Docker container name for shell:exec.
+    pub container: String,
+    /// Default per-command timeout in milliseconds.
+    #[serde(default = "default_shell_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+fn default_shell_timeout_ms() -> u64 { 30000 }
 
 /// Memory backend configuration.
 #[derive(Debug, Clone, Deserialize)]

@@ -5,6 +5,12 @@
 //! Inner tools (memory:search, http:get, etc.) are bridged from konflux::Tool
 //! to rig::ToolDyn, enabling the LLM to call them during reasoning.
 
+pub mod validate;
+pub mod introspect;
+
+pub use validate::ValidateWorkflowTool;
+pub use introspect::IntrospectTool;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
