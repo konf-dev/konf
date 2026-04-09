@@ -77,7 +77,7 @@ nodes:
 | `do` | string | Yes | — | Tool name to invoke (e.g. `echo`, `memory_search`, `ai_complete`) |
 | `with` | map | No | {} | Input parameters — supports both static values and `{{template}}` expressions |
 | `then` | string or string[] | No | — | Next node(s) on success. Use `then: [a, b]` for parallel fan-out. |
-| `catch` | string | No | — | Error handler node |
+| `catch` | string or array | No | — | Error handling. Simple: `catch: fallback_node`. Branch: `catch: [{when: true, then: node}]` |
 | `condition` | string | No | — | Expression that must be truthy to execute |
 | `return` | bool | No | false | If true, this node's output becomes the workflow result |
 | `retry` | object | No | — | Retry policy (see below) |

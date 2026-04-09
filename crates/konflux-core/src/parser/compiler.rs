@@ -8,7 +8,7 @@ use crate::workflow::{
     BackoffStrategy, Edge, EdgeTarget, ErrorAction, Expr,
     PipeStep, RepeatConfig, RetryPolicy, Step, Workflow, StepId, ToolId
 };
-use crate::parser::schema::{WorkflowSchema, NodeSchema, DoBlock, PipeStepSchema, ThenBlock};
+use crate::parser::schema::{WorkflowSchema, NodeSchema, DoBlock, PipeStepSchema, ThenBlock, CatchBlock};
 use crate::parser::graph::DependencyGraph;
 
 /// Compile a validated WorkflowSchema into a Workflow IR.
@@ -112,28 +112,34 @@ fn compile_node(name: &str, node: &NodeSchema, _schema: &WorkflowSchema) -> Resu
     }
 
     // Compile error handling
-    if !node.catch.is_empty() {
-        for branch in &node.catch {
-            let is_match = branch.else_.unwrap_or(false) 
-                || branch.when.is_none() 
-                || branch.when.as_deref() == Some("true");
-                
-            if is_match {
-                if let Some(target) = &branch.then {
-                    step.on_error = ErrorAction::Goto {
-                        step: StepId::new(target),
-                    };
-                } else if let Some(do_) = &branch.do_ {
-                    if do_ == "skip" || do_ == "continue" {
-                        step.on_error = ErrorAction::Skip;
-                    } else if do_.starts_with("fallback:") {
-                        let value = do_.strip_prefix("fallback:").unwrap_or("").to_string();
-                        step.on_error = ErrorAction::Fallback { value };
+    match &node.catch {
+        CatchBlock::Simple(target) => {
+            step.on_error = ErrorAction::Goto {
+                step: StepId::new(target),
+            };
+        }
+        CatchBlock::Branches(branches) if !branches.is_empty() => {
+            for branch in branches {
+                let is_match = branch.is_match();
+
+                if is_match {
+                    if let Some(target) = &branch.then {
+                        step.on_error = ErrorAction::Goto {
+                            step: StepId::new(target),
+                        };
+                    } else if let Some(do_) = &branch.do_ {
+                        if do_ == "skip" || do_ == "continue" {
+                            step.on_error = ErrorAction::Skip;
+                        } else if do_.starts_with("fallback:") {
+                            let value = do_.strip_prefix("fallback:").unwrap_or("").to_string();
+                            step.on_error = ErrorAction::Fallback { value };
+                        }
                     }
+                    break;
                 }
-                break;
             }
         }
+        _ => {} // No catch configured
     }
 
     // Compile retry policy

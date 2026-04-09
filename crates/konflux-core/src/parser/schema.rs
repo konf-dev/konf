@@ -50,7 +50,7 @@ pub struct NodeSchema {
     pub then: Option<ThenBlock>,
 
     #[serde(default)]
-    pub catch: Vec<CatchBranchSchema>,
+    pub catch: CatchBlock,
 
     #[serde(default)]
     pub retry: Option<RetryConfigSchema>,
@@ -119,9 +119,49 @@ pub struct ThenBranchSchema {
     pub else_: Option<bool>,
 }
 
+/// Error handling: simple target node OR array of conditional branches.
+///
+/// # YAML formats
+///
+/// ```yaml
+/// # Simple: jump to a node on any error
+/// catch: fallback_node
+///
+/// # Branches: conditional error handling
+/// catch:
+///   - when: "true"
+///     then: recovery_node
+///   - do: skip          # or do: "fallback:default value"
+/// ```
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum CatchBlock {
+    /// Simple string — jump to this node on any error.
+    Simple(String),
+    /// Array of catch branches with conditions.
+    Branches(Vec<CatchBranchSchema>),
+}
+
+impl Default for CatchBlock {
+    fn default() -> Self {
+        Self::Branches(Vec::new())
+    }
+}
+
+impl CatchBlock {
+    /// Returns true if no catch handling is configured.
+    pub fn is_empty(&self) -> bool {
+        match self {
+            CatchBlock::Simple(_) => false,
+            CatchBlock::Branches(v) => v.is_empty(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CatchBranchSchema {
-    pub when: Option<String>,
+    /// Condition: matches if missing, or if value is `true` / `"true"`.
+    pub when: Option<serde_json::Value>,
     #[serde(rename = "do")]
     pub do_: Option<String>,
     #[serde(default)]
@@ -129,6 +169,22 @@ pub struct CatchBranchSchema {
     pub then: Option<String>,
     #[serde(rename = "else")]
     pub else_: Option<bool>,
+}
+
+impl CatchBranchSchema {
+    /// Check if this branch's `when` condition is satisfied.
+    /// A branch matches if: `when` is absent, or is `true` (bool), or is `"true"` (string).
+    pub fn is_match(&self) -> bool {
+        if self.else_.unwrap_or(false) {
+            return true;
+        }
+        match &self.when {
+            None => true,
+            Some(serde_json::Value::Bool(b)) => *b,
+            Some(serde_json::Value::String(s)) => s == "true",
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

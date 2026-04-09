@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::error::ValidationError;
-use crate::parser::schema::{WorkflowSchema, NodeSchema, DoBlock, ThenBlock, PipeStepSchema};
+use crate::parser::schema::{WorkflowSchema, NodeSchema, DoBlock, ThenBlock, PipeStepSchema, CatchBlock};
 
 /// Validate a parsed workflow schema.
 pub fn validate(schema: &WorkflowSchema) -> Result<(), ValidationError> {
@@ -111,17 +111,28 @@ impl<'a> Validator<'a> {
         }
 
         // Validate catch targets
-        for branch in &node.catch {
-            if let Some(target) = branch.then.as_ref().filter(|t| !self.node_names.contains(*t)) {
-                return Err(ValidationError::UnknownNode {
-                    node: target.clone(),
-                    from: name.to_string(),
-                });
+        match &node.catch {
+            CatchBlock::Simple(target) => {
+                if !self.node_names.contains(target) {
+                    return Err(ValidationError::UnknownNode {
+                        node: target.clone(),
+                        from: name.to_string(),
+                    });
+                }
             }
-            if let Some(do_) = &branch.do_ {
-                // do_ in catch can be a tool or "skip"
-                if do_ != "skip" && do_ != "continue" && !do_.starts_with("fallback:") {
-                    self.check_tool(do_, name)?;
+            CatchBlock::Branches(branches) => {
+                for branch in branches {
+                    if let Some(target) = branch.then.as_ref().filter(|t| !self.node_names.contains(*t)) {
+                        return Err(ValidationError::UnknownNode {
+                            node: target.clone(),
+                            from: name.to_string(),
+                        });
+                    }
+                    if let Some(do_) = &branch.do_ {
+                        if do_ != "skip" && do_ != "continue" && !do_.starts_with("fallback:") {
+                            self.check_tool(do_, name)?;
+                        }
+                    }
                 }
             }
         }
@@ -223,9 +234,16 @@ impl<'a> Validator<'a> {
             }
 
             // Successors from catch:
-            for branch in &node.catch {
-                if let Some(target) = &branch.then {
+            match &node.catch {
+                CatchBlock::Simple(target) => {
                     self.dfs(target, visited, path, reachable)?;
+                }
+                CatchBlock::Branches(branches) => {
+                    for branch in branches {
+                        if let Some(target) = &branch.then {
+                            self.dfs(target, visited, path, reachable)?;
+                        }
+                    }
                 }
             }
         }
