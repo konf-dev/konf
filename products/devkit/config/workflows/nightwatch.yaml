@@ -1,5 +1,5 @@
 workflow: nightwatch
-description: "Self-sustaining health check agent. Runs dev_status, logs results, reschedules itself."
+description: "Self-sustaining health check agent. Runs dev_status, logs results, reschedules itself. Stop by creating /tmp/nightwatch/stop sentinel file."
 register_as_tool: true
 capabilities: ["shell_exec", "template", "echo", "schedule", "workflow_dev_status"]
 input_schema:
@@ -7,9 +7,20 @@ input_schema:
   properties:
     interval_ms:
       type: integer
-      description: "Milliseconds between runs (default: 3600000 = 1 hour)"
+      description: "Milliseconds between runs (default: 3600000 = 1 hour, min: 1000)"
 nodes:
-  check:
+  check_stop:
+    do: shell_exec
+    with:
+      command: "test -f /tmp/nightwatch/stop && echo 'STOPPED' || echo 'RUNNING'"
+    then: decide
+  decide:
+    do: template
+    with:
+      template: "{{check_stop.stdout}}"
+    condition: "{{check_stop.stdout != 'STOPPED'}}"
+    then: health_check
+  health_check:
     do: workflow_dev_status
     then: log_result
     catch: log_error
@@ -18,7 +29,7 @@ nodes:
     with:
       command: |
         mkdir -p /tmp/nightwatch
-        echo "[$(date -Iseconds)] OK: {{check}}" >> /tmp/nightwatch/health.log
+        echo "[$(date -Iseconds)] OK" >> /tmp/nightwatch/health.log
         tail -20 /tmp/nightwatch/health.log
     then: reschedule
   log_error:
@@ -26,7 +37,7 @@ nodes:
     with:
       command: |
         mkdir -p /tmp/nightwatch
-        echo "[$(date -Iseconds)] ERROR: {{check}}" >> /tmp/nightwatch/health.log
+        echo "[$(date -Iseconds)] ERROR" >> /tmp/nightwatch/health.log
     then: reschedule
   reschedule:
     do: schedule

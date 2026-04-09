@@ -36,10 +36,7 @@ nodes:
   deploy:
     do: shell_exec
     with:
-      command: |
-        cat > "${KONF_CONFIG_DIR:-./config}/workflows/auto_diagnostic.yaml" << 'WORKFLOW_EOF'
-        {{analyze.content}}
-        WORKFLOW_EOF
+      command: "python3 -c \"import sys; open('${KONF_CONFIG_DIR:-./config}/workflows/auto_diagnostic.yaml', 'w').write(sys.stdin.read())\" <<< '{{analyze.content}}'"
     then: reload
   reload:
     do: config_reload
@@ -59,6 +56,5 @@ nodes:
       template: |
         Diagnosis complete.
         Test results: {{run_tests}}
-        LLM analysis: {{analyze.content}}
         Diagnostic output: {{run_diagnostic}}
     return: true
