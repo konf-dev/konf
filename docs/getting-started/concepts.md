@@ -30,13 +30,13 @@ workflow: chat
 nodes:
   search:
     do: memory_search
-    input:
-      query: "{{message}}"
+    with:
+      query: "{{input.message}}"
     then: respond
   respond:
     do: ai_complete
-    input:
-      prompt: "{{message}}"
+    with:
+      prompt: "{{input.message}}"
       context: "{{search.results}}"
     return: true
 ```

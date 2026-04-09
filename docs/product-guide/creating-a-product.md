@@ -107,20 +107,20 @@ capabilities: ["memory_search", "memory_store", "ai_complete"]
 nodes:
   search:
     do: memory_search
-    input:
-      query: "{{message}}"
+    with:
+      query: "{{input.message}}"
     then: respond
 
   respond:
     do: ai_complete
-    input:
-      prompt: "{{message}}"
+    with:
+      prompt: "{{input.message}}"
       context: "{{search.results}}"
     return: true
 ```
 
 - `do:` — the tool to invoke.
-- `input:` — arguments passed to the tool. `{{expr}}` interpolates from workflow input or prior node output.
+- `with:` — arguments passed to the tool. `{{input.expr}}` interpolates from workflow input; `{{node.field}}` references prior node output.
 - `then:` — next node(s). Omit for terminal nodes, or use `return: true`.
 - Nodes without dependencies run in parallel.
 

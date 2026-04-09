@@ -322,8 +322,8 @@ capabilities: ["ai_complete"]
 nodes:
   analyze:
     do: ai_complete
-    input:
-      prompt: "Summarize this: {{document}}"
+    with:
+      prompt: "Summarize this: {{input.document}}"
     return: true
 ```
 

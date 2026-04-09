@@ -122,7 +122,7 @@ Each server key becomes the namespace prefix. The `github` server's `create_issu
 nodes:
   list_issues:
     do: mcp:github:list_issues
-    input:
+    with:
       repo: "my-org/my-repo"
       state: "open"
     then: summarize

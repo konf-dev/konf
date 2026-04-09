@@ -250,16 +250,16 @@ capabilities: ["memory_*", "ai_complete"]
 nodes:
   search:
     do: memory_search
-    input:
-      query: "{{message}}"
+    with:
+      query: "{{input.message}}"
   respond:
     do: ai_complete
-    input:
+    with:
       messages:
         - role: system
           content: "You are a helpful assistant."
         - role: user
-          content: "{{message}}"
+          content: "{{input.message}}"
       context: "{{search.results}}"
     return: true
 ```

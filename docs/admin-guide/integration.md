@@ -118,9 +118,9 @@ Call any API directly from workflow YAML:
 nodes:
   call_api:
     do: http_post
-    input:
+    with:
       url: "https://api.example.com/data"
-      body: { query: "{{message}}" }
+      body: { query: "{{input.message}}" }
 ```
 
 No tool registration needed. The `http_post` tool is already registered.

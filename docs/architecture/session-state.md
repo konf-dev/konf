@@ -73,18 +73,18 @@ Primary key: `(namespace, session_id, key)`.
 nodes:
   save_plan:
     do: state_set
-    input:
+    with:
       key: "plan"
       value: { steps: ["step1", "step2"] }
-      session_id: "{{session_id}}"
+      session_id: "{{input.session_id}}"
       ttl_seconds: 3600
 
   save_prefs:
     do: state_set
-    input:
+    with:
       key: "preferences"
       value: { format: "markdown" }
-      session_id: "{{session_id}}"
+      session_id: "{{input.session_id}}"
       # No ttl_seconds — lives until state_clear
 ```
 

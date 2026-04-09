@@ -72,7 +72,7 @@ mcp_servers:
 
 - `tools.*` — built-in tool configuration. Omit a key to disable that tool family.
 - `mcp_servers.*` — external MCP server definitions. See [tools-reference.md](tools-reference.md).
-- Environment variable interpolation uses `${VAR:-default}` syntax.
+- **Note:** Product config files (`tools.yaml`, `models.yaml`) use literal values. Environment variable interpolation (`${VAR:-default}`) is not yet implemented for product configs — only `konf.toml` supports env var overrides via the `KONF_` prefix.
 
 ## models.yaml
 
@@ -120,14 +120,14 @@ capabilities: ["memory_search", "memory_store", "ai_complete"]
 nodes:
   search:
     do: memory_search
-    input:
-      query: "{{message}}"
+    with:
+      query: "{{input.message}}"
     then: respond
 
   respond:
     do: ai_complete
-    input:
-      prompt: "{{message}}"
+    with:
+      prompt: "{{input.message}}"
       context: "{{search.results}}"
     return: true
 ```
@@ -135,8 +135,8 @@ nodes:
 | Node field | Required | Description |
 |------------|----------|-------------|
 | `do` | yes | Tool to invoke |
-| `input` | yes | Arguments (supports `{{expr}}` interpolation) |
-| `then` | no | Next node(s) — string or list |
+| `with` | no | Arguments — supports static values and `{{expr}}` templates |
+| `then` | no | Next node(s) — string or `[a, b]` for parallel fan-out |
 | `return` | no | `true` marks this node's output as the workflow result |
 
-Nodes without inbound edges execute immediately. Parallel branches are resolved concurrently by the engine.
+The first node in the YAML is the entry node. All other nodes must be reachable via `then:` edges. Parallel branches are resolved concurrently by the engine.

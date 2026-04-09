@@ -17,7 +17,7 @@ Workflows are YAML files that define a DAG (directed acyclic graph) of tool call
 workflow: my_workflow          # Required. Unique identifier (becomes workflow ID)
 version: "1.0"                # Optional. Default: "0.1.0"
 description: "What this does" # Optional. Human-readable description
-capabilities:                  # Optional. Required capability grants for execution
+capabilities:                  # Required for register_as_tool. Capability grants.
   - "memory_search"
   - "ai_complete"
 register_as_tool: true         # Optional. Default: false. If true, registers as workflow_{id} tool
@@ -40,25 +40,27 @@ nodes:                         # Required. Map of node_id → node definition
 | `workflow` | string | Yes | — | Unique workflow identifier |
 | `version` | string | No | "0.1.0" | Semantic version |
 | `description` | string | No | — | Human-readable description |
-| `capabilities` | string[] | No | [] | Required capability grants |
+| `capabilities` | string[] | No | [] | Required capability grants (see note below) |
 | `register_as_tool` | bool | No | false | Register as `workflow_{id}` tool |
 | `input_schema` | JSON Schema | No | — | Input validation schema |
 | `output_schema` | JSON Schema | No | — | Output schema for downstream tools |
 | `nodes` | map | Yes | — | Node definitions (at least one required) |
 
+> **Important:** If `register_as_tool: true`, `capabilities` must be non-empty. A workflow with `capabilities: []` will fail at runtime with capability denied errors. Use `capabilities: ["*"]` to grant access to all tools, or list specific tool patterns (e.g., `["http_get", "memory_*"]`).
+
 ---
 
 ## Node Definition
+
+Each node invokes a single tool with the parameters defined in `with:`.
 
 ```yaml
 nodes:
   node_id:
     do: tool_name              # Required. Which tool to invoke
-    with:                      # Optional. Static input parameters
-      key: value
-    input:                     # Optional. Dynamic input with template expressions
-      query: "{{message}}"
-      context: "{{search.results}}"
+    with:                      # Optional. Input parameters (supports {{templates}})
+      query: "{{input.message}}"
+      limit: 10
     then: next_node            # Optional. Next node(s) on success
     catch: error_node          # Optional. Node to run on failure
     condition: "{{score > 0.5}}" # Optional. Skip if condition is false
@@ -66,16 +68,15 @@ nodes:
     retry:                     # Optional. Retry policy
       max_attempts: 3
       backoff_ms: 500
-    join: all                  # Optional. Wait for all/any/none dependencies
+    join: all                  # Optional. Wait for all/any dependencies
     timeout_ms: 30000          # Optional. Per-node timeout
 ```
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `do` | string | Yes | — | Tool name to invoke (e.g. `echo`, `memory_search`, `ai_complete`) |
-| `with` | map | No | {} | Static input parameters (not templated) |
-| `input` | map | No | {} | Dynamic input with `{{expression}}` templates |
-| `then` | string or string[] | No | — | Next node(s) on success |
+| `with` | map | No | {} | Input parameters — supports both static values and `{{template}}` expressions |
+| `then` | string or string[] | No | — | Next node(s) on success. Use `then: [a, b]` for parallel fan-out. |
 | `catch` | string | No | — | Error handler node |
 | `condition` | string | No | — | Expression that must be truthy to execute |
 | `return` | bool | No | false | If true, this node's output becomes the workflow result |
@@ -83,24 +84,77 @@ nodes:
 | `join` | "all" or "any" | No | "all" | Wait for all or any predecessor nodes |
 | `timeout_ms` | integer | No | EngineConfig default | Per-node timeout in milliseconds |
 
+> **Note:** There is no separate `input:` field. Use `with:` for all parameters — it handles both static values (`limit: 10`) and template expressions (`query: "{{input.message}}"`).
+
+---
+
+## Entry Node and DAG Structure
+
+The **first node** in the YAML `nodes:` map is the entry node. All other nodes must be reachable from it via `then:` edges. Unreachable nodes are rejected as orphans at parse time.
+
+To run nodes in parallel, use `then: [a, b]` fan-out from the entry (or any node):
+
+```yaml
+nodes:
+  start:
+    do: echo
+    with:
+      message: "Starting parallel work"
+    then: [fetch_a, fetch_b]    # Both run concurrently
+  fetch_a:
+    do: http_get
+    with:
+      url: "{{input.url_a}}"
+    then: combine
+  fetch_b:
+    do: http_get
+    with:
+      url: "{{input.url_b}}"
+    then: combine
+  combine:
+    do: template
+    with:
+      template: "A: {{fetch_a.body}}, B: {{fetch_b.body}}"
+    join: all                   # Wait for both fetch_a and fetch_b
+    return: true
+```
+
 ---
 
 ## Template Expressions
 
-Input values can reference other nodes' outputs and workflow input using `{{expression}}` syntax:
+Values in `with:` can reference workflow input and other nodes' outputs using `{{expression}}` syntax.
+
+### Reference Rules
+
+| Reference | Meaning | Example |
+|-----------|---------|---------|
+| `{{input.field}}` | Workflow input field | `{{input.message}}`, `{{input.url}}` |
+| `{{node_id.field}}` | Output field from a completed node | `{{search.results}}`, `{{fetch.body}}` |
+| `{{node_id}}` | Entire output of a completed node | `{{fetch}}` |
+| `{{node_id.a.b}}` | Nested field access | `{{response.data.items}}` |
+
+> **Important:** Workflow input is stored under the key `input`. To reference a workflow argument named `message`, use `{{input.message}}`, not `{{message}}`. Using `{{message}}` would look for a node named `message`.
+
+### Expression Types
 
 ```yaml
-input:
-  query: "{{message}}"              # From workflow input
-  context: "{{search.results}}"     # From node named "search", field "results"
-  combined: "{{a.text}} + {{b.text}}" # Multiple references
-```
+with:
+  # Static value (no template)
+  limit: 10
 
-Expressions support:
-- **Dot paths:** `{{node_id.field.nested}}` — access nested JSON fields
-- **Workflow input:** `{{field_name}}` — top-level workflow input fields
-- **Conditionals:** `{{score > 0.5}}` — boolean expressions (in `condition` field)
-- **String interpolation:** `"Hello {{name}}"` — embedded in strings
+  # Reference to workflow input
+  query: "{{input.message}}"
+
+  # Reference to another node's output
+  context: "{{search.results}}"
+
+  # String interpolation with multiple references
+  combined: "{{fetch_a.text}} + {{fetch_b.text}}"
+
+  # Conditional (used in condition: field)
+  # condition: "{{score > 0.5}}"
+```
 
 ---
 
@@ -120,14 +174,12 @@ Only applies to tools marked as `retryable` in their ToolError. Non-retryable er
 
 Nodes form a DAG via `then` edges. The engine:
 
-1. Identifies start nodes (no incoming `then` edges from other nodes)
-2. Executes start nodes concurrently
-3. When a node completes, evaluates its `then` targets
-4. If a target's `join` policy is satisfied (all/any predecessors done), executes it
+1. Starts with the entry node (first in YAML order)
+2. When a node completes, evaluates its `then` targets
+3. If a target's `join` policy is satisfied (all/any predecessors done), executes it
+4. Nodes without shared dependencies run in parallel, bounded by `EngineConfig.max_concurrent_nodes`
 5. Continues until all reachable nodes complete or an unhandled error occurs
 6. The node with `return: true` provides the workflow output
-
-**Concurrency:** Nodes without dependencies run in parallel, bounded by `EngineConfig.max_concurrent_nodes`.
 
 ---
 
@@ -142,13 +194,13 @@ capabilities: ["memory_search", "ai_complete"]
 nodes:
   search:
     do: memory_search
-    input:
-      query: "{{message}}"
+    with:
+      query: "{{input.message}}"
     then: respond
   respond:
     do: ai_complete
-    input:
-      prompt: "{{message}}"
+    with:
+      prompt: "{{input.message}}"
       context: "{{search.results}}"
     return: true
 ```
@@ -157,20 +209,27 @@ nodes:
 
 ```yaml
 workflow: parallel_search
+capabilities: ["http_get", "memory_search", "template"]
 nodes:
+  start:
+    do: echo
+    with:
+      message: "Searching..."
+    then: [web, memory]
   web:
     do: http_get
-    input:
-      url: "https://api.example.com/search?q={{query}}"
+    with:
+      url: "https://api.example.com/search?q={{input.query}}"
+    then: combine
   memory:
     do: memory_search
-    input:
-      query: "{{query}}"
+    with:
+      query: "{{input.query}}"
+    then: combine
   combine:
     do: template
     with:
       template: "Web: {{web.body}}\nMemory: {{memory.results}}"
-      vars: {}
     join: all
     return: true
 ```
@@ -179,11 +238,12 @@ nodes:
 
 ```yaml
 workflow: safe_fetch
+capabilities: ["http_get", "echo"]
 nodes:
   fetch:
     do: http_get
-    input:
-      url: "{{url}}"
+    with:
+      url: "{{input.url}}"
     then: process
     catch: fallback
     retry:
@@ -191,7 +251,7 @@ nodes:
       backoff_ms: 1000
   process:
     do: echo
-    input:
+    with:
       data: "{{fetch.body}}"
     return: true
   fallback:
@@ -201,7 +261,7 @@ nodes:
     return: true
 ```
 
-### Registered as Tool
+### Registered as Tool (Workflow Composition)
 
 ```yaml
 workflow: summarize
@@ -217,12 +277,22 @@ input_schema:
 nodes:
   analyze:
     do: ai_complete
-    input:
-      prompt: "Extract {{max_points}} key points from: {{document}}"
+    with:
+      prompt: "Extract {{input.max_points}} key points from: {{input.document}}"
     return: true
 ```
 
-Other workflows can call this as `workflow_summarize`.
+Other workflows can call this as `workflow_summarize`:
+
+```yaml
+nodes:
+  get_summary:
+    do: workflow_summarize
+    with:
+      document: "{{input.text}}"
+      max_points: 3
+    return: true
+```
 
 ---
 

@@ -60,7 +60,7 @@ Postgres tables enforce namespace isolation via RLS policies. Even if applicatio
 
 - Database URLs are redacted in all log output (the `DatabaseConfig` Debug impl replaces `url` with `[REDACTED]`).
 - Secrets are loaded from environment variables, never from checked-in config.
-- `tools.yaml` supports `${VAR:-default}` interpolation for secrets.
+- `konf.toml` supports env var overrides via the `KONF_` prefix (e.g., `KONF_DATABASE__URL`). Product configs (`tools.yaml`, `models.yaml`) use literal values — env var interpolation is not yet implemented for product config files.
 
 ## Further Reading
 
