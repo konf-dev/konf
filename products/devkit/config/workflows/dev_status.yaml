@@ -1,0 +1,13 @@
+workflow: dev_status
+description: "Check git status and branch info across all repos in konf-dev-stack"
+register_as_tool: true
+capabilities: ["*"]
+input_schema:
+  type: object
+  properties: {}
+nodes:
+  check:
+    do: shell_exec
+    with:
+      command: "cd /home/bert/Work/orgs/konf-dev-stack && echo '=== konf ===' && git -C konf branch --show-current && git -C konf log --oneline -1 && git -C konf status --short | head -10 && echo && echo '=== konf-experiments ===' && git -C konf-experiments branch --show-current && git -C konf-experiments log --oneline -1 && git -C konf-experiments status --short | head -10 && echo && echo '=== smrti ===' && git -C smrti branch --show-current && git -C smrti log --oneline -1 && git -C smrti status --short | head -10 && echo && echo '=== root ===' && git branch --show-current && git log --oneline -1 && git status --short | head -10"
+    return: true

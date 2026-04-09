@@ -1,0 +1,29 @@
+workflow: run_tests
+description: "Run cargo test across konf and smrti workspaces, report results"
+register_as_tool: true
+capabilities: ["*"]
+input_schema:
+  type: object
+  properties:
+    workspace:
+      type: string
+      description: "Which workspace to test: 'konf', 'smrti', or 'all' (default: all)"
+  required: []
+nodes:
+  test_konf:
+    do: shell_exec
+    with:
+      command: "cd /home/bert/Work/orgs/konf-dev-stack/konf && cargo test --workspace 2>&1 | grep -E 'test result|error\\[|FAILED' | head -30"
+    then: [test_smrti, report]
+  test_smrti:
+    do: shell_exec
+    with:
+      command: "cd /home/bert/Work/orgs/konf-dev-stack/smrti && cargo test --workspace 2>&1 | grep -E 'test result|error\\[|FAILED' | head -30"
+    then: report
+  report:
+    do: template
+    with:
+      template: "# Test Results\n\n## konf\n{{test_konf.stdout}}\n\n## smrti\n{{test_smrti.stdout}}"
+    join:
+      wait_for: [test_konf, test_smrti]
+    return: true

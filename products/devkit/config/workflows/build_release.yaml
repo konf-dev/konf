@@ -1,0 +1,27 @@
+workflow: build_release
+description: "Build konf-mcp release binary and report size"
+register_as_tool: true
+capabilities: ["*"]
+input_schema:
+  type: object
+  properties:
+    binary:
+      type: string
+      description: "Which binary to build (default: konf-mcp)"
+  required: []
+nodes:
+  build:
+    do: shell_exec
+    with:
+      command: "cd /home/bert/Work/orgs/konf-dev-stack/konf && cargo build --release --bin konf-mcp 2>&1 | tail -3"
+    then: size
+  size:
+    do: shell_exec
+    with:
+      command: "ls -lh /home/bert/Work/orgs/konf-dev-stack/konf/target/release/konf-mcp | awk '{print $5, $9}'"
+    then: report
+  report:
+    do: template
+    with:
+      template: "# Build Result\n\n{{build.stdout}}\n\nBinary: {{size.stdout}}"
+    return: true

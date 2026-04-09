@@ -108,25 +108,36 @@ impl Tool for ShellExecTool {
             "shell_exec invoked"
         );
 
-        let child = tokio::process::Command::new("docker")
-            .args([
-                "exec",
-                "-u",
-                "konf-agent",
-                "-w",
-                "/workspace",
-                &self.container_name,
-                "bash",
-                "-c",
-                command,
-            ])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| ToolError::ExecutionFailed {
-                message: format!("failed to spawn docker exec: {e}"),
-                retryable: false,
-            })?;
+        // When container is "host", run directly on the host (no Docker).
+        // This is used by trusted products like devkit that need host access.
+        // Untrusted products use a Docker container for isolation.
+        let child = if self.container_name == "host" {
+            tokio::process::Command::new("bash")
+                .args(["-c", command])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+        } else {
+            tokio::process::Command::new("docker")
+                .args([
+                    "exec",
+                    "-u",
+                    "konf-agent",
+                    "-w",
+                    "/workspace",
+                    &self.container_name,
+                    "bash",
+                    "-c",
+                    command,
+                ])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+        }
+        .map_err(|e| ToolError::ExecutionFailed {
+            message: format!("failed to spawn shell command: {e}"),
+            retryable: false,
+        })?;
 
         let timeout_duration = std::time::Duration::from_millis(timeout_ms);
         let output = tokio::time::timeout(timeout_duration, child.wait_with_output())

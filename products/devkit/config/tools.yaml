@@ -1,0 +1,7 @@
+tools:
+  llm:
+    provider: openai
+    model: "${KONF_MODEL:-qwen3:8b}"
+  shell:
+    container: "host"
+    timeout_ms: 120000
