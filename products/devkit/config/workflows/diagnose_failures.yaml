@@ -1,0 +1,64 @@
+workflow: diagnose_failures
+description: "Self-deployment test: run tests, analyze failures with LLM, generate and deploy a diagnostic workflow."
+register_as_tool: true
+capabilities: ["shell_exec", "ai_complete", "yaml_validate_workflow", "config_reload", "workflow_run_tests", "template"]
+nodes:
+  run_tests:
+    do: workflow_run_tests
+    then: analyze
+    catch: analyze
+  analyze:
+    do: ai_complete
+    with:
+      prompt: |
+        You are a diagnostic workflow generator for the Konf platform.
+
+        Test results:
+        {{run_tests}}
+
+        Generate a workflow YAML that investigates the failures.
+        The workflow MUST:
+        - Have workflow id: auto_diagnostic
+        - Use register_as_tool: true
+        - Only use capabilities: ["shell_exec", "template", "echo"]
+        - Have concrete shell commands that inspect logs, check processes, verify configs
+        - Return a structured diagnostic report
+
+        Output ONLY the raw YAML, no markdown fences.
+      model: "${KONF_MODEL:-qwen3:8b}"
+    then: validate
+  validate:
+    do: yaml_validate_workflow
+    with:
+      yaml: "{{analyze.content}}"
+    then: deploy
+    catch: report_invalid
+  deploy:
+    do: shell_exec
+    with:
+      command: |
+        cat > "${KONF_CONFIG_DIR:-./config}/workflows/auto_diagnostic.yaml" << 'WORKFLOW_EOF'
+        {{analyze.content}}
+        WORKFLOW_EOF
+    then: reload
+  reload:
+    do: config_reload
+    then: run_diagnostic
+  run_diagnostic:
+    do: workflow_auto_diagnostic
+    then: done
+    catch: done
+  report_invalid:
+    do: echo
+    with:
+      message: "Generated workflow failed validation: {{validate}}"
+    return: true
+  done:
+    do: template
+    with:
+      template: |
+        Diagnosis complete.
+        Test results: {{run_tests}}
+        LLM analysis: {{analyze.content}}
+        Diagnostic output: {{run_diagnostic}}
+    return: true

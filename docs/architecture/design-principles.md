@@ -209,3 +209,65 @@ If it happens in the system, it's in the journal. If it's in the journal, it's q
 - Platform operator: sees everything (admin API, event journal, runtime metrics)
 
 No silent failures. No invisible state. If you can't observe it, you can't trust it.
+
+---
+
+## 11. The kernel does nothing a workflow can do
+
+Principle 1 says Rust = mechanisms, workflows = policies. This principle is stronger: **prove you need Rust before writing it.** The default answer is "no, it's a workflow."
+
+**The test:** "Is this impossible to express as a workflow using existing tools?" If `shell_exec` + `ai_complete` + filesystem can do it, it's a workflow. No exceptions.
+
+**What is NOT Rust:**
+- Scheduling (system cron via `shell_exec`, file-based state, LLM-managed)
+- Config management (LLM reads/writes YAML files)
+- Monitoring dashboards (workflow reads metrics, formats output)
+- Error escalation (workflow catches errors, decides response)
+- Boot-time setup (a workflow that runs at startup)
+
+**What IS Rust (the only valid reasons):**
+- Security boundaries (capability enforcement, namespace injection — cannot be in userspace)
+- Performance-critical hot paths (tool dispatch, DAG execution — every call, microseconds matter)
+- Shared mutable state primitives (process table, metrics — need atomics/locks)
+- Protocol handling (MCP wire format, SSE streaming — must be correct, not "usually correct")
+
+**The timer exception:** A non-blocking "run this workflow after a delay" is the one primitive that cannot be expressed as a workflow (a sleeping workflow blocks a node). This is the `timer_create` syscall equivalent — minimal kernel support for userspace scheduling.
+
+---
+
+## 12. Prompts are runtime-tweakable code
+
+Where traditional systems use schemas, rules engines, or configuration DSLs, prefer prompts + LLM + filesystem.
+
+An LLM maintaining a file structure is a "database" that:
+- Needs no schema migrations
+- Is tweakable at runtime via prompt overrides
+- Handles edge cases through reasoning, not more rules
+- Self-documents (the LLM can explain its own decisions)
+
+The trade-off: marginally less precision than rigid schemas. The gain: radical flexibility, composability, and zero compiled code.
+
+**Use rigid schemas only for:** security boundaries, performance-critical paths, and data that must be bit-exact (cryptographic operations, financial ledgers).
+
+**Use prompts for:** state management, decision making, classification, formatting, routing, scheduling logic, error diagnosis. These are all judgment calls — and judgment is what LLMs do.
+
+---
+
+## 13. Thin onion layers, each independently useful
+
+The system is an onion:
+
+```
+Layer 0: Kernel     — konflux engine + konf-runtime (DAG execution, capabilities, limits)
+Layer 1: Shell      — builtin tools (echo, template, shell_exec, ai_complete, http_get, schedule)
+Layer 2: Userspace  — workflows that compose tools into behaviors
+Layer 3: Products   — directories of YAML that wire workflows into applications
+Layer 4: Users      — runtime prompt overrides, user-generated workflows
+```
+
+Each layer is independently forkable, composable, and replaceable:
+- A scheduling workflow doesn't know it's inside the devkit product
+- The devkit product doesn't know its scheduling uses cron vs file-based vs manual
+- Others can borrow any layer, fork it, compose differently
+
+Like Linux distributions: they share a kernel but differ in userspace. Konf products share an engine but differ in workflows and prompts.

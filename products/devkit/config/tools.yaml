@@ -5,3 +5,46 @@ tools:
   shell:
     container: "host"
     timeout_ms: 120000
+  mcp_servers:
+    mcp_servers:
+      - name: github
+        transport: stdio
+        command: docker
+        args:
+          - run
+          - --rm
+          - -i
+          - -e
+          - GITHUB_PERSONAL_ACCESS_TOKEN
+          - ghcr.io/github/github-mcp-server
+          - stdio
+          - --toolsets
+          - repos,pull_requests,git
+        env:
+          GITHUB_PERSONAL_ACCESS_TOKEN: "${KONF_GITHUB_TOKEN}"
+
+# Tool guards for autonomous execution (Experiment 004)
+tool_guards:
+  shell_exec:
+    rules:
+      - action: deny
+        predicate:
+          type: contains
+          path: command
+          value: "sudo"
+        message: "sudo blocked in autonomous mode"
+      - action: deny
+        predicate:
+          type: matches
+          path: command
+          pattern: "rm -rf /*"
+        message: "destructive rm on root paths blocked"
+    default: allow
+
+# Role definitions for scoped execution
+roles:
+  admin:
+    capabilities: ["*"]
+  agent:
+    capabilities: ["shell_exec", "template", "echo", "log", "schedule", "config_reload", "ai_complete", "yaml_validate_workflow", "workflow_*"]
+    namespace_suffix: "nightwatch"

@@ -9,6 +9,7 @@
 #![warn(missing_docs)]
 
 pub mod config;
+mod schedule;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -154,6 +155,11 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     runtime.engine().register_tool(Arc::new(ConfigReloadTool::new(
         runtime.clone(),
         config_dir.to_path_buf(),
+    )));
+
+    // 9c. Register schedule tool (timer primitive for autonomous agents).
+    runtime.engine().register_tool(Arc::new(schedule::ScheduleTool::new(
+        runtime.clone(),
     )));
 
     // 10. Register workflows as tools (needs runtime for WorkflowTool)
