@@ -131,11 +131,14 @@ pub enum Rule {
 }
 
 /// Default behavior when no rule matches.
+///
+/// Defaults to `Deny` (fail-closed). Operators must explicitly set `default: allow`
+/// if they want permissive behavior.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DefaultAction {
-    #[default]
     Allow,
+    #[default]
     Deny,
 }
 

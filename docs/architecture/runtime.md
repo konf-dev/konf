@@ -455,7 +455,7 @@ tool_guards:
 Rules are evaluated in order. First match wins:
 - **deny** → returns `ToolError::CapabilityDenied` with the message
 - **allow** → delegates to the inner tool immediately (skips remaining rules)
-- **no match** → `default` action applies (`allow` or `deny`)
+- **no match** → `default` action applies (defaults to `deny` — fail-closed)
 
 ### Predicate Types
 

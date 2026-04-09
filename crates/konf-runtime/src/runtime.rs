@@ -107,82 +107,19 @@ impl Runtime {
         *lock = guards;
     }
 
-    /// Parse a YAML workflow.
-    pub fn parse_yaml(&self, yaml: &str) -> Result<Workflow, RuntimeError> {
-        self.engine.parse_yaml(yaml).map_err(RuntimeError::Engine)
-    }
-
-    // ---- Execution ----
-
-    /// Start a workflow execution. Returns RunId immediately.
-    pub async fn start(
-        &self,
-        workflow: &Workflow,
-        input: Value,
-        scope: ExecutionScope,
-        session_id: String,
-    ) -> Result<RunId, RuntimeError> {
-        info!(
-            workflow_id = %workflow.id,
-            namespace = %scope.namespace,
-            actor_id = %scope.actor.id,
-            "runtime.start"
-        );
-
-        // Validate resource limits
-        scope.validate_start(&self.table)?;
-
-        let run_id = RunId::new_v4();
-        debug!(run_id = %run_id, "workflow run created");
-        let cancel_token = CancellationToken::new();
-
-        // Create the run entry
-        let run = WorkflowRun {
-            id: run_id,
-            parent_id: None,
-            workflow_id: workflow.id.to_string(),
-            namespace: scope.namespace.clone(),
-            actor: scope.actor.clone(),
-            capabilities: scope.capability_patterns(),
-            metadata: HashMap::new(),
-            started_at: Utc::now(),
-            status: std::sync::Mutex::new(RunStatus::Running),
-            completed_at: std::sync::Mutex::new(None),
-            active_nodes: std::sync::Mutex::new(Vec::new()),
-            steps_executed: 0.into(),
-            cancel_token: cancel_token.clone(),
-        };
-
-        self.table.insert(run);
-
-        // Journal: workflow started (if journal is available)
-        if let Some(ref journal) = self.journal {
-        if let Err(e) = journal.append(JournalEntry {
-            run_id,
-            session_id: session_id.clone(),
-            namespace: scope.namespace.clone(),
-            event_type: "workflow_started".into(),
-            payload: serde_json::json!({
-                "workflow_id": workflow.id.to_string(),
-                "namespace": &scope.namespace,
-                "actor_id": &scope.actor.id,
-                "actor_role": &scope.actor.role,
-            }),
-        }).await {
-            warn!(error = %e, run_id = %run_id, "Failed to journal workflow_started event");
-        }
-        }
-
-        // Configure engine from scope limits
+    /// Build a scoped engine with only granted tools, applying VirtualizedTool
+    /// (namespace injection) and GuardedTool (deny/allow rules) wrapping.
+    ///
+    /// Used by both `start` and `start_streaming` to ensure identical security
+    /// behavior regardless of execution path.
+    fn build_scoped_engine(&self, scope: &ExecutionScope) -> Engine {
         let engine_config = EngineConfig {
             max_steps: scope.limits.max_steps,
             max_workflow_timeout_ms: scope.limits.max_workflow_timeout_ms,
             ..self.engine.config().clone()
         };
 
-        // Wrap tools with namespace injection
         let engine = Engine::with_config(engine_config);
-        let capability_patterns = scope.capability_patterns();
 
         // Copy only granted tools, wrapping with VirtualizedTool and GuardedTool.
         //
@@ -255,6 +192,79 @@ impl Runtime {
                 }
             }
         }
+
+        engine
+    }
+
+    /// Parse a YAML workflow.
+    pub fn parse_yaml(&self, yaml: &str) -> Result<Workflow, RuntimeError> {
+        self.engine.parse_yaml(yaml).map_err(RuntimeError::Engine)
+    }
+
+    // ---- Execution ----
+
+    /// Start a workflow execution. Returns RunId immediately.
+    pub async fn start(
+        &self,
+        workflow: &Workflow,
+        input: Value,
+        scope: ExecutionScope,
+        session_id: String,
+    ) -> Result<RunId, RuntimeError> {
+        info!(
+            workflow_id = %workflow.id,
+            namespace = %scope.namespace,
+            actor_id = %scope.actor.id,
+            "runtime.start"
+        );
+
+        // Validate resource limits
+        scope.validate_start(&self.table)?;
+
+        let run_id = RunId::new_v4();
+        debug!(run_id = %run_id, "workflow run created");
+        let cancel_token = CancellationToken::new();
+
+        // Create the run entry
+        let run = WorkflowRun {
+            id: run_id,
+            parent_id: None,
+            workflow_id: workflow.id.to_string(),
+            namespace: scope.namespace.clone(),
+            actor: scope.actor.clone(),
+            capabilities: scope.capability_patterns(),
+            metadata: HashMap::new(),
+            started_at: Utc::now(),
+            status: std::sync::Mutex::new(RunStatus::Running),
+            completed_at: std::sync::Mutex::new(None),
+            active_nodes: std::sync::Mutex::new(Vec::new()),
+            steps_executed: 0.into(),
+            cancel_token: cancel_token.clone(),
+        };
+
+        self.table.insert(run);
+
+        // Journal: workflow started (if journal is available)
+        if let Some(ref journal) = self.journal {
+        if let Err(e) = journal.append(JournalEntry {
+            run_id,
+            session_id: session_id.clone(),
+            namespace: scope.namespace.clone(),
+            event_type: "workflow_started".into(),
+            payload: serde_json::json!({
+                "workflow_id": workflow.id.to_string(),
+                "namespace": &scope.namespace,
+                "actor_id": &scope.actor.id,
+                "actor_role": &scope.actor.role,
+            }),
+        }).await {
+            warn!(error = %e, run_id = %run_id, "Failed to journal workflow_started event");
+        }
+        }
+
+        // Build scoped engine with VirtualizedTool + GuardedTool wrapping
+        let engine = self.build_scoped_engine(&scope);
+        let capability_patterns = scope.capability_patterns();
 
         // Create hooks for process table updates
         let hooks = Arc::new(RuntimeHooks {
@@ -460,32 +470,9 @@ impl Runtime {
             }
         }
 
-        // Build scoped engine with only granted tools
-        let engine_config = EngineConfig {
-            max_steps: scope.limits.max_steps,
-            max_workflow_timeout_ms: scope.limits.max_workflow_timeout_ms,
-            ..self.engine.config().clone()
-        };
-        let engine = Engine::with_config(engine_config);
+        // Build scoped engine with VirtualizedTool + GuardedTool wrapping
+        let engine = self.build_scoped_engine(&scope);
         let capability_patterns = scope.capability_patterns();
-
-        let source_registry = self.engine.registry();
-        for tool_info in source_registry.list() {
-            if let Some(tool) = source_registry.get(&tool_info.name) {
-                match scope.check_tool(&tool_info.name) {
-                    Ok(bindings) => {
-                        if bindings.is_empty() {
-                            engine.register_tool(tool);
-                        } else {
-                            engine.register_tool(Arc::new(VirtualizedTool::new(tool, bindings)));
-                        }
-                    }
-                    Err(_) => {
-                        debug!(tool = %tool_info.name, "Tool not granted in scope, skipping");
-                    }
-                }
-            }
-        }
 
         // Create hooks for process table updates
         let hooks = Arc::new(RuntimeHooks {

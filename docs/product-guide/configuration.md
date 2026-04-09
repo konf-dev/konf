@@ -90,7 +90,7 @@ tool_guards:
           path: "command"
           value: "sudo"
         message: "sudo is not allowed"
-    default: allow
+    default: allow  # explicit — default is deny (fail-closed)
 ```
 
 Guards are hot-reloadable via `config_reload`. See [runtime.md](../architecture/runtime.md#tool-guards) for the full reference.
