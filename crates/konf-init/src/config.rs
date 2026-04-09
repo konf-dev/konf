@@ -129,13 +129,74 @@ impl Default for ServerConfig {
     }
 }
 
-/// Product configuration — tools, workflows, prompts. Hot-reloadable.
+/// Product configuration — tools, workflows, prompts, guards. Hot-reloadable.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct ProductConfig {
     pub tools: ToolsConfig,
     pub workflows: Vec<String>,  // paths to workflow YAML files
     pub prompts: Vec<String>,    // paths to prompt template files
+    pub tool_guards: std::collections::HashMap<String, ToolGuardConfig>,
+    pub roles: std::collections::HashMap<String, RoleConfig>,
+}
+
+/// Guard configuration for a single tool. Evaluated at registry construction time.
+///
+/// # YAML example
+///
+/// ```yaml
+/// tool_guards:
+///   shell_exec:
+///     rules:
+///       - deny:
+///           predicate:
+///             contains: { path: "command", value: "sudo" }
+///           message: "sudo is not allowed"
+///       - deny:
+///           predicate:
+///             matches: { path: "command", pattern: "rm -rf*" }
+///           message: "destructive rm blocked"
+///     default: allow
+///   dangerous_tool:
+///     alias: workflow_safe_dangerous_tool
+/// ```
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ToolGuardConfig {
+    /// Ordered deny/allow rules. First match wins.
+    pub rules: Vec<konf_runtime::guard::Rule>,
+    /// Behavior when no rule matches. Default: allow.
+    pub default: konf_runtime::guard::DefaultAction,
+    /// Optional: redirect calls to this tool to a wrapper workflow instead.
+    /// The wrapper workflow must be registered as a tool (register_as_tool: true).
+    pub alias: Option<String>,
+}
+
+/// Role definition for capability scoping. Maps role name → capabilities + namespace.
+///
+/// # YAML example
+///
+/// ```yaml
+/// roles:
+///   admin:
+///     capabilities: ["*"]
+///   agent:
+///     capabilities: ["memory_*", "ai_complete", "workflow_*"]
+///     namespace_suffix: "agents"
+///   guest:
+///     capabilities: ["echo", "template"]
+///     namespace_suffix: "guest"
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+pub struct RoleConfig {
+    /// Capability patterns granted to this role.
+    pub capabilities: Vec<String>,
+    /// Optional namespace suffix appended to the product namespace.
+    #[serde(default)]
+    pub namespace_suffix: Option<String>,
+    /// Optional resource limit overrides for this role.
+    #[serde(default)]
+    pub limits: Option<konf_runtime::scope::ResourceLimits>,
 }
 
 /// Tools configuration from tools.yaml.
@@ -191,5 +252,80 @@ mod tests {
     fn test_database_is_optional() {
         let config = PlatformConfig::default();
         assert!(config.database.is_none());
+    }
+
+    #[test]
+    fn test_product_config_default_has_no_guards() {
+        let config = ProductConfig::default();
+        assert!(config.tool_guards.is_empty());
+        assert!(config.roles.is_empty());
+    }
+
+    #[test]
+    fn test_tool_guards_deserialize_from_yaml() {
+        let yaml = r#"
+tool_guards:
+  shell_exec:
+    rules:
+      - action: deny
+        predicate:
+          type: contains
+          path: "command"
+          value: "sudo"
+        message: "sudo blocked"
+      - action: deny
+        predicate:
+          type: matches
+          path: "command"
+          pattern: "rm -rf*"
+        message: "destructive rm blocked"
+    default: deny
+  echo:
+    alias: workflow_safe_echo
+"#;
+        let config: ProductConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.tool_guards.len(), 2);
+
+        let shell_guard = &config.tool_guards["shell_exec"];
+        assert_eq!(shell_guard.rules.len(), 2);
+        assert_eq!(shell_guard.default, konf_runtime::guard::DefaultAction::Deny);
+        assert!(shell_guard.alias.is_none());
+
+        let echo_guard = &config.tool_guards["echo"];
+        assert_eq!(echo_guard.alias.as_deref(), Some("workflow_safe_echo"));
+    }
+
+    #[test]
+    fn test_roles_deserialize_from_yaml() {
+        let yaml = r#"
+roles:
+  admin:
+    capabilities: ["*"]
+  agent:
+    capabilities: ["memory_*", "ai_complete"]
+    namespace_suffix: "agents"
+"#;
+        let config: ProductConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.roles.len(), 2);
+
+        let admin = &config.roles["admin"];
+        assert_eq!(admin.capabilities, vec!["*"]);
+        assert!(admin.namespace_suffix.is_none());
+
+        let agent = &config.roles["agent"];
+        assert_eq!(agent.capabilities, vec!["memory_*", "ai_complete"]);
+        assert_eq!(agent.namespace_suffix.as_deref(), Some("agents"));
+    }
+
+    #[test]
+    fn test_tool_guards_absent_defaults_to_empty() {
+        let yaml = r#"
+tools:
+  shell:
+    container: "konf-sandbox"
+"#;
+        let config: ProductConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.tool_guards.is_empty());
+        assert!(config.roles.is_empty());
     }
 }

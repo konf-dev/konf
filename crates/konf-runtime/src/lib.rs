@@ -25,6 +25,7 @@ pub mod error;
 pub mod process;
 pub mod scope;
 pub mod context;
+pub mod guard;
 pub mod hooks;
 pub mod journal;
 pub mod monitor;
@@ -33,8 +34,9 @@ pub mod workflow_tool;
 
 pub use error::{RuntimeError, RunId};
 pub use process::{WorkflowRun, RunStatus, ActiveNode, NodeStatus, ProcessTable};
-pub use scope::{ExecutionScope, CapabilityGrant, ResourceLimits, Actor};
+pub use scope::{ExecutionScope, CapabilityGrant, ResourceLimits, Actor, scope_from_role, dev_scope};
 pub use context::VirtualizedTool;
+pub use guard::{GuardedTool, Rule, Predicate, DefaultAction};
 pub use monitor::{RunSummary, RunDetail, ProcessTree, RuntimeMetrics};
 pub use runtime::Runtime;
 pub use workflow_tool::WorkflowTool;

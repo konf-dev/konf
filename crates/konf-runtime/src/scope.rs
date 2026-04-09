@@ -246,6 +246,73 @@ pub enum ActorRole {
     System,
 }
 
+/// Build an `ExecutionScope` from a role name and product context.
+///
+/// This is the shared auth resolution path used by both HTTP (axum middleware)
+/// and MCP session setup. The caller resolves their auth mechanism (JWT, API key,
+/// etc.) to a role string, then calls this function.
+///
+/// # Arguments
+///
+/// * `actor_id` — Unique identifier for the actor (e.g., user ID, bot name)
+/// * `role_name` — Role string from auth (e.g., "admin", "agent", "guest")
+/// * `product_namespace` — Base namespace for the product (e.g., "konf:unspool")
+/// * `role_capabilities` — Capability patterns for this role
+/// * `namespace_suffix` — Optional suffix appended to product namespace
+/// * `limits` — Resource limits (or default)
+pub fn scope_from_role(
+    actor_id: impl Into<String>,
+    role_name: &str,
+    product_namespace: &str,
+    role_capabilities: &[String],
+    namespace_suffix: Option<&str>,
+    limits: ResourceLimits,
+) -> ExecutionScope {
+    let actor_role = match role_name {
+        "infra_admin" => ActorRole::InfraAdmin,
+        "product_admin" | "admin" => ActorRole::ProductAdmin,
+        "user" => ActorRole::User,
+        "infra_agent" => ActorRole::InfraAgent,
+        "product_agent" | "agent" => ActorRole::ProductAgent,
+        "user_agent" => ActorRole::UserAgent,
+        "system" => ActorRole::System,
+        _ => ActorRole::User, // safe default
+    };
+
+    let namespace = match namespace_suffix {
+        Some(suffix) => format!("{product_namespace}:{suffix}"),
+        None => product_namespace.to_string(),
+    };
+
+    let capabilities = role_capabilities
+        .iter()
+        .map(|pattern| CapabilityGrant::new(pattern.clone()))
+        .collect();
+
+    ExecutionScope {
+        namespace,
+        capabilities,
+        limits,
+        actor: Actor {
+            id: actor_id.into(),
+            role: actor_role,
+        },
+        depth: 0,
+    }
+}
+
+/// Build a dev-mode `ExecutionScope` with full access. Used when no auth is configured.
+pub fn dev_scope(product_namespace: &str) -> ExecutionScope {
+    scope_from_role(
+        "dev_user",
+        "infra_admin",
+        product_namespace,
+        &["*".to_string()],
+        None,
+        ResourceLimits::default(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,5 +477,58 @@ mod tests {
 
         let role: ActorRole = serde_json::from_str("\"user_agent\"").unwrap();
         assert_eq!(role, ActorRole::UserAgent);
+    }
+
+    #[test]
+    fn test_scope_from_role_admin() {
+        let scope = scope_from_role(
+            "alice",
+            "admin",
+            "konf:myproduct",
+            &["*".to_string()],
+            None,
+            ResourceLimits::default(),
+        );
+        assert_eq!(scope.namespace, "konf:myproduct");
+        assert_eq!(scope.actor.id, "alice");
+        assert_eq!(scope.actor.role, ActorRole::ProductAdmin);
+        assert_eq!(scope.capabilities.len(), 1);
+        assert!(scope.capabilities[0].matches("anything").is_some());
+    }
+
+    #[test]
+    fn test_scope_from_role_with_suffix() {
+        let scope = scope_from_role(
+            "bot_1",
+            "agent",
+            "konf:myproduct",
+            &["memory_*".to_string(), "ai_complete".to_string()],
+            Some("agents"),
+            ResourceLimits::default(),
+        );
+        assert_eq!(scope.namespace, "konf:myproduct:agents");
+        assert_eq!(scope.actor.role, ActorRole::ProductAgent);
+        assert_eq!(scope.capabilities.len(), 2);
+    }
+
+    #[test]
+    fn test_scope_from_role_unknown_defaults_to_user() {
+        let scope = scope_from_role(
+            "unknown",
+            "some_random_role",
+            "konf:test",
+            &[],
+            None,
+            ResourceLimits::default(),
+        );
+        assert_eq!(scope.actor.role, ActorRole::User);
+    }
+
+    #[test]
+    fn test_dev_scope_has_full_access() {
+        let scope = dev_scope("konf:dev");
+        assert_eq!(scope.actor.id, "dev_user");
+        assert_eq!(scope.actor.role, ActorRole::InfraAdmin);
+        assert!(scope.capabilities[0].matches("anything").is_some());
     }
 }

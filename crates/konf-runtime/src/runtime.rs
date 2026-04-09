@@ -19,11 +19,24 @@ use konflux::Workflow;
 
 use crate::context::VirtualizedTool;
 use crate::error::{RunId, RuntimeError};
+use crate::guard::{GuardedTool, Rule, DefaultAction};
 use crate::hooks::RuntimeHooks;
 use crate::journal::{EventJournal, JournalEntry};
 use crate::monitor::{ProcessTree, RunDetail, RunSummary, RuntimeMetrics};
 use crate::process::{ProcessTable, RunStatus, WorkflowRun};
 use crate::scope::{ExecutionScope, ResourceLimits};
+
+/// Per-tool guard configuration. Stored in the runtime and applied during
+/// per-execution registry construction (same phase as VirtualizedTool wrapping).
+#[derive(Debug, Clone, Default)]
+pub struct ToolGuardEntry {
+    /// Ordered deny/allow rules.
+    pub rules: Vec<Rule>,
+    /// Behavior when no rule matches.
+    pub default_action: DefaultAction,
+    /// Optional: redirect to a wrapper workflow tool instead.
+    pub alias: Option<String>,
+}
 
 /// The workflow management runtime.
 pub struct Runtime {
@@ -32,6 +45,8 @@ pub struct Runtime {
     journal: Option<Arc<EventJournal>>,
     _default_limits: ResourceLimits,
     started_at: Instant,
+    /// Tool guards from product config, applied during registry construction.
+    tool_guards: std::sync::RwLock<HashMap<String, ToolGuardEntry>>,
     // Counters for metrics (Arc-wrapped for sharing with spawned tasks)
     total_completed: Arc<std::sync::atomic::AtomicU64>,
     total_failed: Arc<std::sync::atomic::AtomicU64>,
@@ -73,6 +88,7 @@ impl Runtime {
             journal,
             _default_limits: default_limits,
             started_at: Instant::now(),
+            tool_guards: std::sync::RwLock::new(HashMap::new()),
             total_completed: Arc::new(0.into()),
             total_failed: Arc::new(0.into()),
             total_cancelled: Arc::new(0.into()),
@@ -82,6 +98,13 @@ impl Runtime {
     /// Access the engine for tool registration.
     pub fn engine(&self) -> &Engine {
         &self.engine
+    }
+
+    /// Set tool guards from product config. Replaces all existing guards.
+    /// Called at boot and on config_reload.
+    pub fn set_tool_guards(&self, guards: HashMap<String, ToolGuardEntry>) {
+        let mut lock = self.tool_guards.write().expect("tool_guards lock poisoned");
+        *lock = guards;
     }
 
     /// Parse a YAML workflow.
@@ -161,20 +184,73 @@ impl Runtime {
         let engine = Engine::with_config(engine_config);
         let capability_patterns = scope.capability_patterns();
 
-        // Copy only granted tools, wrapping with VirtualizedTool where bindings exist
+        // Copy only granted tools, wrapping with VirtualizedTool and GuardedTool.
+        //
+        // Wrapping order (outermost evaluated first):
+        //   GuardedTool → VirtualizedTool → inner tool
+        //
+        // Guards check raw LLM input, then VirtualizedTool injects bindings.
         let source_registry = self.engine.registry();
+        let guards = self.tool_guards.read().expect("tool_guards lock poisoned");
         for tool_info in source_registry.list() {
-            if let Some(tool) = source_registry.get(&tool_info.name) {
-                match scope.check_tool(&tool_info.name) {
+            let tool_name = &tool_info.name;
+
+            // Check if this tool has an alias (redirect to wrapper workflow).
+            // The alias is still gated by the scope's capabilities — if the
+            // scope doesn't grant the original tool name, the alias is skipped too.
+            if let Some(guard_entry) = guards.get(tool_name) {
+                if let Some(ref alias) = guard_entry.alias {
+                    if scope.check_tool(tool_name).is_err() {
+                        debug!(tool = %tool_name, "Aliased tool not granted in scope, skipping");
+                        continue;
+                    }
+                    if let Some(alias_tool) = source_registry.get(alias) {
+                        debug!(tool = %tool_name, alias = %alias, "Tool aliased to wrapper");
+                        engine.register_tool(alias_tool);
+                        continue;
+                    } else {
+                        warn!(
+                            tool = %tool_name, alias = %alias,
+                            "Tool guard alias not found in registry, falling back to original"
+                        );
+                    }
+                }
+            }
+
+            if let Some(tool) = source_registry.get(tool_name) {
+                match scope.check_tool(tool_name) {
                     Ok(bindings) => {
-                        if bindings.is_empty() {
-                            engine.register_tool(tool);
+                        // Layer 1: VirtualizedTool (namespace injection)
+                        let wrapped: Arc<dyn konflux::tool::Tool> = if bindings.is_empty() {
+                            tool
                         } else {
-                            engine.register_tool(Arc::new(VirtualizedTool::new(tool, bindings)));
-                        }
+                            Arc::new(VirtualizedTool::new(tool, bindings))
+                        };
+
+                        // Layer 2: GuardedTool (deny/allow rules from config)
+                        let wrapped = if let Some(guard_entry) = guards.get(tool_name) {
+                            if guard_entry.rules.is_empty() {
+                                wrapped
+                            } else {
+                                debug!(
+                                    tool = %tool_name,
+                                    rule_count = guard_entry.rules.len(),
+                                    "Applying tool guards"
+                                );
+                                Arc::new(GuardedTool::new(
+                                    wrapped,
+                                    guard_entry.rules.clone(),
+                                    guard_entry.default_action,
+                                ))
+                            }
+                        } else {
+                            wrapped
+                        };
+
+                        engine.register_tool(wrapped);
                     }
                     Err(_) => {
-                        debug!(tool = %tool_info.name, "Tool not granted in scope, skipping");
+                        debug!(tool = %tool_name, "Tool not granted in scope, skipping");
                     }
                 }
             }

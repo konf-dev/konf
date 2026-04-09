@@ -72,7 +72,28 @@ mcp_servers:
 
 - `tools.*` — built-in tool configuration. Omit a key to disable that tool family.
 - `mcp_servers.*` — external MCP server definitions. See [tools-reference.md](tools-reference.md).
-- **Note:** Product config files (`tools.yaml`, `models.yaml`) use literal values. Environment variable interpolation (`${VAR:-default}`) is not yet implemented for product configs — only `konf.toml` supports env var overrides via the `KONF_` prefix.
+- **Environment variables:** `tools.yaml` supports `${VAR}` and `${VAR:-default}` interpolation. Missing variables without a default resolve to an empty string. `konf.toml` also supports env var overrides via the `KONF_` prefix.
+- `tool_guards.*` — deny/allow rules per tool. See below.
+- `roles.*` — role → capability mapping for auth scoping. See [runtime.md](../architecture/runtime.md#auth-scoping).
+
+### Tool Guards
+
+Define deny/allow rules that are evaluated before every tool invocation:
+
+```yaml
+tool_guards:
+  shell_exec:
+    rules:
+      - action: deny
+        predicate:
+          type: contains
+          path: "command"
+          value: "sudo"
+        message: "sudo is not allowed"
+    default: allow
+```
+
+Guards are hot-reloadable via `config_reload`. See [runtime.md](../architecture/runtime.md#tool-guards) for the full reference.
 
 ## models.yaml
 

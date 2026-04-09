@@ -36,12 +36,35 @@ type ServerInfo = rmcp::model::InitializeResult;
 pub struct KonfMcpServer {
     engine: Arc<Engine>,
     runtime: Arc<Runtime>,
+    /// Capability patterns for this MCP session. Controls which tools are visible
+    /// and what capabilities tool calls receive. Default: `["*"]` (dev mode).
+    session_capabilities: Vec<String>,
 }
 
 impl KonfMcpServer {
     /// Create a new MCP server backed by the given engine and runtime.
+    /// Defaults to full access (dev mode). Use `with_capabilities` for scoped sessions.
     pub fn new(engine: Arc<Engine>, runtime: Arc<Runtime>) -> Self {
-        Self { engine, runtime }
+        Self {
+            engine,
+            runtime,
+            session_capabilities: vec!["*".into()],
+        }
+    }
+
+    /// Create a scoped MCP server with specific capability patterns.
+    /// Tools not matching the patterns are hidden from `list_tools` and
+    /// denied on `call_tool`.
+    pub fn with_capabilities(
+        engine: Arc<Engine>,
+        runtime: Arc<Runtime>,
+        capabilities: Vec<String>,
+    ) -> Self {
+        Self {
+            engine,
+            runtime,
+            session_capabilities: capabilities,
+        }
     }
 
     /// Serve MCP over stdio (for CLI / Claude Desktop integration).
@@ -93,18 +116,20 @@ fn tool_info_to_mcp(info: &ToolInfo) -> McpTool {
     )
 }
 
-/// Build a ToolContext for an MCP tool call.
-fn mcp_tool_context(_tool_name: &str) -> konflux::tool::ToolContext {
-    // TODO: Replace with per-session capability grants when MCP auth is implemented.
-    // For now, MCP clients get infra-level access (all capabilities).
-    // This is acceptable for the architect use case (trusted, single-user)
-    // but must be scoped before multi-tenant MCP access.
+/// Build a ToolContext for an MCP tool call using session capabilities.
+fn mcp_tool_context(capabilities: &[String]) -> konflux::tool::ToolContext {
     konflux::tool::ToolContext {
-        capabilities: vec!["*".into()],
+        capabilities: capabilities.to_vec(),
         workflow_id: "mcp".into(),
         node_id: "mcp_call".into(),
         metadata: std::collections::HashMap::new(),
     }
+}
+
+/// Check if a tool name matches session capability patterns.
+/// Delegates to the engine's authoritative capability matching to avoid divergence.
+fn tool_allowed_by_session(tool_name: &str, capabilities: &[String]) -> bool {
+    konflux::capability::check_tool_access(tool_name, capabilities).is_ok()
 }
 
 impl ServerHandler for KonfMcpServer {
@@ -128,6 +153,7 @@ impl ServerHandler for KonfMcpServer {
         let registry = self.engine.registry();
         let tools: Vec<McpTool> = registry.list()
             .iter()
+            .filter(|info| tool_allowed_by_session(&info.name, &self.session_capabilities))
             .map(tool_info_to_mcp)
             .collect();
 
@@ -158,7 +184,15 @@ impl ServerHandler for KonfMcpServer {
             None => serde_json::Value::Object(serde_json::Map::new()),
         };
 
-        let ctx = mcp_tool_context(tool_name);
+        // Check session capabilities before invoking
+        if !tool_allowed_by_session(tool_name, &self.session_capabilities) {
+            return Err(ErrorData::invalid_params(
+                format!("Tool not permitted in this session: {tool_name}"),
+                None,
+            ));
+        }
+
+        let ctx = mcp_tool_context(&self.session_capabilities);
 
         match tool.invoke(input, &ctx).await {
             Ok(output) => {

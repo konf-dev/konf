@@ -404,3 +404,110 @@ metrics = runtime.metrics()
 # Control
 await runtime.cancel(run_id, "user requested")
 ```
+
+---
+
+## Tool Guards
+
+Tool guards are configurable deny/allow rules evaluated before tool invocation. They follow the same decorator pattern as `VirtualizedTool` — wrapping tools transparently at registry construction time.
+
+### Wrapping Order
+
+```text
+GuardedTool(              ← rules checked on raw LLM input
+  VirtualizedTool(        ← namespace/bindings injected
+    inner_tool            ← actual execution
+  )
+)
+```
+
+Rules evaluate **before** namespace injection. This means guards operate on what the LLM actually sent, not the post-injection input.
+
+### Configuration
+
+Guards are defined in `tools.yaml` under `tool_guards:`:
+
+```yaml
+tool_guards:
+  shell_exec:
+    rules:
+      - action: deny
+        predicate:
+          type: contains
+          path: "command"
+          value: "sudo"
+        message: "sudo is not allowed"
+      - action: deny
+        predicate:
+          type: matches
+          path: "command"
+          pattern: "rm -rf*"
+        message: "destructive rm blocked"
+    default: allow
+
+  # Aliasing: redirect calls to a wrapper workflow
+  dangerous_tool:
+    alias: workflow_safe_dangerous_tool
+```
+
+### Rule Evaluation
+
+Rules are evaluated in order. First match wins:
+- **deny** → returns `ToolError::CapabilityDenied` with the message
+- **allow** → delegates to the inner tool immediately (skips remaining rules)
+- **no match** → `default` action applies (`allow` or `deny`)
+
+### Predicate Types
+
+| Type | Fields | True when |
+|------|--------|-----------|
+| `contains` | `path`, `value` | String at `path` contains `value` as substring |
+| `matches` | `path`, `pattern` | String at `path` matches glob pattern (`*`, `?`) |
+| `equals` | `path`, `value` | Value at `path` equals `value` exactly |
+| `exists` | `path` | Field at `path` exists and is not null |
+| `not` | `predicate` | Inner predicate is false |
+| `all` | `predicates` | All inner predicates are true |
+| `any` | `predicates` | Any inner predicate is true |
+
+Paths are dot-separated (e.g., `config.level`) and support array indexing (e.g., `items.0.name`).
+
+### Tool Aliasing
+
+When `alias` is set, the runtime registers the alias workflow under the original tool's name. The agent calls `shell_exec` but actually gets `workflow_safe_shell`. Combined with capability attenuation, the original tool is only accessible inside the wrapper workflow's scope.
+
+### No Hidden Behaviors
+
+Guards are applied at registry construction time — the tool in the registry IS the guarded version. `system_introspect` shows the tools as they appear. The executor is unchanged; it dispatches tools identically regardless of wrapping.
+
+---
+
+## Auth Scoping
+
+The runtime provides `scope_from_role()` to build an `ExecutionScope` from a role name and product context. This is the shared auth resolution path used by both HTTP (axum middleware) and MCP session setup.
+
+```rust
+let scope = scope_from_role(
+    "alice",                          // actor ID
+    "agent",                          // role name
+    "konf:myproduct",                 // product namespace
+    &["memory_*", "ai_complete"],     // capabilities for this role
+    Some("agents"),                   // namespace suffix
+    ResourceLimits::default(),
+);
+```
+
+Role definitions live in `tools.yaml`:
+
+```yaml
+roles:
+  admin:
+    capabilities: ["*"]
+  agent:
+    capabilities: ["memory_*", "ai_complete", "workflow_*"]
+    namespace_suffix: "agents"
+  guest:
+    capabilities: ["echo", "template"]
+    namespace_suffix: "guest"
+```
+
+MCP sessions use `KonfMcpServer::with_capabilities()` for scoped access. The default (`KonfMcpServer::new()`) gives full access for local development.

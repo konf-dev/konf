@@ -19,7 +19,7 @@ use tracing::info;
 use konflux::engine::Engine;
 use konf_runtime::Runtime;
 
-pub use config::{PlatformConfig, ProductConfig, ToolsConfig, AuthConfig, ServerConfig, ShellConfig};
+pub use config::{PlatformConfig, ProductConfig, ToolsConfig, AuthConfig, ServerConfig, ShellConfig, ToolGuardConfig, RoleConfig};
 
 /// A fully booted Konf instance, ready for transport shells to serve.
 pub struct KonfInstance {
@@ -165,6 +165,9 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     if workflows_dir.is_dir() {
         register_workflows(runtime.engine(), &runtime, &workflows_dir)?;
     }
+
+    // 10b. Apply tool guards from product config
+    apply_tool_guards(&runtime, &product_config);
 
     let final_tool_count = runtime.engine().registry().len();
     info!(tools = final_tool_count, resources = engine.resources().len(), "Registration complete");
@@ -424,6 +427,33 @@ impl konflux::tool::Tool for ConfigReloadTool {
 
                 let total_tools = self.runtime.engine().registry().len();
 
+                // Reload tool guards from tools.yaml
+                let tools_yaml_path = self.config_dir.join("tools.yaml");
+                if tools_yaml_path.exists() {
+                    match std::fs::read_to_string(&tools_yaml_path) {
+                        Ok(contents) => {
+                            let interpolated = interpolate_env_vars(&contents);
+                            match serde_yaml::from_str::<ProductConfig>(&interpolated) {
+                                Ok(product_config) => {
+                                    apply_tool_guards(&self.runtime, &product_config);
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "Failed to parse tools.yaml for guards — keeping existing guards"
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "Failed to read tools.yaml for guards — keeping existing guards"
+                            );
+                        }
+                    }
+                }
+
                 // Signal MCP server (and any other listeners) that tools changed
                 self.runtime.engine().notify_tools_changed();
 
@@ -453,6 +483,34 @@ impl konflux::tool::Tool for ConfigReloadTool {
 }
 
 /// Scan workflows/ directory and register eligible workflows as tools.
+/// Convert product config tool guards to runtime format and apply them.
+fn apply_tool_guards(runtime: &Arc<Runtime>, product_config: &ProductConfig) {
+    use konf_runtime::runtime::ToolGuardEntry;
+
+    if product_config.tool_guards.is_empty() {
+        return;
+    }
+
+    let guards: std::collections::HashMap<String, ToolGuardEntry> = product_config
+        .tool_guards
+        .iter()
+        .map(|(name, cfg)| {
+            (
+                name.clone(),
+                ToolGuardEntry {
+                    rules: cfg.rules.clone(),
+                    default_action: cfg.default,
+                    alias: cfg.alias.clone(),
+                },
+            )
+        })
+        .collect();
+
+    let count = guards.len();
+    runtime.set_tool_guards(guards);
+    info!(guard_count = count, "Tool guards applied from product config");
+}
+
 fn register_workflows(
     engine: &Engine,
     runtime: &Arc<Runtime>,

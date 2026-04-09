@@ -42,7 +42,7 @@ nodes:                         # Required. Map of node_id → node definition
 | `description` | string | No | — | Human-readable description |
 | `capabilities` | string[] | No | [] | Required capability grants (see note below) |
 | `register_as_tool` | bool | No | false | Register as `workflow_{id}` tool |
-| `input_schema` | JSON Schema | No | — | Input validation schema |
+| `input_schema` | JSON Schema | No | — | Input validation schema. When `register_as_tool: true`, this becomes the tool's parameter schema (advertised to MCP clients and LLMs). |
 | `output_schema` | JSON Schema | No | — | Output schema for downstream tools |
 | `nodes` | map | Yes | — | Node definitions (at least one required) |
 
@@ -91,6 +91,8 @@ nodes:
 ## Entry Node and DAG Structure
 
 The **first node** in the YAML `nodes:` map is the entry node. All other nodes must be reachable from it via `then:` edges. Unreachable nodes are rejected as orphans at parse time.
+
+> **Note:** The entry node must not use `join:` — it has no predecessors and is always the first node executed.
 
 To run nodes in parallel, use `then: [a, b]` fan-out from the entry (or any node):
 
@@ -293,6 +295,8 @@ nodes:
       max_points: 3
     return: true
 ```
+
+> **Capability attenuation:** When a workflow calls another workflow-as-tool, the child runs in a child execution scope. Child capabilities can only be equal to or more restrictive than the parent's — never broader. A parent with `capabilities: ["ai_complete"]` cannot call a child that requires `["ai_complete", "shell_exec"]`. See [engine.md](../architecture/engine.md#capability-validation) for details.
 
 ---
 
