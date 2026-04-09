@@ -155,13 +155,13 @@ mod tests {
         rt.block_on(register(&engine, backend)).unwrap();
 
         let registry = engine.registry();
-        assert!(registry.contains("memory_search"));
-        assert!(registry.contains("memory_store"));
-        assert!(registry.contains("state_set"));
-        assert!(registry.contains("state_get"));
-        assert!(registry.contains("state_delete"));
-        assert!(registry.contains("state_list"));
-        assert!(registry.contains("state_clear"));
+        assert!(registry.contains("memory:search"));
+        assert!(registry.contains("memory:store"));
+        assert!(registry.contains("state:set"));
+        assert!(registry.contains("state:get"));
+        assert!(registry.contains("state:delete"));
+        assert!(registry.contains("state:list"));
+        assert!(registry.contains("state:clear"));
         assert_eq!(registry.len(), 7);
     }
 

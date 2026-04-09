@@ -172,8 +172,8 @@ impl AiCompleteTool {
         for info in registry.list() {
             // Skip ai_complete itself to prevent unbounded recursion,
             // unless explicitly whitelisted
-            if info.name == "ai_complete"
-                && tool_whitelist.is_none_or(|wl| !wl.iter().any(|n| n == "ai_complete"))
+            if info.name == "ai:complete"
+                && tool_whitelist.is_none_or(|wl| !wl.iter().any(|n| n == "ai:complete"))
             {
                 continue;
             }
@@ -244,7 +244,7 @@ impl AiCompleteTool {
 impl Tool for AiCompleteTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "ai_complete".into(),
+            name: "ai:complete".into(),
             description: "Generate an LLM completion with optional tool calling (ReAct loop). \
                 Tools are filtered by the caller's capabilities and optional `tools` whitelist.".into(),
             input_schema: json!({
@@ -275,7 +275,7 @@ impl Tool for AiCompleteTool {
                     "max_iterations": { "type": "integer", "description": "Override max ReAct iterations for this call" }
                 }
             }),
-            capabilities: vec!["ai_complete".into()],
+            capabilities: vec!["ai:complete".into()],
             supports_streaming: true,
             output_schema: None,
             annotations: ToolAnnotations { open_world: true, ..Default::default() },
@@ -328,7 +328,7 @@ impl Tool for AiCompleteTool {
         Ok(json!({
             "text": result.text,
             "_meta": {
-                "tool": "ai_complete",
+                "tool": "ai:complete",
                 "provider": config.provider,
                 "model": config.model,
                 "duration_ms": duration_ms,
@@ -706,24 +706,24 @@ mod tests {
 
     #[test]
     fn test_resolve_tools_filters_by_capabilities() {
-        let engine = engine_with_tools(&["echo", "shell_exec", "http_get", "memory_search"]);
+        let engine = engine_with_tools(&["echo", "shell:exec", "http:get", "memory:search"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
         // Only grant echo and http_get
-        let ctx = mock_ctx(vec!["echo", "http_get"]);
+        let ctx = mock_ctx(vec!["echo", "http:get"]);
         let resolved = tool.resolve_tools(&ctx, None);
 
         let names: Vec<String> = resolved.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"echo".to_string()));
-        assert!(names.contains(&"http_get".to_string()));
-        assert!(!names.contains(&"shell_exec".to_string()));
-        assert!(!names.contains(&"memory_search".to_string()));
+        assert!(names.contains(&"http:get".to_string()));
+        assert!(!names.contains(&"shell:exec".to_string()));
+        assert!(!names.contains(&"memory:search".to_string()));
         assert_eq!(resolved.len(), 2);
     }
 
     #[test]
     fn test_resolve_tools_wildcard_grants_all() {
-        let engine = engine_with_tools(&["echo", "shell_exec", "http_get"]);
+        let engine = engine_with_tools(&["echo", "shell:exec", "http:get"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
         let ctx = mock_ctx(vec!["*"]);
@@ -734,22 +734,22 @@ mod tests {
 
     #[test]
     fn test_resolve_tools_prefix_wildcard() {
-        let engine = engine_with_tools(&["memory_search", "memory_store", "http_get"]);
+        let engine = engine_with_tools(&["memory:search", "memory:store", "http:get"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
-        let ctx = mock_ctx(vec!["memory_*"]);
+        let ctx = mock_ctx(vec!["memory:*"]);
         let resolved = tool.resolve_tools(&ctx, None);
 
         let names: Vec<String> = resolved.iter().map(|t| t.name()).collect();
-        assert!(names.contains(&"memory_search".to_string()));
-        assert!(names.contains(&"memory_store".to_string()));
-        assert!(!names.contains(&"http_get".to_string()));
+        assert!(names.contains(&"memory:search".to_string()));
+        assert!(names.contains(&"memory:store".to_string()));
+        assert!(!names.contains(&"http:get".to_string()));
         assert_eq!(resolved.len(), 2);
     }
 
     #[test]
     fn test_resolve_tools_whitelist_intersects_capabilities() {
-        let engine = engine_with_tools(&["echo", "shell_exec", "http_get"]);
+        let engine = engine_with_tools(&["echo", "shell:exec", "http:get"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
         // Grant all, but whitelist only echo
@@ -763,12 +763,12 @@ mod tests {
 
     #[test]
     fn test_resolve_tools_whitelist_cannot_bypass_capabilities() {
-        let engine = engine_with_tools(&["echo", "shell_exec"]);
+        let engine = engine_with_tools(&["echo", "shell:exec"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
         // Only grant echo, but whitelist shell_exec
         let ctx = mock_ctx(vec!["echo"]);
-        let whitelist = vec!["shell_exec".to_string()];
+        let whitelist = vec!["shell:exec".to_string()];
         let resolved = tool.resolve_tools(&ctx, Some(&whitelist));
 
         // shell_exec fails capability check, so nothing resolved
@@ -777,7 +777,7 @@ mod tests {
 
     #[test]
     fn test_resolve_tools_excludes_ai_complete() {
-        let engine = engine_with_tools(&["echo", "ai_complete"]);
+        let engine = engine_with_tools(&["echo", "ai:complete"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
         let ctx = mock_ctx(vec!["*"]);
@@ -785,27 +785,27 @@ mod tests {
 
         let names: Vec<String> = resolved.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"echo".to_string()));
-        assert!(!names.contains(&"ai_complete".to_string()));
+        assert!(!names.contains(&"ai:complete".to_string()));
         assert_eq!(resolved.len(), 1);
     }
 
     #[test]
     fn test_resolve_tools_ai_complete_explicit_whitelist() {
-        let engine = engine_with_tools(&["echo", "ai_complete"]);
+        let engine = engine_with_tools(&["echo", "ai:complete"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
         let ctx = mock_ctx(vec!["*"]);
-        let whitelist = vec!["ai_complete".to_string()];
+        let whitelist = vec!["ai:complete".to_string()];
         let resolved = tool.resolve_tools(&ctx, Some(&whitelist));
 
         // Explicit whitelist overrides the self-exclusion
         assert_eq!(resolved.len(), 1);
-        assert_eq!(resolved[0].name(), "ai_complete");
+        assert_eq!(resolved[0].name(), "ai:complete");
     }
 
     #[test]
     fn test_resolve_tools_empty_capabilities_denies_all() {
-        let engine = engine_with_tools(&["echo", "shell_exec"]);
+        let engine = engine_with_tools(&["echo", "shell:exec"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
         let ctx = mock_ctx(vec![]);

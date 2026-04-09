@@ -1,13 +1,13 @@
 workflow: nightwatch
 description: "Health check agent. Runs dev_status and logs the result. Use schedule tool with repeat:true to run periodically."
 register_as_tool: true
-capabilities: ["shell_exec", "workflow_dev_status"]
+capabilities: ["shell:exec", "workflow:dev_status"]
 nodes:
   health_check:
-    do: workflow_dev_status
+    do: workflow:dev_status
     then: log_result
   log_result:
-    do: shell_exec
+    do: shell:exec
     with:
       command: "mkdir -p /tmp/nightwatch && echo \"[$(date -Iseconds)] OK\" >> /tmp/nightwatch/health.log && tail -5 /tmp/nightwatch/health.log"
     return: true

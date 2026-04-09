@@ -231,7 +231,7 @@ nodes:
     // Scope without "echo" capability
     let scope = ExecutionScope {
         namespace: "konf:test:denied".into(),
-        capabilities: vec![CapabilityGrant::new("ai_complete")], // no echo
+        capabilities: vec![CapabilityGrant::new("ai:complete")], // no echo
         limits: ResourceLimits::default(),
         actor: Actor { id: "test".into(), role: ActorRole::User },
         depth: 0,

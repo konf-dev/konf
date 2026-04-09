@@ -386,13 +386,13 @@ impl ConfigReloadTool {
 impl konflux::tool::Tool for ConfigReloadTool {
     fn info(&self) -> konflux::tool::ToolInfo {
         konflux::tool::ToolInfo {
-            name: "config_reload".into(),
+            name: "config:reload".into(),
             description: "Reload product configuration (workflows, prompts, tools) from disk. Re-parses all workflow YAML files and re-registers them as tools.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
             }),
-            capabilities: vec!["config_reload".into()],
+            capabilities: vec!["config:reload".into()],
             supports_streaming: false,
             output_schema: None,
             annotations: konflux::tool::ToolAnnotations::default(),
@@ -417,7 +417,7 @@ impl konflux::tool::Tool for ConfigReloadTool {
         // Remove existing workflow_* tools before re-registering
         let existing_tools = self.runtime.engine().registry().list();
         let workflow_tool_names: Vec<String> = existing_tools.iter()
-            .filter(|t| t.name.starts_with("workflow_"))
+            .filter(|t| t.name.starts_with("workflow:"))
             .map(|t| t.name.clone())
             .collect();
 
@@ -429,7 +429,7 @@ impl konflux::tool::Tool for ConfigReloadTool {
         match register_workflows(self.runtime.engine(), &self.runtime, &workflows_dir) {
             Ok(()) => {
                 let new_workflow_count = self.runtime.engine().registry().list().iter()
-                    .filter(|t| t.name.starts_with("workflow_"))
+                    .filter(|t| t.name.starts_with("workflow:"))
                     .count();
 
                 let total_tools = self.runtime.engine().registry().len();
@@ -579,7 +579,7 @@ fn register_workflows(
             );
 
             engine.register_tool(Arc::new(tool));
-            info!(workflow = %workflow.id, "Registered workflow as tool: workflow_{}", workflow.id);
+            info!(workflow = %workflow.id, "Registered workflow as tool: workflow:{}", workflow.id);
         }
     }
 
@@ -605,8 +605,8 @@ mod tests {
         let tools = ToolsConfig::default();
         register_tools(&engine, &tools).await.unwrap();
         // HTTP tools registered by default
-        assert!(engine.registry().contains("http_get"));
-        assert!(engine.registry().contains("http_post"));
+        assert!(engine.registry().contains("http:get"));
+        assert!(engine.registry().contains("http:post"));
     }
 
     #[test]
@@ -690,12 +690,12 @@ nodes:
         register_workflows(&engine, &runtime, &workflows_dir).unwrap();
 
         // echo_test should be registered as a tool
-        assert!(engine.registry().contains("workflow_echo_test"),
-            "Expected workflow_echo_test in registry, got: {:?}",
+        assert!(engine.registry().contains("workflow:echo_test"),
+            "Expected workflow:echo_test in registry, got: {:?}",
             engine.registry().list().iter().map(|t| &t.name).collect::<Vec<_>>());
 
         // helper should NOT be registered as a tool (no register_as_tool)
-        assert!(!engine.registry().contains("workflow_helper"));
+        assert!(!engine.registry().contains("workflow:helper"));
 
         // Both should be registered as resources
         assert!(engine.resources().get("konf://workflows/echo.yaml").is_some());

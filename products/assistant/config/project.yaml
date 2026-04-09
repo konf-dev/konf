@@ -6,6 +6,6 @@ triggers:
   chat:
     workflow: chat
     capabilities:
-      - "memory_*"
-      - "ai_complete"
-      - "http_get"
+      - "memory:*"
+      - "ai:complete"
+      - "http:get"

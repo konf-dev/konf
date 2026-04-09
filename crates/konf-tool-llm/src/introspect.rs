@@ -37,7 +37,7 @@ fn matches_filter(pattern: &str, tool_name: &str) -> bool {
 impl Tool for IntrospectTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "system_introspect".into(),
+            name: "system:introspect".into(),
             description: "List all registered tools with their names, descriptions, input schemas, and annotations.".into(),
             input_schema: json!({
                 "type": "object",
@@ -111,7 +111,7 @@ mod tests {
         let tool = IntrospectTool::new(make_engine());
         let info = tool.info();
 
-        assert_eq!(info.name, "system_introspect");
+        assert_eq!(info.name, "system:introspect");
         assert!(info.capabilities.is_empty());
         assert!(info.annotations.read_only);
         assert!(info.annotations.idempotent);
@@ -163,9 +163,9 @@ mod tests {
     fn test_matches_filter() {
         assert!(matches_filter("memory_*", "memory_search"));
         assert!(matches_filter("memory_*", "memory_store"));
-        assert!(!matches_filter("memory_*", "ai_complete"));
+        assert!(!matches_filter("memory_*", "ai:complete"));
         assert!(matches_filter("*", "anything"));
-        assert!(matches_filter("ai_complete", "ai_complete"));
-        assert!(!matches_filter("ai_complete", "ai_other"));
+        assert!(matches_filter("ai:complete", "ai:complete"));
+        assert!(!matches_filter("ai:complete", "ai_other"));
     }
 }

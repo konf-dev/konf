@@ -38,7 +38,7 @@ impl Tool for SearchTool {
     fn info(&self) -> ToolInfo {
         let modes = self.backend.supported_search_modes();
         ToolInfo {
-            name: "memory_search".into(),
+            name: "memory:search".into(),
             description: "Search the knowledge graph for relevant information. Returns nodes with similarity scores.".into(),
             input_schema: json!({
                 "type": "object",
@@ -51,7 +51,7 @@ impl Tool for SearchTool {
                 "required": ["query"]
             }),
             output_schema: None,
-            capabilities: vec!["memory_search".into()],
+            capabilities: vec!["memory:search".into()],
             supports_streaming: false,
             annotations: ToolAnnotations { read_only: true, idempotent: true, ..Default::default() },
         }
@@ -92,7 +92,7 @@ impl StoreTool {
 impl Tool for StoreTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "memory_store".into(),
+            name: "memory:store".into(),
             description: "Add nodes to the knowledge graph.".into(),
             input_schema: json!({
                 "type": "object",
@@ -113,7 +113,7 @@ impl Tool for StoreTool {
                 "required": ["nodes"]
             }),
             output_schema: None,
-            capabilities: vec!["memory_store".into()],
+            capabilities: vec!["memory:store".into()],
             supports_streaming: false,
             annotations: ToolAnnotations::default(),
         }
@@ -150,7 +150,7 @@ impl StateSetTool {
 impl Tool for StateSetTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "state_set".into(),
+            name: "state:set".into(),
             description: "Set a session state key (working memory scratchpad).".into(),
             input_schema: json!({
                 "type": "object",
@@ -163,7 +163,7 @@ impl Tool for StateSetTool {
                 "required": ["key", "value", "session_id"]
             }),
             output_schema: None,
-            capabilities: vec!["state_set".into()],
+            capabilities: vec!["state:set".into()],
             supports_streaming: false,
             annotations: ToolAnnotations { idempotent: true, ..Default::default() },
         }
@@ -203,7 +203,7 @@ impl StateGetTool {
 impl Tool for StateGetTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "state_get".into(),
+            name: "state:get".into(),
             description: "Get a session state value by key.".into(),
             input_schema: json!({
                 "type": "object",
@@ -214,7 +214,7 @@ impl Tool for StateGetTool {
                 "required": ["key", "session_id"]
             }),
             output_schema: None,
-            capabilities: vec!["state_get".into()],
+            capabilities: vec!["state:get".into()],
             supports_streaming: false,
             annotations: ToolAnnotations { read_only: true, idempotent: true, ..Default::default() },
         }
@@ -251,7 +251,7 @@ impl StateDeleteTool {
 impl Tool for StateDeleteTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "state_delete".into(),
+            name: "state:delete".into(),
             description: "Delete a session state key.".into(),
             input_schema: json!({
                 "type": "object",
@@ -262,7 +262,7 @@ impl Tool for StateDeleteTool {
                 "required": ["key", "session_id"]
             }),
             output_schema: None,
-            capabilities: vec!["state_delete".into()],
+            capabilities: vec!["state:delete".into()],
             supports_streaming: false,
             annotations: ToolAnnotations { destructive: true, ..Default::default() },
         }
@@ -299,7 +299,7 @@ impl StateListTool {
 impl Tool for StateListTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "state_list".into(),
+            name: "state:list".into(),
             description: "List all session state keys for a session.".into(),
             input_schema: json!({
                 "type": "object",
@@ -309,7 +309,7 @@ impl Tool for StateListTool {
                 "required": ["session_id"]
             }),
             output_schema: None,
-            capabilities: vec!["state_list".into()],
+            capabilities: vec!["state:list".into()],
             supports_streaming: false,
             annotations: ToolAnnotations { read_only: true, idempotent: true, ..Default::default() },
         }
@@ -344,7 +344,7 @@ impl StateClearTool {
 impl Tool for StateClearTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "state_clear".into(),
+            name: "state:clear".into(),
             description: "Clear all session state for a session.".into(),
             input_schema: json!({
                 "type": "object",
@@ -354,7 +354,7 @@ impl Tool for StateClearTool {
                 "required": ["session_id"]
             }),
             output_schema: None,
-            capabilities: vec!["state_clear".into()],
+            capabilities: vec!["state:clear".into()],
             supports_streaming: false,
             annotations: ToolAnnotations { destructive: true, ..Default::default() },
         }

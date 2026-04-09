@@ -1,7 +1,7 @@
 workflow: context_assembly
 nodes:
   search_memory:
-    do: memory_search
+    do: memory:search
     with:
       query: "{{ input.message }}"
       limit: 15

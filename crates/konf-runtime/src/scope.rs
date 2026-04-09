@@ -28,8 +28,8 @@ pub struct ExecutionScope {
 /// A capability grant with optional parameter bindings.
 ///
 /// The `pattern` field supports glob matching:
-/// - `"memory_*"` matches `"memory_search"`, `"memory_store"`
-/// - `"ai_complete"` matches exactly
+/// - `"memory:*"` matches `"memory:search"`, `"memory:store"`
+/// - `"ai:complete"` matches exactly
 /// - `"*"` matches everything
 ///
 /// The `bindings` field contains parameters injected into tool input,
@@ -74,10 +74,10 @@ fn matches_capability_pattern(pattern: &str, tool_name: &str) -> bool {
     if pattern == "*" {
         return true;
     }
-    if let Some(prefix) = pattern.strip_suffix("_*") {
-        // "memory_*" matches "memory_search" but not "memorysearch"
+    if let Some(prefix) = pattern.strip_suffix(":*") {
+        // "memory:*" matches "memory:search" but not "memorysearch"
         return tool_name.starts_with(prefix)
-            && tool_name.get(prefix.len()..prefix.len() + 1) == Some("_");
+            && tool_name.get(prefix.len()..prefix.len() + 1) == Some(":");
     }
     pattern == tool_name
 }
@@ -118,18 +118,18 @@ impl ExecutionScope {
                 if parent_grant.pattern == child_grant.pattern {
                     return true;
                 }
-                // A parent prefix (e.g. "memory_*") covers a child-specific tool (e.g. "memory_search")
-                // but NOT a child prefix (e.g. "memory_*" cannot be granted if parent only has "memory_search")
-                if let Some(parent_prefix) = parent_grant.pattern.strip_suffix("_*") {
+                // A parent prefix (e.g. "memory:*") covers a child-specific tool (e.g. "memory:search")
+                // but NOT a child prefix (e.g. "memory:*" cannot be granted if parent only has "memory:search")
+                if let Some(parent_prefix) = parent_grant.pattern.strip_suffix(":*") {
                     // Child is a specific tool under the parent prefix
                     if !child_grant.pattern.ends_with("_*") {
                         return matches_capability_pattern(&parent_grant.pattern, &child_grant.pattern);
                     }
                     // Child is also a prefix — must be equal or more specific
-                    if let Some(child_prefix) = child_grant.pattern.strip_suffix("_*") {
+                    if let Some(child_prefix) = child_grant.pattern.strip_suffix(":*") {
                         return child_prefix.starts_with(parent_prefix)
                             && (child_prefix == parent_prefix
-                                || child_prefix.as_bytes().get(parent_prefix.len()) == Some(&b'_'));
+                                || child_prefix.as_bytes().get(parent_prefix.len()) == Some(&b':'));
                     }
                 }
                 false
@@ -319,16 +319,16 @@ mod tests {
 
     #[test]
     fn test_capability_exact_match() {
-        let grant = CapabilityGrant::new("memory_search");
-        assert!(grant.matches("memory_search").is_some());
-        assert!(grant.matches("memory_store").is_none());
+        let grant = CapabilityGrant::new("memory:search");
+        assert!(grant.matches("memory:search").is_some());
+        assert!(grant.matches("memory:store").is_none());
     }
 
     #[test]
     fn test_capability_glob_match() {
-        let grant = CapabilityGrant::new("memory_*");
-        assert!(grant.matches("memory_search").is_some());
-        assert!(grant.matches("memory_store").is_some());
+        let grant = CapabilityGrant::new("memory:*");
+        assert!(grant.matches("memory:search").is_some());
+        assert!(grant.matches("memory:store").is_some());
         // Must have underscore separator — "memorysearch" should NOT match
         assert!(grant.matches("memorysearch").is_none());
     }
@@ -337,16 +337,16 @@ mod tests {
     fn test_capability_wildcard_all() {
         let grant = CapabilityGrant::new("*");
         assert!(grant.matches("anything").is_some());
-        assert!(grant.matches("memory_search").is_some());
+        assert!(grant.matches("memory:search").is_some());
     }
 
     #[test]
     fn test_capability_bindings_returned() {
         let mut bindings = HashMap::new();
         bindings.insert("namespace".to_string(), Value::String("user_123".to_string()));
-        let grant = CapabilityGrant::with_bindings("memory_*", bindings);
+        let grant = CapabilityGrant::with_bindings("memory:*", bindings);
 
-        let result = grant.matches("memory_search").unwrap();
+        let result = grant.matches("memory:search").unwrap();
         assert_eq!(result.get("namespace").unwrap(), "user_123");
     }
 
@@ -355,17 +355,17 @@ mod tests {
         let scope = ExecutionScope {
             namespace: "konf:test:user_1".into(),
             capabilities: vec![
-                CapabilityGrant::new("memory_search"),
-                CapabilityGrant::new("ai_complete"),
+                CapabilityGrant::new("memory:search"),
+                CapabilityGrant::new("ai:complete"),
             ],
             limits: ResourceLimits::default(),
             actor: Actor { id: "user_1".into(), role: ActorRole::User },
             depth: 0,
         };
 
-        assert!(scope.check_tool("memory_search").is_ok());
-        assert!(scope.check_tool("ai_complete").is_ok());
-        assert!(scope.check_tool("memory_store").is_err());
+        assert!(scope.check_tool("memory:search").is_ok());
+        assert!(scope.check_tool("ai:complete").is_ok());
+        assert!(scope.check_tool("memory:store").is_err());
     }
 
     #[test]
@@ -376,14 +376,14 @@ mod tests {
         let scope = ExecutionScope {
             namespace: "konf:test:user_1".into(),
             capabilities: vec![
-                CapabilityGrant::with_bindings("memory_*", bindings),
+                CapabilityGrant::with_bindings("memory:*", bindings),
             ],
             limits: ResourceLimits::default(),
             actor: Actor { id: "user_1".into(), role: ActorRole::User },
             depth: 0,
         };
 
-        let result = scope.check_tool("memory_search").unwrap();
+        let result = scope.check_tool("memory:search").unwrap();
         assert_eq!(result.get("namespace").unwrap(), "konf:test:user_1");
     }
 
@@ -392,8 +392,8 @@ mod tests {
         let parent = ExecutionScope {
             namespace: "konf:test".into(),
             capabilities: vec![
-                CapabilityGrant::new("memory_*"),
-                CapabilityGrant::new("ai_complete"),
+                CapabilityGrant::new("memory:*"),
+                CapabilityGrant::new("ai:complete"),
             ],
             limits: ResourceLimits::default(),
             actor: Actor { id: "admin".into(), role: ActorRole::ProductAdmin },
@@ -402,14 +402,14 @@ mod tests {
 
         // Valid child — subset of parent
         let child = parent.child_scope(
-            vec![CapabilityGrant::new("memory_search")],
+            vec![CapabilityGrant::new("memory:search")],
             Some("konf:test:user_1".into()),
         );
         assert!(child.is_ok());
 
         // Invalid child — http_get not in parent
         let child = parent.child_scope(
-            vec![CapabilityGrant::new("http_get")],
+            vec![CapabilityGrant::new("http:get")],
             None,
         );
         assert!(child.is_err());
@@ -420,16 +420,16 @@ mod tests {
         let parent = ExecutionScope {
             namespace: "konf:test".into(),
             capabilities: vec![
-                CapabilityGrant::new("memory_search"),
+                CapabilityGrant::new("memory:search"),
             ],
             limits: ResourceLimits::default(),
             actor: Actor { id: "admin".into(), role: ActorRole::ProductAdmin },
             depth: 0,
         };
 
-        // Child cannot escalate "memory_search" to "memory_*"
+        // Child cannot escalate "memory:search" to "memory:*"
         let child = parent.child_scope(
-            vec![CapabilityGrant::new("memory_*")],
+            vec![CapabilityGrant::new("memory:*")],
             None,
         );
         assert!(child.is_err(), "child should not be able to amplify capability");
@@ -447,7 +447,7 @@ mod tests {
         let parent = ExecutionScope {
             namespace: "konf:test".into(),
             capabilities: vec![
-                CapabilityGrant::new("memory_*"),
+                CapabilityGrant::new("memory:*"),
             ],
             limits: ResourceLimits::default(),
             actor: Actor { id: "admin".into(), role: ActorRole::ProductAdmin },
@@ -456,14 +456,14 @@ mod tests {
 
         // Same prefix is allowed
         let child = parent.child_scope(
-            vec![CapabilityGrant::new("memory_*")],
+            vec![CapabilityGrant::new("memory:*")],
             None,
         );
         assert!(child.is_ok());
 
         // Specific tool under prefix is allowed
         let child = parent.child_scope(
-            vec![CapabilityGrant::new("memory_search")],
+            vec![CapabilityGrant::new("memory:search")],
             None,
         );
         assert!(child.is_ok());
@@ -502,7 +502,7 @@ mod tests {
             "bot_1",
             "agent",
             "konf:myproduct",
-            &["memory_*".to_string(), "ai_complete".to_string()],
+            &["memory:*".to_string(), "ai:complete".to_string()],
             Some("agents"),
             ResourceLimits::default(),
         );

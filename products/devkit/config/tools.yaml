@@ -25,7 +25,7 @@ tools:
 
 # Tool guards for autonomous execution (Experiment 004)
 tool_guards:
-  shell_exec:
+  shell:exec:
     rules:
       - action: deny
         predicate:
@@ -46,5 +46,5 @@ roles:
   admin:
     capabilities: ["*"]
   agent:
-    capabilities: ["shell_exec", "template", "echo", "log", "schedule", "config_reload", "ai_complete", "yaml_validate_workflow", "workflow_*"]
+    capabilities: ["shell:exec", "template", "echo", "log", "schedule", "config:reload", "ai:complete", "yaml:validate_workflow", "workflow:*"]
     namespace_suffix: "nightwatch"

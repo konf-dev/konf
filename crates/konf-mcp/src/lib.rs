@@ -102,15 +102,26 @@ impl KonfMcpServer {
     }
 }
 
+/// Convert a kernel tool name to MCP-safe name.
+///
+/// Colons in tool names break Claude Code's identifier mapping
+/// (anthropics/claude-code#25081). The kernel uses colons for namespacing
+/// (`memory:search`, `ai:complete`). MCP clients see underscores
+/// (`memory_search`, `ai_complete`). Translation happens only at this boundary.
+fn kernel_to_mcp_name(name: &str) -> String {
+    name.replace(':', "_")
+}
+
 /// Convert a Konf ToolInfo to an MCP Tool definition.
 fn tool_info_to_mcp(info: &ToolInfo) -> McpTool {
     let schema_obj = info.input_schema.as_object().cloned().unwrap_or_default();
+    let mcp_name = kernel_to_mcp_name(&info.name);
 
     // NOTE: Do NOT add .with_annotations() here.
     // Claude Code silently drops ALL tools when annotations are present
     // in the tools/list response (anthropics/claude-code#25081).
     McpTool::new(
-        info.name.clone(),
+        mcp_name,
         info.description.clone(),
         Arc::new(schema_obj),
     )
@@ -171,12 +182,20 @@ impl ServerHandler for KonfMcpServer {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
-        let tool_name = &request.name;
-        tracing::info!(tool = %tool_name, "MCP tools/call");
+        let mcp_name = &request.name;
+        tracing::info!(tool = %mcp_name, "MCP tools/call");
 
+        // Resolve MCP name → kernel name. MCP clients send underscored names
+        // (e.g., "memory_search"), kernel uses colons ("memory:search").
+        // Build reverse map from kernel registry to find the match.
         let registry = self.engine.registry();
-        let tool = registry.get(tool_name).ok_or_else(|| {
-            ErrorData::invalid_params(format!("Tool not found: {tool_name}"), None)
+        let kernel_name = registry.list().iter()
+            .find(|info| kernel_to_mcp_name(&info.name) == *mcp_name)
+            .map(|info| info.name.clone())
+            .unwrap_or_else(|| mcp_name.to_string()); // fallback to exact match
+
+        let tool = registry.get(&kernel_name).ok_or_else(|| {
+            ErrorData::invalid_params(format!("Tool not found: {mcp_name}"), None)
         })?;
 
         let input: serde_json::Value = match request.arguments {
@@ -184,10 +203,10 @@ impl ServerHandler for KonfMcpServer {
             None => serde_json::Value::Object(serde_json::Map::new()),
         };
 
-        // Check session capabilities before invoking
-        if !tool_allowed_by_session(tool_name, &self.session_capabilities) {
+        // Check session capabilities using the kernel name
+        if !tool_allowed_by_session(&kernel_name, &self.session_capabilities) {
             return Err(ErrorData::invalid_params(
-                format!("Tool not permitted in this session: {tool_name}"),
+                format!("Tool not permitted in this session: {mcp_name}"),
                 None,
             ));
         }
@@ -201,7 +220,7 @@ impl ServerHandler for KonfMcpServer {
                 Ok(CallToolResult::success(vec![Content::text(text)]))
             }
             Err(e) => {
-                tracing::warn!(tool = %tool_name, error = %e, "MCP tool call failed");
+                tracing::warn!(tool = %kernel_name, error = %e, "MCP tool call failed");
                 Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
             }
         }

@@ -122,7 +122,7 @@ impl Tool for ScheduleTool {
         let workflow_input = input.get("input").cloned().unwrap_or(json!({}));
 
         // Fail-fast: verify workflow exists now (re-resolved at each execution).
-        let tool_name = format!("workflow_{workflow_id}");
+        let tool_name = format!("workflow:{workflow_id}");
         if self.runtime.engine().registry().get(&tool_name).is_none() {
             return Err(ToolError::NotFound { tool_id: tool_name });
         }
@@ -209,7 +209,7 @@ pub struct CancelScheduleTool;
 impl Tool for CancelScheduleTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "cancel_schedule".into(),
+            name: "cancel:schedule".into(),
             description: "Cancel a scheduled workflow by its schedule_id. \
                 Stops repeating timers and aborts pending one-shot schedules.".into(),
             input_schema: json!({
@@ -339,7 +339,7 @@ mod tests {
     async fn test_cancel_tool_info() {
         let tool = CancelScheduleTool;
         let info = tool.info();
-        assert_eq!(info.name, "cancel_schedule");
+        assert_eq!(info.name, "cancel:schedule");
         assert_eq!(info.capabilities, vec!["schedule"]);
     }
 }

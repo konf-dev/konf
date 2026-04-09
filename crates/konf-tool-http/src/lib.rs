@@ -135,7 +135,7 @@ impl HttpGetTool {
 impl Tool for HttpGetTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "http_get".into(),
+            name: "http:get".into(),
             description: "Make an HTTP GET request and return the response.".into(),
             input_schema: json!({
                 "type": "object",
@@ -147,7 +147,7 @@ impl Tool for HttpGetTool {
                 "required": ["url"]
             }),
             output_schema: None,
-            capabilities: vec!["http_get".into()],
+            capabilities: vec!["http:get".into()],
             supports_streaming: false,
             annotations: ToolAnnotations { open_world: true, idempotent: true, ..Default::default() },
         }
@@ -196,7 +196,7 @@ impl Tool for HttpGetTool {
             "headers": headers,
             "body": body_value,
             "_meta": {
-                "tool": "http_get",
+                "tool": "http:get",
                 "duration_ms": duration_ms,
             }
         }))
@@ -231,7 +231,7 @@ impl HttpPostTool {
 impl Tool for HttpPostTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "http_post".into(),
+            name: "http:post".into(),
             description: "Make an HTTP POST request with a JSON body.".into(),
             input_schema: json!({
                 "type": "object",
@@ -244,7 +244,7 @@ impl Tool for HttpPostTool {
                 "required": ["url"]
             }),
             output_schema: None,
-            capabilities: vec!["http_post".into()],
+            capabilities: vec!["http:post".into()],
             supports_streaming: false,
             annotations: ToolAnnotations { open_world: true, ..Default::default() },
         }
@@ -287,7 +287,7 @@ impl Tool for HttpPostTool {
             "status": status,
             "body": body_value,
             "_meta": {
-                "tool": "http_post",
+                "tool": "http:post",
                 "duration_ms": duration_ms,
             }
         }))
@@ -302,7 +302,7 @@ mod tests {
     fn test_http_get_tool_info() {
         let tool = HttpGetTool::new();
         let info = tool.info();
-        assert_eq!(info.name, "http_get");
+        assert_eq!(info.name, "http:get");
         assert!(info.annotations.open_world);
         assert!(info.annotations.idempotent);
         assert!(!info.annotations.destructive);
@@ -312,7 +312,7 @@ mod tests {
     fn test_http_post_tool_info() {
         let tool = HttpPostTool::new();
         let info = tool.info();
-        assert_eq!(info.name, "http_post");
+        assert_eq!(info.name, "http:post");
         assert!(info.annotations.open_world);
         assert!(!info.annotations.idempotent);
     }
@@ -322,8 +322,8 @@ mod tests {
         let engine = Engine::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(register(&engine, &json!({}))).unwrap();
-        assert!(engine.registry().contains("http_get"));
-        assert!(engine.registry().contains("http_post"));
+        assert!(engine.registry().contains("http:get"));
+        assert!(engine.registry().contains("http:post"));
         assert_eq!(engine.registry().len(), 2);
     }
 

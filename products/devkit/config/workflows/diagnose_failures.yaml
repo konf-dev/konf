@@ -1,14 +1,14 @@
 workflow: diagnose_failures
 description: "Self-deployment test: run tests, analyze failures with LLM, generate and deploy a diagnostic workflow."
 register_as_tool: true
-capabilities: ["shell_exec", "ai_complete", "yaml_validate_workflow", "config_reload", "workflow_run_tests", "template"]
+capabilities: ["shell:exec", "ai:complete", "yaml:validate_workflow", "config:reload", "workflow:run_tests", "template"]
 nodes:
   run_tests:
-    do: workflow_run_tests
+    do: workflow:run_tests
     then: analyze
     catch: analyze
   analyze:
-    do: ai_complete
+    do: ai:complete
     with:
       prompt: |
         You are a diagnostic workflow generator for the Konf platform.
@@ -20,7 +20,7 @@ nodes:
         The workflow MUST:
         - Have workflow id: auto_diagnostic
         - Use register_as_tool: true
-        - Only use capabilities: ["shell_exec", "template", "echo"]
+        - Only use capabilities: ["shell:exec", "template", "echo"]
         - Have concrete shell commands that inspect logs, check processes, verify configs
         - Return a structured diagnostic report
 
@@ -28,18 +28,18 @@ nodes:
       model: "${KONF_MODEL:-qwen3:8b}"
     then: validate
   validate:
-    do: yaml_validate_workflow
+    do: yaml:validate_workflow
     with:
       yaml: "{{analyze.content}}"
     then: deploy
     catch: report_invalid
   deploy:
-    do: shell_exec
+    do: shell:exec
     with:
       command: "python3 -c \"import sys; open('${KONF_CONFIG_DIR:-./config}/workflows/auto_diagnostic.yaml', 'w').write(sys.stdin.read())\" <<< '{{analyze.content}}'"
     then: reload
   reload:
-    do: config_reload
+    do: config:reload
     then: run_diagnostic
   run_diagnostic:
     do: workflow_auto_diagnostic

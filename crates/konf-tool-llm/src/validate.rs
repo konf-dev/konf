@@ -29,9 +29,9 @@ fn matches_capability_pattern(pattern: &str, capability: &str) -> bool {
     if pattern == "*" {
         return true;
     }
-    if let Some(prefix) = pattern.strip_suffix("_*") {
+    if let Some(prefix) = pattern.strip_suffix(":*") {
         return capability.starts_with(prefix)
-            && capability.get(prefix.len()..prefix.len() + 1) == Some("_");
+            && capability.get(prefix.len()..prefix.len() + 1) == Some(":");
     }
     pattern == capability
 }
@@ -40,7 +40,7 @@ fn matches_capability_pattern(pattern: &str, capability: &str) -> bool {
 impl Tool for ValidateWorkflowTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "yaml_validate_workflow".into(),
+            name: "yaml:validate_workflow".into(),
             description: "Validate a workflow YAML string against the Konf kernel. Checks syntax, schema, tool references, and capability requirements.".into(),
             input_schema: json!({
                 "type": "object",
@@ -52,7 +52,7 @@ impl Tool for ValidateWorkflowTool {
                 },
                 "required": ["yaml"]
             }),
-            capabilities: vec!["yaml_validate_workflow".into()],
+            capabilities: vec!["yaml:validate_workflow".into()],
             supports_streaming: false,
             output_schema: None,
             annotations: ToolAnnotations {
@@ -139,8 +139,8 @@ mod tests {
         let tool = ValidateWorkflowTool::new(make_engine());
         let info = tool.info();
 
-        assert_eq!(info.name, "yaml_validate_workflow");
-        assert_eq!(info.capabilities, vec!["yaml_validate_workflow"]);
+        assert_eq!(info.name, "yaml:validate_workflow");
+        assert_eq!(info.capabilities, vec!["yaml:validate_workflow"]);
         assert!(info.annotations.read_only);
         assert!(info.annotations.idempotent);
         assert!(!info.annotations.destructive);
@@ -149,20 +149,20 @@ mod tests {
 
     #[test]
     fn test_matches_capability_pattern_exact() {
-        assert!(matches_capability_pattern("ai_complete", "ai_complete"));
-        assert!(!matches_capability_pattern("ai_complete", "ai_other"));
+        assert!(matches_capability_pattern("ai:complete", "ai:complete"));
+        assert!(!matches_capability_pattern("ai:complete", "ai:other"));
     }
 
     #[test]
     fn test_matches_capability_pattern_glob() {
-        assert!(matches_capability_pattern("ai_*", "ai_complete"));
-        assert!(matches_capability_pattern("ai_*", "ai_other"));
-        assert!(!matches_capability_pattern("ai_*", "memory_search"));
+        assert!(matches_capability_pattern("ai:*", "ai:complete"));
+        assert!(matches_capability_pattern("ai:*", "ai:other"));
+        assert!(!matches_capability_pattern("ai:*", "memory:search"));
     }
 
     #[test]
     fn test_matches_capability_pattern_wildcard() {
         assert!(matches_capability_pattern("*", "anything"));
-        assert!(matches_capability_pattern("*", "ai_complete"));
+        assert!(matches_capability_pattern("*", "ai:complete"));
     }
 }

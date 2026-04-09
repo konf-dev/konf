@@ -86,15 +86,15 @@ fn test_validate_start_different_namespace_not_counted() {
 fn test_capability_patterns_extraction() {
     let scope = ExecutionScope {
         capabilities: vec![
-            CapabilityGrant::new("memory_*"),
-            CapabilityGrant::new("ai_complete"),
-            CapabilityGrant::with_bindings("http_get", HashMap::new()),
+            CapabilityGrant::new("memory:*"),
+            CapabilityGrant::new("ai:complete"),
+            CapabilityGrant::with_bindings("http:get", HashMap::new()),
         ],
         ..test_scope("konf:test")
     };
 
     let patterns = scope.capability_patterns();
-    assert_eq!(patterns, vec!["memory_*", "ai_complete", "http_get"]);
+    assert_eq!(patterns, vec!["memory:*", "ai:complete", "http:get"]);
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn test_child_scope_inherits_limits() {
     };
 
     let child = parent.child_scope(
-        vec![CapabilityGrant::new("memory_search")],
+        vec![CapabilityGrant::new("memory:search")],
         Some("konf:test:user_1".into()),
     ).unwrap();
 

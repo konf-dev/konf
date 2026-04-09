@@ -181,7 +181,7 @@ pub struct ToolGuardConfig {
 ///   admin:
 ///     capabilities: ["*"]
 ///   agent:
-///     capabilities: ["memory_*", "ai_complete", "workflow_*"]
+///     capabilities: ["memory:*", "ai:complete", "workflow:*"]
 ///     namespace_suffix: "agents"
 ///   guest:
 ///     capabilities: ["echo", "template"]
@@ -265,7 +265,7 @@ mod tests {
     fn test_tool_guards_deserialize_from_yaml() {
         let yaml = r#"
 tool_guards:
-  shell_exec:
+  "shell:exec":
     rules:
       - action: deny
         predicate:
@@ -281,18 +281,18 @@ tool_guards:
         message: "destructive rm blocked"
     default: deny
   echo:
-    alias: workflow_safe_echo
+    alias: "workflow:safe_echo"
 "#;
         let config: ProductConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.tool_guards.len(), 2);
 
-        let shell_guard = &config.tool_guards["shell_exec"];
+        let shell_guard = &config.tool_guards["shell:exec"];
         assert_eq!(shell_guard.rules.len(), 2);
         assert_eq!(shell_guard.default, konf_runtime::guard::DefaultAction::Deny);
         assert!(shell_guard.alias.is_none());
 
         let echo_guard = &config.tool_guards["echo"];
-        assert_eq!(echo_guard.alias.as_deref(), Some("workflow_safe_echo"));
+        assert_eq!(echo_guard.alias.as_deref(), Some("workflow:safe_echo"));
     }
 
     #[test]
@@ -302,7 +302,7 @@ roles:
   admin:
     capabilities: ["*"]
   agent:
-    capabilities: ["memory_*", "ai_complete"]
+    capabilities: ["memory:*", "ai:complete"]
     namespace_suffix: "agents"
 "#;
         let config: ProductConfig = serde_yaml::from_str(yaml).unwrap();
@@ -313,7 +313,7 @@ roles:
         assert!(admin.namespace_suffix.is_none());
 
         let agent = &config.roles["agent"];
-        assert_eq!(agent.capabilities, vec!["memory_*", "ai_complete"]);
+        assert_eq!(agent.capabilities, vec!["memory:*", "ai:complete"]);
         assert_eq!(agent.namespace_suffix.as_deref(), Some("agents"));
     }
 

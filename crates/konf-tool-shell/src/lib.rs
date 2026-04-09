@@ -59,7 +59,7 @@ impl ShellExecTool {
 impl Tool for ShellExecTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "shell_exec".into(),
+            name: "shell:exec".into(),
             description: "Execute a shell command inside the sandboxed container. \
                 Returns stdout, stderr, and exit code."
                 .into(),
@@ -78,7 +78,7 @@ impl Tool for ShellExecTool {
                 "required": ["command"]
             }),
             output_schema: None,
-            capabilities: vec!["shell_exec".into()],
+            capabilities: vec!["shell:exec".into()],
             supports_streaming: false,
             annotations: ToolAnnotations {
                 destructive: true,
@@ -191,8 +191,8 @@ mod tests {
         let tool = ShellExecTool::new("test-container", 5000);
         let info = tool.info();
 
-        assert_eq!(info.name, "shell_exec");
-        assert_eq!(info.capabilities, vec!["shell_exec"]);
+        assert_eq!(info.name, "shell:exec");
+        assert_eq!(info.capabilities, vec!["shell:exec"]);
         assert!(info.annotations.destructive);
         assert!(!info.annotations.read_only);
         assert!(!info.annotations.idempotent);
