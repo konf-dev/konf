@@ -78,47 +78,103 @@ mcp_servers:
 
 ### Roles
 
-Roles define capability grants for different actor types. The runtime uses these to create scoped contexts for authenticated users.
+Roles define capability grants for different actor types. The runtime uses these to create scoped contexts for authenticated users, ensuring least-privilege access and strict namespace isolation.
 
 ```yaml
 roles:
   admin:
-    capabilities: ["*"] # Full access
+    capabilities: ["*"] # Full access to all tools and operations
   agent:
     capabilities:
-      - "memory:*"
-      - "state:*"
-      - "ai:complete"
-      - "http:get"
-      - "schedule:create"
-      - "cancel:schedule"
+      - "memory:*"       # All memory operations (search, store, delete)
+      - "state:*"        # All session state operations
+      - "ai:complete"    # LLM completion
+      - "http:get"       # Read-only HTTP requests
+      - "schedule:create" # Create scheduled workflows
+      - "cancel:schedule" # Cancel scheduled workflows
+      - "secret:get"      # Access allowed secrets
+      - "secret:list"     # List allowed secrets
+    namespace_suffix: "agents" # Appended to the product namespace
   guest:
     capabilities:
-      - "memory:search"
-      - "ai:complete"
+      - "memory:search"  # Read-only memory access
+      - "ai:complete"    # LLM completion
+    namespace_suffix: "guest"
 ```
 
-See [runtime.md](../architecture/runtime.md#auth-scoping) for how roles are used in the capability lattice.
+**Key concepts:**
+- **`roles`**: Top-level key under which role definitions reside.
+- **Role name**: The identifier for the role (e.g., `admin`, `agent`, `guest`).
+- **`capabilities`**: A list of capability patterns that define what actions a role is permitted to perform. Patterns support wildcards (e.g., `memory:*`, `*`). Capabilities granted to a role are the **maximum** permissions that can be given to any workflow or tool run under that role's context.
+- **`namespace_suffix`**: An optional string appended to the base product namespace. This allows you to isolate data (e.g., `konf:assistant:agents` vs `konf:assistant:guest`) without changing the tool implementation.
+
+See [runtime.md](../architecture/runtime.md#auth-scoping) for how roles are used in the capability lattice and [multi-tenancy.md](../architecture/multi-tenancy.md) for more on namespace isolation.
 
 ### Tool Guards
 
-Define deny/allow rules that are evaluated before every tool invocation:
+Tool guards define deny/allow rules that are evaluated before every tool invocation. They provide a powerful way to enforce security policies and prevent agents from performing dangerous or unintended actions.
 
 ```yaml
 tool_guards:
+  # Guards for a specific tool, e.g., shell:exec
   shell:exec:
     rules:
+      # Deny execution if the command contains "sudo"
       - action: deny
         predicate:
           type: contains
           path: "command"
           value: "sudo"
-        message: "sudo is not allowed"
-    default: allow  # explicit — default is deny (fail-closed)
+        message: "Tool Guard: 'sudo' is not allowed for shell:exec."
+      # Deny execution if the command matches a pattern (e.g., rm -rf)
+      - action: deny
+        predicate:
+          type: matches
+          path: "command"
+          value: ".*rm -rf.*"
+        message: "Tool Guard: 'rm -rf' is not allowed for shell:exec."
+    default: allow  # Explicitly allow other commands; default is 'deny' (fail-closed)
+
+  # Example: Guard for memory:store
+  memory:store:
+    rules:
+      # Deny storing nodes with a specific type
+      - action: deny
+        predicate:
+          type: equals
+          path: "node_type"
+          value: "sensitive_info"
+        message: "Tool Guard: Cannot store sensitive_info nodes in memory."
+    default: allow
+
+  # Example: Global guard (applies to all tools)
+  "*":
+    rules:
+      - action: deny
+        predicate: { type: exists, path: "_debug_force_fail" }
+        message: "Tool Guard: Debug force fail enabled."
+    default: allow
 ```
 
-Guards are hot-reloadable via `config:reload`. See [runtime.md](../architecture/runtime.md#tool-guards) for the full reference.
+**Key concepts:**
+- **`tool_guards`**: The top-level key under which all guard definitions reside.
+- **Tool name**: Each key under `tool_guards` specifies the tool to guard (e.g., `shell:exec`, `memory:store`). Use `"*"` for a global guard that applies to all tools.
+- **`rules`**: A list of rule objects. Each rule defines an `action` and a `predicate`.
+- **`action`**: `deny` or `allow`. If a rule matches, this action is taken.
+- **`predicate`**: The condition to check against the tool's input. Predicate types:
+  - `contains`: Checks if a string value contains a substring.
+  - `matches`: Checks if a string value matches a regex pattern.
+  - `equals`: Checks if a value equals another value.
+  - `exists`: Checks if a field exists in the input.
+  - `not`: Inverts another predicate.
+  - `all`: All sub-predicates must be true.
+  - `any`: Any sub-predicate must be true.
+- **`path`**: A JSON pointer path to the field in the tool's input to check (e.g., `command`, `key`, `node_type`).
+- **`value`**: The value to compare against for `contains`, `matches`, `equals` predicates.
+- **`message`**: A custom error message returned if the guard denies the action.
+- **`default`**: `allow` or `deny`. If no rules match, this action is taken. The default is `deny` (fail-closed).
 
+Tool guards are hot-reloadable via `config:reload`. See [runtime.md](../architecture/runtime.md#tool-guards) for the full reference and implementation details.
 ## models.yaml
 
 LLM provider and generation settings.

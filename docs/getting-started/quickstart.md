@@ -4,20 +4,45 @@ Get the Konf platform running locally in 5 minutes.
 
 ---
 
+## The Konf Boot Lifecycle
+
+Konf OS is self-bootstrapping. It uses a specialized "Init Kell" to provision its own infrastructure (Databases, Secrets, Compute) before any other product loads.
+
+### Phase 0: Provision Infrastructure
+
+```bash
+# Clone the repo
+git clone https://github.com/konf-dev/konf-dev-stack.git
+cd konf-dev-stack
+
+# Boot the Init product (PID 1)
+# This uses docker-compose to start Infisical and Postgres
+cargo run --release --bin konf-mcp -- --product init
+```
+
+### Phase 1: Start your Product
+
+Once the infrastructure is healthy, you can start your agents. We recommend using the **Infisical CLI** to inject secrets directly from the Phase 0 vault.
+
+```bash
+# Set up a test secret in the vault
+infisical secrets set TEST_SECRET="hello_world" --env=dev
+
+# Start your product with secret injection
+infisical run --env=dev -- cargo run --release --bin konf-backend -- --product devkit
+```
+
+---
+
 ## Prerequisites
 
 - **Rust** 1.75+ (`rustup` recommended)
-- **PostgreSQL** 15+ with pgvector extension (for smrti backend)
-- **Docker** (optional, for docker-compose setup)
+- **Docker** (to run the `init` product's containers)
+- **Infisical CLI** (recommended for secret management)
 
-If you just need a local Postgres with pgvector quickly:
-```bash
-docker run -d --name konf-pg -p 5432:5432 \
-  -e POSTGRES_PASSWORD=konf -e POSTGRES_DB=konf \
-  pgvector/pgvector:pg17
-```
+---
 
-## Option A: Docker Compose (recommended)
+## Option A: Standalone Docker (The "Old Way")
 
 ```bash
 # Clone the repo

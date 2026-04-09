@@ -212,12 +212,7 @@ pub struct ToolsConfig {
     pub secret: Option<SecretConfig>,
 }
 
-/// Secret configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-pub struct SecretConfig {
-    /// List of environment variable names that are allowed to be read.
-    pub allowed_keys: Vec<String>,
-}
+pub use konf_tool_secret::SecretConfig;
 
 /// Shell sandbox configuration.
 #[derive(Debug, Clone, Deserialize)]
@@ -246,15 +241,14 @@ mod tests {
     #[test]
     fn test_secret_config_parsing() {
         let yaml = r#"
-    secret:
-    allowed_keys:
+secret:
+  allowed_keys:
     - "STRIPE_SECRET_KEY"
     - "ANTHROPIC_API_KEY"
-    "#;
+"#;
         let tools: ToolsConfig = serde_yaml::from_str(yaml).unwrap();
-        let secret = tools.secret.unwrap();
+        let secret = tools.secret.expect("SecretConfig should not be None");
         assert_eq!(secret.allowed_keys, vec!["STRIPE_SECRET_KEY", "ANTHROPIC_API_KEY"]);
-    }
     }
 
     #[test]

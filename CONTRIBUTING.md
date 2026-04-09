@@ -11,6 +11,12 @@ Thank you for your interest in contributing to Konf!
 | **Documentation** | `docs/` | [Docs index](docs/README.md) |
 | **Plugins** (WASM, future) | `sdk/` | [SDK README](sdk/README.md) |
 
+## Terminology Guide
+
+- **`kell`**: The user-facing concept of a Konf application – a directory of YAML configuration.
+- **`ProductConfig`**: The Rust struct representing the loaded configuration of a kell.
+- **`product`**: An informal term, often used interchangeably with `kell` in conversation.
+
 ## Reporting Bugs
 
 Open a [bug report](https://github.com/konf-dev/konf/issues/new?template=bug.yml) with steps to reproduce.
