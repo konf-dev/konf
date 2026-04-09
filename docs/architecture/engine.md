@@ -52,7 +52,7 @@ Every tool publishes identical metadata regardless of source (Rust, MCP, Python)
 
 ```rust
 pub struct ToolInfo {
-    /// Unique tool name, e.g. "memory_search", "ai_complete", "workflow_summarize"
+    /// Unique tool name, e.g. "memory:search", "ai:complete", "workflow:summarize"
     pub name: String,
 
     /// Human-readable description for the LLM
@@ -318,16 +318,16 @@ input_schema:
   properties:
     document: { type: string }
   required: [document]
-capabilities: ["ai_complete"]
+capabilities: ["ai:complete"]
 nodes:
   analyze:
-    do: ai_complete
+    do: ai:complete
     with:
       prompt: "Summarize this: {{input.document}}"
     return: true
 ```
 
-This workflow is callable as `workflow_summarize` from other workflows or MCP clients. The engine creates a `WorkflowTool` wrapper that:
+This workflow is callable as `workflow:summarize` from other workflows (or `workflow_summarize` from MCP clients). The engine creates a `WorkflowTool` wrapper that:
 - Publishes ToolInfo from the workflow's YAML header
 - Creates a child execution scope (attenuated capabilities)
 - Runs the workflow via the runtime
@@ -359,7 +359,7 @@ When `runtime.start()` is called:
 3. **Denied tools are NOT registered** in the per-execution engine — the LLM never sees them
 4. Granted tools are wrapped with `VirtualizedTool` (if bindings exist) and registered
 
-This means: if a scope has capabilities `["memory_search", "ai_complete"]`, the LLM only sees two tools, even if the global registry has 100+. This prevents LLM context overflow and enforces least-privilege — the LLM cannot even attempt to call a tool it wasn't granted.
+This means: if a scope has capabilities `["memory:search", "ai:complete"]`, the LLM only sees two tools, even if the global registry has 100+. This prevents LLM context overflow and enforces least-privilege — the LLM cannot even attempt to call a tool it wasn't granted.
 
 **Why this matters:** MCP clients connecting via konf-mcp will also be scoped. An MCP `tools/list` response only includes tools the client's auth token grants. Different users see different tool sets from the same Konf instance.
 

@@ -173,7 +173,7 @@ Konf uses structural security, not prompt-based trust. The LLM never sees or con
 
 3. **VirtualizedTool** wraps each tool, injecting bound parameters (like `namespace`) into the input before the tool sees it. The LLM requests `memory:search(query="exercise")`. The tool receives `memory:search(query="exercise", namespace="konf:myproduct:user_123")`.
 
-4. **Child workflows** can only attenuate capabilities, never amplify. A workflow with `memory_search` cannot grant `memory_*` to a sub-workflow. This is Fuchsia's capability routing model.
+4. **Child workflows** can only attenuate capabilities, never amplify. A workflow with `memory:search` cannot grant `memory:*` to a sub-workflow. This is Fuchsia's capability routing model.
 
 5. **ResourceLimits** enforce per-scope quotas: max steps, timeout, concurrent nodes, child depth, active runs per namespace.
 
@@ -246,14 +246,14 @@ Product workflows (`config/workflows/chat.yaml`):
 workflow: chat
 description: "Handle a user chat message"
 register_as_tool: true
-capabilities: ["memory_*", "ai_complete"]
+capabilities: ["memory:*", "ai:complete"]
 nodes:
   search:
-    do: memory_search
+    do: memory:search
     with:
       query: "{{input.message}}"
   respond:
-    do: ai_complete
+    do: ai:complete
     with:
       messages:
         - role: system

@@ -150,7 +150,7 @@ The LLM iterates on errors until validation passes. Only then does `workflow_cre
 - Resource quotas cap how many workflows/schedules a user can create
 - Persona evolution is slow (nightly reflect), not reactive (per-message rewrite)
 - No workflow can run faster than the minimum schedule interval (e.g., 1 hour)
-- External tool access (http_get) requires explicit capability grant
+- External tool access (`http:get`) requires explicit capability grant
 
 ---
 
@@ -159,9 +159,9 @@ The LLM iterates on errors until validation passes. Only then does `workflow_cre
 A child scope can be equal to or more restricted than its parent. Never more permissive.
 
 This is Fuchsia's capability routing model:
-- Product grants user: `["memory_*", "ai_complete", "state_*"]`
-- User's workflow creates sub-workflow: can grant at most `["memory_search"]` — a subset
-- Sub-workflow cannot gain `http_get` if the parent doesn't have it
+- Product grants user: `["memory:*", "ai:complete", "state:*"]`
+- User's workflow creates sub-workflow: can grant at most `["memory:search"]` — a subset
+- Sub-workflow cannot gain `http:get` if the parent doesn't have it
 
 Namespace injection is structural, not prompt-based:
 - VirtualizedTool injects `namespace` parameter before the tool sees input
@@ -216,7 +216,7 @@ No silent failures. No invisible state. If you can't observe it, you can't trust
 
 Principle 1 says Rust = mechanisms, workflows = policies. This principle is stronger: **prove you need Rust before writing it.** The default answer is "no, it's a workflow."
 
-**The test:** "Is this impossible to express as a workflow using existing tools?" If `shell_exec` + `ai_complete` + filesystem can do it, it's a workflow. No exceptions.
+**The test:** "Is this impossible to express as a workflow using existing tools?" If `shell:exec` + `ai:complete` + filesystem can do it, it's a workflow. No exceptions.
 
 **What is NOT Rust:**
 - Scheduling (system cron via `shell_exec`, file-based state, LLM-managed)
@@ -259,7 +259,7 @@ The system is an onion:
 
 ```
 Layer 0: Kernel     — konflux engine + konf-runtime (DAG execution, capabilities, limits)
-Layer 1: Shell      — builtin tools (echo, template, shell_exec, ai_complete, http_get, schedule)
+Layer 1: Shell      — builtin tools (echo, template, shell:exec, ai:complete, http:get, schedule)
 Layer 2: Userspace  — workflows that compose tools into behaviors
 Layer 3: Products   — directories of YAML that wire workflows into applications
 Layer 4: Users      — runtime prompt overrides, user-generated workflows

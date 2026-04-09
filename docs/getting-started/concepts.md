@@ -29,12 +29,12 @@ A **workflow** is a directed acyclic graph (DAG) of tool calls, defined in YAML:
 workflow: chat
 nodes:
   search:
-    do: memory_search
+    do: memory:search
     with:
       query: "{{input.message}}"
     then: respond
   respond:
-    do: ai_complete
+    do: ai:complete
     with:
       prompt: "{{input.message}}"
       context: "{{search.results}}"
@@ -49,10 +49,10 @@ A **tool** is a single action the agent can take. Tools are namespaced:
 
 | Namespace | Examples                         |
 |-----------|----------------------------------|
-| `memory`  | `memory_search`, `memory_store`  |
-| `ai`      | `ai_complete`                    |
-| `http`    | `http_get`, `http_post`          |
-| `embed`   | `embed_text`                     |
+| `memory`  | `memory:search`, `memory:store`  |
+| `ai`      | `ai:complete`                    |
+| `http`    | `http:get`, `http:post`          |
+| `embed`   | `ai:embed`                     |
 | `mcp`     | `mcp:*` (external MCP servers)   |
 | builtin   | `echo`                           |
 
@@ -83,9 +83,9 @@ triggers:
   chat:
     workflow: chat
     capabilities:
-      - "memory_*"       # all memory operations
-      - "ai_complete"    # LLM calls
-      - "http_get"       # read-only HTTP
+      - "memory:*"       # all memory operations
+      - "ai:complete"    # LLM calls
+      - "http:get"       # read-only HTTP
 ```
 
 The end user inherits at most these capabilities. The LLM never sees namespace or capability metadata — it only sees the tool interface.

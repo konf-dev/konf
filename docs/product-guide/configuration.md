@@ -30,9 +30,9 @@ triggers:
   chat:
     workflow: chat
     capabilities:
-      - "memory_*"
-      - "ai_complete"
-      - "http_get"
+      - "memory:*"
+      - "ai:complete"
+      - "http:get"
 ```
 
 | Field | Required | Description |
@@ -159,17 +159,17 @@ Each file in `config/workflows/` defines one workflow. See the [creating a produ
 ```yaml
 workflow: chat
 description: "Search memory for context, then respond with LLM"
-capabilities: ["memory_search", "memory_store", "ai_complete"]
+capabilities: ["memory:search", "memory:store", "ai:complete"]
 
 nodes:
   search:
-    do: memory_search
+    do: memory:search
     with:
       query: "{{input.message}}"
     then: respond
 
   respond:
-    do: ai_complete
+    do: ai:complete
     with:
       prompt: "{{input.message}}"
       context: "{{search.results}}"

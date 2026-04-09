@@ -9,13 +9,13 @@
 
 ### 1. Structural security via namespace injection
 
-The LLM never sees the user's namespace. The runtime injects it below the workflow layer via `VirtualizedTool` (in `konf-runtime/src/context.rs`). When the LLM calls `memory_search(query="exercise")`, the tool receives `memory_search(query="exercise", namespace="konf:myproduct:user_123")`. The namespace parameter is invisible to the model and cannot be overridden by prompt injection.
+The LLM never sees the user's namespace. The runtime injects it below the workflow layer via `VirtualizedTool` (in `konf-runtime/src/context.rs`). When the LLM calls `memory:search(query="exercise")`, the tool receives `memory:search(query="exercise", namespace="konf:myproduct:user_123")`. The namespace parameter is invisible to the model and cannot be overridden by prompt injection.
 
 **Status:** Proven, tested.
 
 ### 2. Capability attenuation via Fuchsia-style lattice
 
-Child scopes can only narrow permissions, never widen them (in `konf-runtime/src/scope.rs`). An agent granted `memory_search` cannot delegate `memory_delete` to a sub-agent. This is enforced by the runtime at scope creation time, not by the LLM's compliance with instructions.
+Child scopes can only narrow permissions, never widen them (in `konf-runtime/src/scope.rs`). An agent granted `memory:search` cannot delegate `memory:delete` to a sub-agent. This is enforced by the runtime at scope creation time, not by the LLM's compliance with instructions.
 
 **Status:** Proven, tested.
 
@@ -47,7 +47,7 @@ The architect agent (or any agent) can write and modify YAML workflows at runtim
 
 2. **The kernel validates every workflow before accepting it.** Malformed YAML, unknown tools, and invalid node references are rejected at parse time, before any execution occurs.
 
-3. **The capability lattice prevents privilege escalation.** A workflow cannot require capabilities that the writing agent does not already possess. An agent with `memory_search` cannot create a workflow that uses `memory_delete`.
+3. **The capability lattice prevents privilege escalation.** A workflow cannot require capabilities that the writing agent does not already possess. An agent with `memory:search` cannot create a workflow that uses `memory:delete`.
 
 4. **This is structurally impossible to bypass.** These guarantees are enforced by the Rust runtime, not by prompt instructions. No amount of prompt injection can circumvent compile-time type checking or runtime capability validation.
 

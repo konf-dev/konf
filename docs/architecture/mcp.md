@@ -47,15 +47,15 @@ impl KonfMcpServer {
 
 ### What's exposed
 
-**Tools** — all registered tools:
-- Memory tools: `memory_search`, `memory_store`, `state_*`
-- LLM tools: `ai_complete`
-- HTTP tools: `http_get`, `http_post`
-- Embed tools: `ai_embed`
-- Workflow tools: `workflow_chat`, `workflow_summarize`, etc.
+**Tools** — all registered tools. The MCP server translates the kernel's colon-namespaced names (e.g., `memory:search`) to underscore-separated names (`memory_search`) for MCP clients, per the MCP spec.
+- Memory tools: `memory:search`, `memory:store`, `state:*`
+- LLM tools: `ai:complete`
+- HTTP tools: `http:get`, `http:post`
+- Embed tools: `ai:embed`
+- Workflow tools: `workflow:chat`, `workflow:summarize`, etc.
 - MCP-forwarded tools: `brave:search`, `github:create_issue`, etc.
 
-Each tool's `ToolInfo` is translated to MCP's tool definition format. Annotations map directly:
+Each tool's `ToolInfo` is translated to MCP's tool definition format. The name translation is handled by an adapter. Annotations map directly:
 - `read_only` → `readOnlyHint`
 - `destructive` → `destructiveHint`
 - `idempotent` → `idempotentHint`
@@ -109,6 +109,22 @@ konf --mcp-sse --port 3001 --config ./config
 ```
 
 Both modes use konf-init to boot the engine. No HTTP server, no auth middleware, no scheduling.
+
+### Name Translation (Colon → Underscore)
+
+**The kernel uses colons for tool namespacing** (e.g., `memory:search`, `ai:complete`). This is the canonical representation used in workflows, capabilities, and all internal logic.
+
+However, the **MCP spec (SEP-986) restricts tool names** to the character set `[A-Za-z0-9_\-.]`. Colons are not permitted.
+
+To ensure compliance, the `konf-mcp` server includes a lightweight adapter that translates tool names at the boundary:
+- `memory:search` → `memory_search`
+- `workflow:chat` → `workflow_chat`
+
+This translation is **transparent** and happens only at the MCP server boundary for outbound `tools/list` responses and inbound `tools/call` requests.
+- **MCP clients** see and call tools with underscores.
+- **Internal workflows** and capability grants use colons.
+
+This allows Konf to maintain its internal namespacing convention while remaining 100% compliant with the public MCP specification. The original reason for this was a bug in an early client, but the implementation now serves to enforce spec compliance.
 
 ---
 
@@ -238,10 +254,10 @@ mcp_servers:
   - name: instance-b
     transport: sse
     url: "http://instance-b:3001/mcp"
-    capabilities: ["workflow_*"]
+    capabilities: ["workflow:*"]
 ```
 
-Now Instance A's agents can call `workflow_summarize` which actually executes on Instance B. Transparent to the agent.
+Now Instance A's agents can call `workflow:summarize` which actually executes on Instance B. The MCP client will see the tool as `workflow_summarize`, but the call from within an Instance A workflow should use the kernel name `workflow:summarize`. This is transparent to the agent.
 
 ---
 

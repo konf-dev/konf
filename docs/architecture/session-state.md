@@ -56,23 +56,23 @@ Primary key: `(namespace, session_id, key)`.
 
 ### Behavior
 
-- `state_set` upserts (INSERT ON CONFLICT UPDATE). Overwrites value and resets `updated_at`.
-- `state_get` returns `None`/null if key doesn't exist or has expired.
-- `state_delete` removes a single key. Returns whether the key existed.
-- `state_clear` removes ALL keys for a session. Returns count of keys removed.
-- `state_list` returns all non-expired keys for a session as `[(key, value)]`.
+- `state:set` upserts (INSERT ON CONFLICT UPDATE). Overwrites value and resets `updated_at`.
+- `state:get` returns `None`/null if key doesn't exist or has expired.
+- `state:delete` removes a single key. Returns whether the key existed.
+- `state:clear` removes ALL keys for a session. Returns count of keys removed.
+- `state:list` returns all non-expired keys for a session as `[(key, value)]`.
 - Expired rows are filtered on read (`WHERE expires_at IS NULL OR expires_at > NOW()`).
 - Expired rows are cleaned up periodically (lazy cleanup on read is fine; optional background cleanup).
 
 ### TTL
 
-`state_set` accepts an optional `ttl_seconds: int` parameter. If set, `expires_at = NOW() + interval`. If not set, `expires_at = NULL` (lives until explicitly cleared or session ends).
+`state:set` accepts an optional `ttl_seconds: int` parameter. If set, `expires_at = NOW() + interval`. If not set, `expires_at = NULL` (lives until explicitly cleared or session ends).
 
 ```yaml
 # In a workflow — expires in 1 hour
 nodes:
   save_plan:
-    do: state_set
+    do: state:set
     with:
       key: "plan"
       value: { steps: ["step1", "step2"] }
@@ -80,12 +80,12 @@ nodes:
       ttl_seconds: 3600
 
   save_prefs:
-    do: state_set
+    do: state:set
     with:
       key: "preferences"
       value: { format: "markdown" }
       session_id: "{{input.session_id}}"
-      # No ttl_seconds — lives until state_clear
+      # No ttl_seconds — lives until state:clear
 ```
 
 ### Configuration
@@ -101,9 +101,9 @@ Backend-specific TTL and cleanup settings are configured in tools.yaml under the
 
 ### Error Handling
 
-- `state_get` for non-existent key: returns `{"value": null, "_meta": {"found": false}}`
-- `state_set` with invalid value (not JSON-serializable): raises `ValidationError`
-- `state_clear` for non-existent session: returns `{"cleared": 0, "_meta": {...}}` (not an error)
+- `state:get` for non-existent key: returns `{"value": null, "_meta": {"found": false}}`
+- `state:set` with invalid value (not JSON-serializable): raises `ValidationError`
+- `state:clear` for non-existent session: returns `{"cleared": 0, "_meta": {...}}` (not an error)
 
 ### Testing
 
@@ -114,4 +114,4 @@ Backend-specific TTL and cleanup settings are configured in tools.yaml under the
 - Session isolation: set in session A, verify not visible in session B
 - Concurrent access: multiple sets to same key from different tasks
 - Large values: JSONB with nested structures, arrays
-- state_list ordering: consistent ordering (by key name)
+- `state:list` ordering: consistent ordering (by key name)
