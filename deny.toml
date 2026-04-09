@@ -1,8 +1,6 @@
 [advisories]
 vulnerability = "deny"
-unmaintained = "warn"
-yanked = "warn"
-notice = "warn"
+# unmaintained, yanked, and notice settings removed to avoid schema version issues in CI
 
 [licenses]
 unlicensed = "deny"
