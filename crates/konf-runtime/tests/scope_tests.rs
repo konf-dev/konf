@@ -160,17 +160,22 @@ fn test_resource_limits_default_values() {
 
 #[test]
 fn test_resource_limits_validation_rejects_zero() {
-    let mut limits = ResourceLimits::default();
-
-    limits.max_steps = 0;
+    let limits = ResourceLimits {
+        max_steps: 0,
+        ..ResourceLimits::default()
+    };
     assert!(limits.validate().is_err());
-    limits.max_steps = 1000;
 
-    limits.max_workflow_timeout_ms = 0;
+    let limits = ResourceLimits {
+        max_workflow_timeout_ms: 0,
+        ..ResourceLimits::default()
+    };
     assert!(limits.validate().is_err());
-    limits.max_workflow_timeout_ms = 300_000;
 
-    limits.max_active_runs_per_namespace = 0;
+    let limits = ResourceLimits {
+        max_active_runs_per_namespace: 0,
+        ..ResourceLimits::default()
+    };
     assert!(limits.validate().is_err());
 }
 

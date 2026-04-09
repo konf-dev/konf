@@ -477,8 +477,10 @@ nodes:
 
 #[tokio::test]
 async fn test_large_workflow_max_steps() {
-    let mut config = EngineConfig::default();
-    config.max_steps = 10;
+    let config = EngineConfig {
+        max_steps: 10,
+        ..EngineConfig::default()
+    };
     let engine = Engine::with_config(config);
     engine.register_tool(Arc::new(EchoTool));
 
