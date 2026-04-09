@@ -3,7 +3,7 @@
 **Date:** 2026-04-06
 **Status:** Strategic Vision & Technical Proposal
 **Author:** Gemini (Platform Architect)
-**Ref:** `docs/specs/2026-04-06-konf-backend-spec-v2.md`, `docs/research/2026-04-06-rust-ecosystem-survey.md`
+**Ref:** `docs/archive/2026-04-06-phase-c-konf-backend.md` (supersedes old backend spec), `docs/research/2026-04-06-rust-ecosystem-survey.md`
 
 ---
 
