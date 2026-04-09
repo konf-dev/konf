@@ -9,17 +9,21 @@
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| A-D | **Done** | Core engine, runtime, tools, transports (10 crates, 165 tests) |
+| A-D | **Done** | Core engine, runtime, tools, transports (12 crates, 165+ tests) |
 | G1-G2 | **Done** | CI, Docker |
-| **E1** | **Next** | Shell tool + sandbox container — agent gets OS access |
-| **E2** | Next | Extend ai_complete for agent-mode (tool selection in workflow YAML) |
-| **E3** | Next | products/architect — first product bootstraps the ecosystem |
+| E1 | **Done** | Shell tool + sandbox container |
+| E2 | **Partial** | MCP E2E validated (Experiment 001). Nested composition verified. Docs fixed. |
+| **E3** | **Next** | products/architect — first product, or Experiment 003 (dev env as product) |
 | E4 | After E3 | SQLite backend — prove portability |
 | E5 | After E3 | WASM adapter — prove open architecture |
+| **F** | **Planned** | Civilization primitives — hooks, event bus, dynamic agents, MCP sessions |
 | G3 | Planned | OpenTelemetry, OpenAPI docs |
 
-> **Monorepo migration complete.** All 10 crates now live under `crates/` in a single Cargo workspace
+> **Monorepo migration complete.** All 12 crates now live under `crates/` in a single Cargo workspace
 > (`konf`). The license is BSL-1.1. smrti remains an external dependency at konf-dev/smrti.
+>
+> **Strategic roadmap:** See `konf-experiments/experiments/ROADMAP-2026-04-09.md` for the full
+> execution plan integrating experiment findings with the civilization vision.
 
 ---
 
