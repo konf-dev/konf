@@ -156,13 +156,39 @@ Then:
 docker compose up
 ```
 
-## 9. Test
+## 10. (Optional) Add Tool Guards and Roles
 
-Health check:
+For production systems, you can add security boundaries in `tools.yaml`.
 
-```bash
-curl http://localhost:8000/v1/health
+**Tool Guards** deny specific tool invocations based on input parameters. For example, to prevent `shell:exec` from running `rm -rf` or `sudo`:
+
+```yaml
+# config/tools.yaml
+tool_guards:
+  shell:exec:
+    rules:
+      - action: deny
+        predicate: { type: contains, path: "command", value: "sudo" }
+        message: "sudo is not allowed"
+      - action: deny
+        predicate: { type: matches, path: "command", value: "rm -rf" }
+        message: "recursive force delete is not allowed"
+    default: allow
 ```
+
+**Roles** define capability sets for different user types, which are then enforced by the runtime for authenticated requests.
+
+```yaml
+# config/tools.yaml
+roles:
+  admin:
+    capabilities: ["*"] # Full access
+  agent:
+    capabilities: ["memory:*", "ai:complete", "http:get"]
+  guest:
+    capabilities: ["memory:search"]
+```
+
 
 Send a message:
 
@@ -179,6 +205,61 @@ curl -N -X POST http://localhost:8000/v1/chat/stream \
   -H "Content-Type: application/json" \
   -d '{"message": "Tell me about yourself"}'
 ```
+
+## Example: Autonomous Agent
+
+You can create autonomous agents that run on a schedule. This example uses the `nightwatch.yaml` workflow from the `devkit` product, which periodically runs a health check.
+
+**1. The workflow (`nightwatch.yaml`):**
+
+This workflow runs another workflow (`workflow:dev_status`) and logs the result to a file.
+
+```yaml
+workflow: nightwatch
+description: "Health check agent. Runs dev_status and logs the result."
+register_as_tool: true
+capabilities: ["shell:exec", "workflow:dev_status"]
+nodes:
+  health_check:
+    do: workflow:dev_status
+    then: log_result
+  log_result:
+    do: shell:exec
+    with:
+      command: "echo \"[$(date -Iseconds)] OK\" >> /tmp/health.log"
+    return: true
+```
+
+**2. The scheduler workflow (`schedule_nightwatch.yaml`):**
+
+This workflow uses the `schedule:create` tool to run the `nightwatch` workflow every 60 seconds.
+
+```yaml
+workflow: schedule_nightwatch
+description: "Schedule the nightwatch agent to run periodically"
+capabilities: ["schedule:create"]
+nodes:
+  schedule:
+    do: schedule:create
+    with:
+      workflow: "nightwatch"
+      delay_seconds: 60
+      repeat: true
+    return: true
+```
+
+**3. Trigger it:**
+
+To start the agent, invoke the `schedule_nightwatch` workflow once. It will then run indefinitely.
+
+```bash
+curl -X POST http://localhost:8000/v1/invoke/schedule_nightwatch
+```
+
+The agent is now running. You can monitor its health log at `/tmp/health.log`. To stop it, you would need a `cancel:schedule` workflow.
+
+This pattern (a workflow that does work + a workflow that schedules it) is the foundation for all autonomous behavior in Konf.
+
 
 ## Final Structure
 

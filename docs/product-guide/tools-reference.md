@@ -105,6 +105,28 @@ In addition to `echo`, the following built-in tools are always available without
 | **Input** | `text: string`, `model: string` (optional, uses default) |
 | **Enable** | `tools.embed` section in `tools.yaml` |
 
+### schedule:create
+
+| Field | Value |
+|-------|-------|
+| **Name** | `schedule:create` |
+| **Description** | Schedule a workflow to run after a delay. Can be repeating. |
+| **Input** | `workflow: string` (name), `input: object` (workflow args), `delay_seconds: int` (1-604800), `repeat: bool` (default false) |
+| **Output** | `{ schedule_id: string }` |
+| **Enable** | Always available |
+| **Capability** | `schedule:create` or `schedule:*` |
+
+### cancel:schedule
+
+| Field | Value |
+|-------|-------|
+| **Name** | `cancel:schedule` |
+| **Description** | Cancel a previously scheduled workflow. |
+| **Input** | `schedule_id: string` |
+| **Output** | `{ cancelled: bool }` |
+| **Enable** | Always available |
+| **Capability** | `cancel:schedule` or `schedule:*` |
+
 ## MCP Tools (`mcp:*`)
 
 MCP (Model Context Protocol) servers expose external tools via a standardized protocol. Any tool from an MCP server appears as `mcp:<server>:<tool_name>`.

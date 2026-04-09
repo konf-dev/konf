@@ -74,7 +74,31 @@ mcp_servers:
 - `mcp_servers.*` — external MCP server definitions. See [tools-reference.md](tools-reference.md).
 - **Environment variables:** `tools.yaml` supports `${VAR}` and `${VAR:-default}` interpolation. Missing variables without a default resolve to an empty string. `konf.toml` also supports env var overrides via the `KONF_` prefix.
 - `tool_guards.*` — deny/allow rules per tool. See below.
-- `roles.*` — role → capability mapping for auth scoping. See [runtime.md](../architecture/runtime.md#auth-scoping).
+- `roles.*` — role → capability mapping for auth scoping. See below.
+
+### Roles
+
+Roles define capability grants for different actor types. The runtime uses these to create scoped contexts for authenticated users.
+
+```yaml
+roles:
+  admin:
+    capabilities: ["*"] # Full access
+  agent:
+    capabilities:
+      - "memory:*"
+      - "state:*"
+      - "ai:complete"
+      - "http:get"
+      - "schedule:create"
+      - "cancel:schedule"
+  guest:
+    capabilities:
+      - "memory:search"
+      - "ai:complete"
+```
+
+See [runtime.md](../architecture/runtime.md#auth-scoping) for how roles are used in the capability lattice.
 
 ### Tool Guards
 
@@ -82,7 +106,7 @@ Define deny/allow rules that are evaluated before every tool invocation:
 
 ```yaml
 tool_guards:
-  shell_exec:
+  shell:exec:
     rules:
       - action: deny
         predicate:
@@ -93,7 +117,7 @@ tool_guards:
     default: allow  # explicit — default is deny (fail-closed)
 ```
 
-Guards are hot-reloadable via `config_reload`. See [runtime.md](../architecture/runtime.md#tool-guards) for the full reference.
+Guards are hot-reloadable via `config:reload`. See [runtime.md](../architecture/runtime.md#tool-guards) for the full reference.
 
 ## models.yaml
 
