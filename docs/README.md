@@ -35,6 +35,4 @@
 - [Service Model](architecture/service-model.md) — How Konf runs as a service
 
 ### Internal
-- [Research](research/) — Architecture research and evaluations
 - [Plans](plans/) — Implementation roadmaps
-- [Archive](archive/) — Superseded documents
