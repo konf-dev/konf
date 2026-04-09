@@ -13,12 +13,12 @@ nodes:
   build:
     do: shell_exec
     with:
-      command: "cd /home/bert/Work/orgs/konf-dev-stack/konf && cargo build --release --bin konf-mcp 2>&1 | tail -3"
+      command: "cd ${KONF_WORKSPACE}/konf && cargo build --release --bin konf-mcp 2>&1 | tail -3"
     then: size
   size:
     do: shell_exec
     with:
-      command: "ls -lh /home/bert/Work/orgs/konf-dev-stack/konf/target/release/konf-mcp | awk '{print $5, $9}'"
+      command: "ls -lh ${KONF_WORKSPACE}/konf/target/release/konf-mcp | awk '{print $5, $9}'"
     then: report
   report:
     do: template

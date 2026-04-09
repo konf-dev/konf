@@ -9,7 +9,7 @@ nodes:
   clippy:
     do: shell_exec
     with:
-      command: "cd /home/bert/Work/orgs/konf-dev-stack/konf && cargo clippy --workspace -- -D warnings 2>&1 | tail -5"
+      command: "cd ${KONF_WORKSPACE}/konf && cargo clippy --workspace -- -D warnings 2>&1 | tail -5"
     then: report
   report:
     do: template

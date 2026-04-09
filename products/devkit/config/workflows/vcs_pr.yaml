@@ -1,0 +1,34 @@
+workflow: vcs_pr
+description: "Open a pull request from the agent's branch for human review"
+register_as_tool: true
+capabilities: [github:create_pull_request]
+input_schema:
+  type: object
+  properties:
+    repo:
+      type: string
+      description: "Repository name (e.g. 'konf')"
+    branch:
+      type: string
+      description: "Agent branch name (will be prefixed with agent/devkit/)"
+    base:
+      type: string
+      description: "Target branch (e.g. 'experiments/v1' or 'main')"
+    title:
+      type: string
+      description: "PR title"
+    body:
+      type: string
+      description: "PR description"
+  required: [repo, branch, base, title]
+nodes:
+  open:
+    do: github:create_pull_request
+    with:
+      owner: "konf-dev"
+      repo: "{{input.repo}}"
+      head: "agent/devkit/{{input.branch}}"
+      base: "{{input.base}}"
+      title: "{{input.title}}"
+      body: "{{input.body}}"
+    return: true

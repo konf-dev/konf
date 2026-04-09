@@ -108,9 +108,24 @@ Backed by reqwest. Configurable max timeout (default 30s, capped at 300s). Retur
 
 | Tool | Description | Annotations |
 |------|-------------|-------------|
-| `ai_complete` | LLM completion with optional tool-calling loop (ReAct) | open_world, supports_streaming |
+| `ai_complete` | LLM completion with capability-enforced tool-calling loop (ReAct) | open_world, supports_streaming |
 
-`ai_complete` supports both batch and streaming modes via the Tool trait's `invoke()` and `invoke_streaming()` methods. The `open_world` annotation reflects the LLM API call itself; tools invoked within the ReAct loop have their own annotations checked independently.
+`ai_complete` is the keystone agentic tool. The kernel owns the ReAct loop — not the LLM, not application code.
+
+**How it works:**
+1. At invocation, tools are resolved dynamically from the engine's live registry
+2. Only tools that pass the caller's `ToolContext.capabilities` (same lattice as the executor) are exposed to the LLM
+3. An optional `tools` whitelist in `with:` further restricts visibility (AND with capabilities)
+4. The LLM calls tools → kernel dispatches → feeds results back → repeats until text response or `max_iterations`
+5. `ai_complete` itself is excluded from inner tools to prevent unbounded recursion (unless explicitly whitelisted)
+
+**Streaming events emitted per iteration:**
+- `Status { iteration, max }` — before each LLM call
+- `ToolStart { tool, input, call_id }` — before each inner tool dispatch
+- `ToolEnd { tool, call_id, duration_ms, output_preview }` — after each inner tool dispatch
+- `TextDelta` — final text response
+
+**Per-node overrides:** `model`, `temperature`, `max_tokens`, `max_iterations`, `provider` can be overridden in `with:` per workflow node.
 
 Backed by rig-core. Supports OpenAI, Anthropic, Google, and any OpenAI-compatible API (ollama, vLLM). Provider and model configurable via tools.yaml.
 

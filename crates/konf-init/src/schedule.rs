@@ -7,12 +7,14 @@
 //! like `timer_create` with `it_interval` set. The workflow stays clean —
 //! it doesn't know it's being repeated. Scheduling is a separate concern.
 
+use std::collections::HashMap as StdHashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use konflux::error::ToolError;
@@ -28,6 +30,10 @@ const MAX_DELAY_MS: u64 = 7 * 24 * 3600 * 1_000;
 
 /// Monotonic counter for unique schedule IDs.
 static SCHEDULE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Global map of active schedule handles. Used by `cancel_schedule` to abort timers.
+static SCHEDULE_HANDLES: std::sync::LazyLock<std::sync::Mutex<StdHashMap<u64, JoinHandle<()>>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(StdHashMap::new()));
 
 /// A tool that schedules a workflow to run after a delay.
 ///
@@ -136,7 +142,7 @@ impl Tool for ScheduleTool {
         let workflow_id_owned = workflow_id.to_string();
         let tool_name_owned = tool_name.clone();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
 
@@ -178,6 +184,11 @@ impl Tool for ScheduleTool {
             }
         });
 
+        // Store handle for cancellation via cancel_schedule tool.
+        if let Ok(mut handles) = SCHEDULE_HANDLES.lock() {
+            handles.insert(schedule_id, handle);
+        }
+
         Ok(json!({
             "scheduled": true,
             "workflow": workflow_id,
@@ -185,6 +196,68 @@ impl Tool for ScheduleTool {
             "repeat": repeat,
             "schedule_id": schedule_id,
         }))
+    }
+}
+
+/// Cancel a previously scheduled workflow by its `schedule_id`.
+///
+/// Aborts the tokio task. If the workflow is mid-execution, it will be
+/// interrupted at the next `.await` point.
+pub struct CancelScheduleTool;
+
+#[async_trait]
+impl Tool for CancelScheduleTool {
+    fn info(&self) -> ToolInfo {
+        ToolInfo {
+            name: "cancel_schedule".into(),
+            description: "Cancel a scheduled workflow by its schedule_id. \
+                Stops repeating timers and aborts pending one-shot schedules.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "schedule_id": {
+                        "type": "integer",
+                        "description": "The schedule_id returned by the schedule tool"
+                    }
+                },
+                "required": ["schedule_id"]
+            }),
+            output_schema: None,
+            capabilities: vec!["schedule".into()],
+            supports_streaming: false,
+            annotations: Default::default(),
+        }
+    }
+
+    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+        let schedule_id = input.get("schedule_id")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| ToolError::ExecutionFailed {
+                message: "missing required field: schedule_id".into(),
+                retryable: false,
+            })?;
+
+        let cancelled = if let Ok(mut handles) = SCHEDULE_HANDLES.lock() {
+            if let Some(handle) = handles.remove(&schedule_id) {
+                handle.abort();
+                info!(schedule_id, "Cancelled scheduled workflow");
+                true
+            } else {
+                false
+            }
+        } else {
+            warn!("Failed to lock schedule handles map");
+            false
+        };
+
+        if cancelled {
+            Ok(json!({ "cancelled": true, "schedule_id": schedule_id }))
+        } else {
+            Err(ToolError::ExecutionFailed {
+                message: format!("schedule_id {schedule_id} not found or already completed"),
+                retryable: false,
+            })
+        }
     }
 }
 
@@ -250,9 +323,23 @@ mod tests {
     #[tokio::test]
     async fn test_repeat_defaults_to_false() {
         let tool = ScheduleTool::new(make_runtime().await);
-        // No repeat field — should default to false (visible in response)
         let result = tool.invoke(json!({"workflow": "nonexistent", "delay_ms": 5000}), &test_ctx()).await;
-        // Will fail on workflow lookup, but we're testing parsing
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_cancel_nonexistent_schedule() {
+        let tool = CancelScheduleTool;
+        let result = tool.invoke(json!({"schedule_id": 99999}), &test_ctx()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_tool_info() {
+        let tool = CancelScheduleTool;
+        let info = tool.info();
+        assert_eq!(info.name, "cancel_schedule");
+        assert_eq!(info.capabilities, vec!["schedule"]);
     }
 }

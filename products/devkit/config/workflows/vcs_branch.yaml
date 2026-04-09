@@ -1,0 +1,26 @@
+workflow: vcs_branch
+description: "Create a new branch for an agent, scoped to agent/{actor_id}/ prefix"
+register_as_tool: true
+capabilities: [github:create_branch]
+input_schema:
+  type: object
+  properties:
+    repo:
+      type: string
+      description: "Repository name (e.g. 'konf')"
+    branch:
+      type: string
+      description: "Branch name (will be prefixed with agent/{actor_id}/)"
+    from_branch:
+      type: string
+      description: "Source branch to create from (e.g. 'experiments/v1')"
+  required: [repo, branch]
+nodes:
+  create:
+    do: github:create_branch
+    with:
+      owner: "konf-dev"
+      repo: "{{input.repo}}"
+      branch: "agent/devkit/{{input.branch}}"
+      from_branch: "{{input.from_branch}}"
+    return: true

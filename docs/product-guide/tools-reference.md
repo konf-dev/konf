@@ -62,9 +62,12 @@ nodes:
 | Field | Value |
 |-------|-------|
 | **Name** | `ai_complete` |
-| **Description** | Generate a completion from the configured LLM. |
-| **Input** | `prompt: string`, `context: string` (optional), `system: string` (optional), `temperature: float` (optional) |
+| **Description** | LLM completion with capability-enforced tool-calling (ReAct loop). The kernel owns the loop — tools are resolved dynamically from the live registry, filtered by the caller's capabilities. |
+| **Input** | `prompt: string`, `system: string` (optional), `messages: array` (optional, multi-turn history), `tools: string[]` (optional, explicit tool whitelist — AND with capabilities), `model: string` (optional, override), `temperature: float` (optional, override), `max_tokens: int` (optional, override), `max_iterations: int` (optional, override, default 10) |
+| **Output** | `{ text: string, _meta: { tool, provider, model, duration_ms, iterations, tool_calls } }` |
 | **Enable** | `tools.llm` section in `tools.yaml` |
+| **Streaming** | Emits `ToolStart`, `ToolEnd`, `TextDelta`, `Status` events during the ReAct loop |
+| **Security** | Inner tools inherit the caller's capabilities. `ai_complete` excluded from inner tools unless explicitly whitelisted. Empty capabilities deny all tools. |
 
 ### http_get
 

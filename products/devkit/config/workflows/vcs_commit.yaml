@@ -1,0 +1,38 @@
+workflow: vcs_commit
+description: "Push files to the agent's scoped branch. Commits as konf-agents[bot]."
+register_as_tool: true
+capabilities: [github:push_files]
+input_schema:
+  type: object
+  properties:
+    repo:
+      type: string
+      description: "Repository name (e.g. 'konf')"
+    branch:
+      type: string
+      description: "Branch name (will be prefixed with agent/devkit/)"
+    message:
+      type: string
+      description: "Commit message"
+    files:
+      type: array
+      description: "Files to push"
+      items:
+        type: object
+        properties:
+          path:
+            type: string
+          content:
+            type: string
+        required: [path, content]
+  required: [repo, branch, message, files]
+nodes:
+  push:
+    do: github:push_files
+    with:
+      owner: "konf-dev"
+      repo: "{{input.repo}}"
+      branch: "agent/devkit/{{input.branch}}"
+      message: "{{input.message}}"
+      files: "{{input.files}}"
+    return: true

@@ -3,7 +3,7 @@
 **Date:** 2026-04-06 (rewritten for all-Rust architecture)
 **Status:** Replaces the Python/FastAPI plan
 **Spec:** `docs/specs/2026-04-06-konf-backend-spec-v2.md`
-**Implementation plan:** See `/home/bert/.claude/plans/bright-conjuring-unicorn.md` for detailed step-by-step
+**Implementation plan:** See `the plan file (session-specific)` for detailed step-by-step
 
 ---
 

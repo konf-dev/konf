@@ -157,10 +157,11 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
         config_dir.to_path_buf(),
     )));
 
-    // 9c. Register schedule tool (timer primitive for autonomous agents).
+    // 9c. Register schedule + cancel_schedule tools (timer primitives for autonomous agents).
     runtime.engine().register_tool(Arc::new(schedule::ScheduleTool::new(
         runtime.clone(),
     )));
+    runtime.engine().register_tool(Arc::new(schedule::CancelScheduleTool));
 
     // 10. Register workflows as tools (needs runtime for WorkflowTool)
     // IMPORTANT: Register into the runtime's engine, not the original clone.
