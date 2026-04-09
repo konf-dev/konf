@@ -19,7 +19,7 @@ pub mod template;
 pub mod builtin;
 pub mod hooks;
 
-pub use engine::{Engine, EngineConfig};
+pub use engine::{Engine, EngineConfig, ToolChangedReceiver};
 pub use workflow::Workflow;
 pub use tool::{Tool, ToolInfo, ToolAnnotations, ToolContext, ToolRegistry};
 pub use resource::{Resource, ResourceInfo, ResourceRegistry, ResourceError, ResourceChanged};

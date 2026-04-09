@@ -47,9 +47,22 @@ impl KonfMcpServer {
     /// Serve MCP over stdio (for CLI / Claude Desktop integration).
     pub async fn serve_stdio(self) -> anyhow::Result<()> {
         tracing::info!("Starting MCP server on stdio");
+        let mut tool_changed_rx = self.engine.subscribe_tool_changes();
         let transport = rmcp::transport::stdio();
         let service = self.serve(transport).await
             .map_err(|e| anyhow::anyhow!("MCP stdio server failed: {e}"))?;
+
+        // Spawn a task that watches for tool-list changes and notifies the MCP client.
+        let peer = service.peer().clone();
+        tokio::spawn(async move {
+            while tool_changed_rx.changed().await.is_ok() {
+                tracing::info!("Tool list changed, sending notifications/tools/list_changed");
+                if let Err(e) = peer.notify_tool_list_changed().await {
+                    tracing::warn!(error = %e, "Failed to send tool_list_changed notification");
+                }
+            }
+        });
+
         service.waiting().await
             .map_err(|e| anyhow::anyhow!("MCP stdio server error: {e}"))?;
         Ok(())
@@ -99,6 +112,7 @@ impl ServerHandler for KonfMcpServer {
         ServerInfo::new(
             ServerCapabilities::builder()
                 .enable_tools()
+                .enable_tool_list_changed()
                 .enable_resources()
                 .build()
         )

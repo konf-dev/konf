@@ -424,6 +424,9 @@ impl konflux::tool::Tool for ConfigReloadTool {
 
                 let total_tools = self.runtime.engine().registry().len();
 
+                // Signal MCP server (and any other listeners) that tools changed
+                self.engine.notify_tools_changed();
+
                 info!(
                     config_dir = %self.config_dir.display(),
                     removed = workflow_tool_names.len(),

@@ -17,6 +17,9 @@ use crate::stream::{stream_channel, StreamReceiver, StreamEvent};
 use crate::tool::{Tool, ToolRegistry};
 use crate::workflow::Workflow;
 
+/// Receiver for tool-list-changed notifications.
+pub type ToolChangedReceiver = tokio::sync::watch::Receiver<u64>;
+
 /// Configuration for the engine. All values are configurable — no hardcoded defaults
 /// in the executor or other modules. Change these to tune behavior.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -91,30 +94,53 @@ pub struct Engine {
     resources: Arc<std::sync::RwLock<ResourceRegistry>>,
     prompts: Arc<std::sync::RwLock<PromptRegistry>>,
     config: EngineConfig,
+    /// Monotonic counter incremented when the tool list changes.
+    /// Listeners (e.g., MCP server) watch this to send notifications.
+    tool_changed_tx: Arc<tokio::sync::watch::Sender<u64>>,
+    tool_changed_rx: ToolChangedReceiver,
 }
 
 impl Engine {
     pub fn new() -> Self {
+        let (tx, rx) = tokio::sync::watch::channel(0u64);
         Self {
             tools: Arc::new(std::sync::RwLock::new(ToolRegistry::new())),
             resources: Arc::new(std::sync::RwLock::new(ResourceRegistry::new())),
             prompts: Arc::new(std::sync::RwLock::new(PromptRegistry::new())),
             config: EngineConfig::default(),
+            tool_changed_tx: Arc::new(tx),
+            tool_changed_rx: rx,
         }
     }
 
     pub fn with_config(config: EngineConfig) -> Self {
+        let (tx, rx) = tokio::sync::watch::channel(0u64);
         Self {
             tools: Arc::new(std::sync::RwLock::new(ToolRegistry::new())),
             resources: Arc::new(std::sync::RwLock::new(ResourceRegistry::new())),
             prompts: Arc::new(std::sync::RwLock::new(PromptRegistry::new())),
             config,
+            tool_changed_tx: Arc::new(tx),
+            tool_changed_rx: rx,
         }
     }
 
     /// Get the engine configuration.
     pub fn config(&self) -> &EngineConfig {
         &self.config
+    }
+
+    /// Signal that the tool list has changed. Listeners (e.g., MCP server)
+    /// will be notified to send `notifications/tools/list_changed`.
+    pub fn notify_tools_changed(&self) {
+        let prev = *self.tool_changed_tx.borrow();
+        // send is infallible when there is at least one receiver (we hold one)
+        let _ = self.tool_changed_tx.send(prev.wrapping_add(1));
+    }
+
+    /// Subscribe to tool-list-changed notifications.
+    pub fn subscribe_tool_changes(&self) -> ToolChangedReceiver {
+        self.tool_changed_rx.clone()
     }
 
     // ---- Tool registry ----
