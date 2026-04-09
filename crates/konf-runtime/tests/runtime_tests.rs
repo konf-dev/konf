@@ -7,7 +7,6 @@
 //! Skip these tests in CI without Postgres by running:
 //!   cargo test --lib  (unit tests only)
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
