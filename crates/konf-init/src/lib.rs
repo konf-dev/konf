@@ -23,10 +23,9 @@ pub use config::{PlatformConfig, ProductConfig, ToolsConfig, AuthConfig, ServerC
 
 /// A fully booted Konf instance, ready for transport shells to serve.
 pub struct KonfInstance {
-    /// The engine with all tools, resources, and prompts registered
-    pub engine: Arc<Engine>,
-
-    /// The runtime with process management and optional journal
+    /// The runtime with process management and optional journal.
+    /// Access the engine via `runtime.engine()` — this is the canonical
+    /// tool registry containing all tools including workflow tools.
     pub runtime: Arc<Runtime>,
 
     /// The loaded and validated platform configuration
@@ -148,28 +147,38 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     );
     info!("Runtime initialized");
 
-    // 9b. Register config_reload tool (needs engine + runtime)
-    engine.register_tool(Arc::new(ConfigReloadTool::new(
-        Arc::new(engine.clone()),
+    // 9b. Register config_reload tool into the runtime's engine.
+    // ConfigReloadTool must operate on the same engine the runtime uses
+    // so that reloaded workflow tools are visible in child scopes.
+    runtime.engine().register_tool(Arc::new(ConfigReloadTool::new(
         runtime.clone(),
         config_dir.to_path_buf(),
     )));
 
     // 10. Register workflows as tools (needs runtime for WorkflowTool)
+    // IMPORTANT: Register into the runtime's engine, not the original clone.
+    // The runtime owns its own Engine instance (cloned at step 9). WorkflowTool
+    // runs via runtime.run() which copies tools from runtime.engine — so workflow
+    // tools MUST be in the runtime's engine to be available in child scopes.
     let workflows_dir = config_dir.join("workflows");
     if workflows_dir.is_dir() {
-        register_workflows(&engine, &runtime, &workflows_dir)?;
+        register_workflows(runtime.engine(), &runtime, &workflows_dir)?;
     }
 
-    let final_tool_count = engine.registry().len();
+    let final_tool_count = runtime.engine().registry().len();
     info!(tools = final_tool_count, resources = engine.resources().len(), "Registration complete");
 
     // 11. Return instance
     let config = Arc::new(config);
     let product_config = Arc::new(ArcSwap::from_pointee(product_config));
 
+    // Note: The `engine` field is dropped — all tools (including workflow tools
+    // and config_reload) are registered into the runtime's engine. Consumers
+    // should use `instance.runtime.engine()` for the canonical tool registry.
+    // The original `engine` was only used during boot for steps 1-8 registration.
+    drop(engine);
+
     Ok(KonfInstance {
-        engine: Arc::new(engine),
         runtime,
         config,
         product_config,
@@ -299,15 +308,17 @@ impl konflux::Resource for FileResource {
 /// Re-scans the workflows directory, re-parses all YAML files, and
 /// re-registers workflow tools in the engine.
 pub struct ConfigReloadTool {
-    engine: Arc<Engine>,
     runtime: Arc<Runtime>,
     config_dir: std::path::PathBuf,
 }
 
 impl ConfigReloadTool {
     /// Create a new config_reload tool.
-    pub fn new(engine: Arc<Engine>, runtime: Arc<Runtime>, config_dir: std::path::PathBuf) -> Self {
-        Self { engine, runtime, config_dir }
+    ///
+    /// Uses the runtime's engine for tool registration so that reloaded
+    /// workflow tools are visible in child scopes during nested execution.
+    pub fn new(runtime: Arc<Runtime>, config_dir: std::path::PathBuf) -> Self {
+        Self { runtime, config_dir }
     }
 }
 
@@ -344,24 +355,24 @@ impl konflux::tool::Tool for ConfigReloadTool {
         }
 
         // Remove existing workflow_* tools before re-registering
-        let existing_tools = self.engine.registry().list();
+        let existing_tools = self.runtime.engine().registry().list();
         let workflow_tool_names: Vec<String> = existing_tools.iter()
             .filter(|t| t.name.starts_with("workflow_"))
             .map(|t| t.name.clone())
             .collect();
 
         for name in &workflow_tool_names {
-            self.engine.remove_tool(name);
+            self.runtime.engine().remove_tool(name);
         }
 
         // Re-register workflows from disk
-        match register_workflows(&self.engine, &self.runtime, &workflows_dir) {
+        match register_workflows(self.runtime.engine(), &self.runtime, &workflows_dir) {
             Ok(()) => {
-                let new_workflow_count = self.engine.registry().list().iter()
+                let new_workflow_count = self.runtime.engine().registry().list().iter()
                     .filter(|t| t.name.starts_with("workflow_"))
                     .count();
 
-                let total_tools = self.engine.registry().len();
+                let total_tools = self.runtime.engine().registry().len();
 
                 info!(
                     config_dir = %self.config_dir.display(),

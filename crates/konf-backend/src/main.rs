@@ -66,7 +66,7 @@ async fn main() -> anyhow::Result<()> {
             std::fs::read_dir(&workflows_dir).ok()
                 .and_then(|entries| {
                     entries.filter_map(|e| e.ok())
-                        .find(|e| e.path().extension().map_or(false, |ext| ext == "yaml" || ext == "yml"))
+                        .find(|e| e.path().extension().is_some_and(|ext| ext == "yaml" || ext == "yml"))
                         .and_then(|e| std::fs::read_to_string(e.path()).ok())
                 })
                 .unwrap_or_else(|| templates::CHAT_WORKFLOW.to_string())

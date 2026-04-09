@@ -106,115 +106,107 @@ impl ServerHandler for KonfMcpServer {
         .with_instructions("Konf AI agent platform. Provides tools for memory, LLM, HTTP, and workflow execution.")
     }
 
-    fn list_tools(
+    async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        async move {
-            let registry = self.engine.registry();
-            let tools: Vec<McpTool> = registry.list()
-                .iter()
-                .map(tool_info_to_mcp)
-                .collect();
+    ) -> Result<ListToolsResult, ErrorData> {
+        let registry = self.engine.registry();
+        let tools: Vec<McpTool> = registry.list()
+            .iter()
+            .map(tool_info_to_mcp)
+            .collect();
 
-            tracing::debug!(count = tools.len(), "MCP tools/list");
+        tracing::debug!(count = tools.len(), "MCP tools/list");
 
-            Ok(ListToolsResult {
-                tools,
-                next_cursor: None,
-                meta: None,
-            })
-        }
+        Ok(ListToolsResult {
+            tools,
+            next_cursor: None,
+            meta: None,
+        })
     }
 
-    fn call_tool(
+    async fn call_tool(
         &self,
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<CallToolResult, ErrorData>> + Send + '_ {
-        async move {
-            let tool_name = &request.name;
-            tracing::info!(tool = %tool_name, "MCP tools/call");
+    ) -> Result<CallToolResult, ErrorData> {
+        let tool_name = &request.name;
+        tracing::info!(tool = %tool_name, "MCP tools/call");
 
-            let registry = self.engine.registry();
-            let tool = registry.get(tool_name).ok_or_else(|| {
-                ErrorData::invalid_params(format!("Tool not found: {tool_name}"), None)
-            })?;
+        let registry = self.engine.registry();
+        let tool = registry.get(tool_name).ok_or_else(|| {
+            ErrorData::invalid_params(format!("Tool not found: {tool_name}"), None)
+        })?;
 
-            let input: serde_json::Value = match request.arguments {
-                Some(args) => serde_json::Value::Object(args),
-                None => serde_json::Value::Object(serde_json::Map::new()),
-            };
+        let input: serde_json::Value = match request.arguments {
+            Some(args) => serde_json::Value::Object(args),
+            None => serde_json::Value::Object(serde_json::Map::new()),
+        };
 
-            let ctx = mcp_tool_context(tool_name);
+        let ctx = mcp_tool_context(tool_name);
 
-            match tool.invoke(input, &ctx).await {
-                Ok(output) => {
-                    let text = serde_json::to_string_pretty(&output)
-                        .unwrap_or_else(|_| output.to_string());
-                    Ok(CallToolResult::success(vec![Content::text(text)]))
-                }
-                Err(e) => {
-                    tracing::warn!(tool = %tool_name, error = %e, "MCP tool call failed");
-                    Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
-                }
+        match tool.invoke(input, &ctx).await {
+            Ok(output) => {
+                let text = serde_json::to_string_pretty(&output)
+                    .unwrap_or_else(|_| output.to_string());
+                Ok(CallToolResult::success(vec![Content::text(text)]))
+            }
+            Err(e) => {
+                tracing::warn!(tool = %tool_name, error = %e, "MCP tool call failed");
+                Ok(CallToolResult::error(vec![Content::text(e.to_string())]))
             }
         }
     }
 
-    fn list_resources(
+    async fn list_resources(
         &self,
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ListResourcesResult, ErrorData>> + Send + '_ {
-        async move {
-            let registry = self.engine.resources();
-            let resources = registry.list()
-                .iter()
-                .map(|info| {
-                    RawResource::new(info.uri.clone(), info.name.clone())
-                        .with_description(info.description.clone())
-                        .with_mime_type(info.mime_type.clone())
-                        .no_annotation()
-                })
-                .collect();
-
-            tracing::debug!("MCP resources/list");
-
-            Ok(ListResourcesResult {
-                resources,
-                next_cursor: None,
-                meta: None,
+    ) -> Result<ListResourcesResult, ErrorData> {
+        let registry = self.engine.resources();
+        let resources = registry.list()
+            .iter()
+            .map(|info| {
+                RawResource::new(info.uri.clone(), info.name.clone())
+                    .with_description(info.description.clone())
+                    .with_mime_type(info.mime_type.clone())
+                    .no_annotation()
             })
-        }
+            .collect();
+
+        tracing::debug!("MCP resources/list");
+
+        Ok(ListResourcesResult {
+            resources,
+            next_cursor: None,
+            meta: None,
+        })
     }
 
-    fn read_resource(
+    async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> impl std::future::Future<Output = Result<ReadResourceResult, ErrorData>> + Send + '_ {
-        async move {
-            let uri = &request.uri;
-            tracing::info!(uri = %uri, "MCP resources/read");
+    ) -> Result<ReadResourceResult, ErrorData> {
+        let uri = &request.uri;
+        tracing::info!(uri = %uri, "MCP resources/read");
 
-            let registry = self.engine.resources();
-            let resource = registry.get(uri).ok_or_else(|| {
-                ErrorData::invalid_params(format!("Resource not found: {uri}"), None)
-            })?;
+        let registry = self.engine.resources();
+        let resource = registry.get(uri).ok_or_else(|| {
+            ErrorData::invalid_params(format!("Resource not found: {uri}"), None)
+        })?;
 
-            let content = resource.read().await.map_err(|e| {
-                ErrorData::internal_error(format!("Failed to read resource: {e}"), None)
-            })?;
+        let content = resource.read().await.map_err(|e| {
+            ErrorData::internal_error(format!("Failed to read resource: {e}"), None)
+        })?;
 
-            let text = serde_json::to_string_pretty(&content)
-                .unwrap_or_else(|_| content.to_string());
+        let text = serde_json::to_string_pretty(&content)
+            .unwrap_or_else(|_| content.to_string());
 
-            Ok(ReadResourceResult::new(vec![
-                ResourceContents::text(text, uri.clone())
-            ]))
-        }
+        Ok(ReadResourceResult::new(vec![
+            ResourceContents::text(text, uri.clone())
+        ]))
     }
 }
 

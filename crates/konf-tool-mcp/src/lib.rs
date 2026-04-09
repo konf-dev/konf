@@ -76,8 +76,8 @@ impl McpManager {
         Ok(())
     }
 
-    async fn connect_and_register<'a>(
-        &'a self,
+    async fn connect_and_register(
+        &self,
         config: &McpServerConfig,
         engine: &konflux::Engine,
     ) -> anyhow::Result<usize> {

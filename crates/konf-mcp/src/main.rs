@@ -6,6 +6,7 @@
 //! SSE transport is available when mounted in konf-backend at /mcp.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tracing_subscriber::EnvFilter;
 
@@ -31,15 +32,16 @@ async fn main() -> anyhow::Result<()> {
     // Boot the platform
     let instance = konf_init::boot(&config_dir).await?;
 
+    let engine = instance.runtime.engine();
     tracing::info!(
-        tools = instance.engine.registry().len(),
-        resources = instance.engine.resources().len(),
+        tools = engine.registry().len(),
+        resources = engine.resources().len(),
         "Konf MCP server ready"
     );
 
     // Serve via stdio (Claude Desktop, CLI, piped connections)
     let server = konf_mcp::KonfMcpServer::new(
-        instance.engine.clone(),
+        Arc::new(engine.clone()),
         instance.runtime.clone(),
     );
     server.serve_stdio().await?;

@@ -116,12 +116,18 @@ pub struct HttpGetTool {
     client: reqwest::Client,
 }
 
-impl HttpGetTool {
-    /// Create a new HttpGetTool with a default reqwest client.
-    pub fn new() -> Self {
+impl Default for HttpGetTool {
+    fn default() -> Self {
         Self {
             client: reqwest::Client::new(),
         }
+    }
+}
+
+impl HttpGetTool {
+    /// Create a new HttpGetTool with a default reqwest client.
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
@@ -206,12 +212,18 @@ pub struct HttpPostTool {
     client: reqwest::Client,
 }
 
-impl HttpPostTool {
-    /// Create a new HttpPostTool with a default reqwest client.
-    pub fn new() -> Self {
+impl Default for HttpPostTool {
+    fn default() -> Self {
         Self {
             client: reqwest::Client::new(),
         }
+    }
+}
+
+impl HttpPostTool {
+    /// Create a new HttpPostTool with a default reqwest client.
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 

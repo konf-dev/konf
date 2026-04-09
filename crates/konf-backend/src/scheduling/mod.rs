@@ -103,8 +103,7 @@ impl Scheduler {
                 .await {
                     tracing::error!(job_id = job.id, error = %db_err, "Failed to update job status to 'failed'");
                 }
-            } else {
-                if let Err(db_err) = sqlx::query(
+            } else if let Err(db_err) = sqlx::query(
                     "UPDATE scheduled_jobs SET status = 'completed', completed_at = NOW() WHERE id = $1",
                 )
                 .bind(job.id)
@@ -112,7 +111,6 @@ impl Scheduler {
                 .await {
                     tracing::error!(job_id = job.id, error = %db_err, "Failed to update job status to 'completed'");
                 }
-            }
         }
 
         Ok(count)
