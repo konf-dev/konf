@@ -80,7 +80,8 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     let product_config = if tools_yaml_path.exists() {
         let contents = std::fs::read_to_string(&tools_yaml_path)
             .map_err(|e| anyhow::anyhow!("Failed to read tools.yaml: {e}"))?;
-        serde_yaml::from_str::<ProductConfig>(&contents)
+        let interpolated = interpolate_env_vars(&contents);
+        serde_yaml::from_str::<ProductConfig>(&interpolated)
             .map_err(|e| anyhow::anyhow!("Failed to parse tools.yaml: {e}"))?
     } else {
         ProductConfig::default()
@@ -185,6 +186,55 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
         #[cfg(feature = "postgres")]
         pool,
     })
+}
+
+/// Replace `${VAR}` and `${VAR:-default}` patterns with environment variable values.
+///
+/// - `${VAR}` is replaced with the value of env var `VAR`, or empty string if unset.
+/// - `${VAR:-default}` is replaced with the value of env var `VAR`, or `"default"` if unset.
+///
+/// This function is infallible: missing variables produce their default or empty string.
+fn interpolate_env_vars(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '$' && chars.peek() == Some(&'{') {
+            chars.next(); // consume '{'
+            let mut inner = String::new();
+            let mut found_close = false;
+            for c in chars.by_ref() {
+                if c == '}' {
+                    found_close = true;
+                    break;
+                }
+                inner.push(c);
+            }
+            if !found_close {
+                // Unclosed brace — emit literally
+                result.push('$');
+                result.push('{');
+                result.push_str(&inner);
+                continue;
+            }
+            let (var_name, default_val) = match inner.find(":-") {
+                Some(pos) => (&inner[..pos], Some(&inner[pos + 2..])),
+                None => (inner.as_str(), None),
+            };
+            match std::env::var(var_name) {
+                Ok(val) => result.push_str(&val),
+                Err(_) => {
+                    if let Some(def) = default_val {
+                        result.push_str(def);
+                    }
+                }
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+
+    result
 }
 
 /// Register tools based on product config.
@@ -599,6 +649,57 @@ nodes:
         register_workflows(&engine, &runtime, dir.path()).unwrap();
         // No tools registered from bad file
         assert!(engine.registry().is_empty());
+    }
+
+    #[test]
+    fn test_interpolate_existing_var() {
+        std::env::set_var("KONF_TEST_INTERP_A", "hello");
+        let result = interpolate_env_vars("model: ${KONF_TEST_INTERP_A}");
+        assert_eq!(result, "model: hello");
+        std::env::remove_var("KONF_TEST_INTERP_A");
+    }
+
+    #[test]
+    fn test_interpolate_missing_var_becomes_empty() {
+        std::env::remove_var("KONF_TEST_INTERP_MISSING");
+        let result = interpolate_env_vars("model: ${KONF_TEST_INTERP_MISSING}");
+        assert_eq!(result, "model: ");
+    }
+
+    #[test]
+    fn test_interpolate_missing_var_uses_default() {
+        std::env::remove_var("KONF_TEST_INTERP_MISS2");
+        let result = interpolate_env_vars("model: ${KONF_TEST_INTERP_MISS2:-qwen3:8b}");
+        assert_eq!(result, "model: qwen3:8b");
+    }
+
+    #[test]
+    fn test_interpolate_existing_var_ignores_default() {
+        std::env::set_var("KONF_TEST_INTERP_B", "custom");
+        let result = interpolate_env_vars("model: ${KONF_TEST_INTERP_B:-fallback}");
+        assert_eq!(result, "model: custom");
+        std::env::remove_var("KONF_TEST_INTERP_B");
+    }
+
+    #[test]
+    fn test_interpolate_no_patterns_unchanged() {
+        let input = "plain: value\nno_vars: here";
+        assert_eq!(interpolate_env_vars(input), input);
+    }
+
+    #[test]
+    fn test_interpolate_multiple_vars() {
+        std::env::set_var("KONF_TEST_INTERP_C", "aaa");
+        std::env::remove_var("KONF_TEST_INTERP_D");
+        let result = interpolate_env_vars("${KONF_TEST_INTERP_C} and ${KONF_TEST_INTERP_D:-bbb}");
+        assert_eq!(result, "aaa and bbb");
+        std::env::remove_var("KONF_TEST_INTERP_C");
+    }
+
+    #[test]
+    fn test_interpolate_unclosed_brace_literal() {
+        let input = "model: ${UNCLOSED";
+        assert_eq!(interpolate_env_vars(input), input);
     }
 
     #[test]
