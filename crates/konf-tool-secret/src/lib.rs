@@ -1,0 +1,176 @@
+//! Standard library tools for managing secrets via environment variables.
+
+use std::sync::Arc;
+use async_trait::async_trait;
+use serde::Deserialize;
+use serde_json::{json, Value};
+
+use konflux::error::ToolError;
+use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
+use konflux::Engine;
+
+/// Configuration for the secret tool.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SecretConfig {
+    /// List of environment variable names that are allowed to be read.
+    pub allowed_keys: Vec<String>,
+}
+
+/// Register secret tools with the engine.
+pub fn register(engine: &Engine, config: &SecretConfig) {
+    engine.register_tool(Arc::new(SecretGetTool {
+        allowed_keys: config.allowed_keys.clone(),
+    }));
+    engine.register_tool(Arc::new(SecretListTool {
+        allowed_keys: config.allowed_keys.clone(),
+    }));
+}
+
+// ============================================================
+// secret:get
+// ============================================================
+
+pub struct SecretGetTool {
+    allowed_keys: Vec<String>,
+}
+
+#[async_trait]
+impl Tool for SecretGetTool {
+    fn info(&self) -> ToolInfo {
+        ToolInfo {
+            name: "secret:get".into(),
+            description: "Fetch a secret from the environment. Only keys listed in 'allowed_keys' are accessible.".into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string" }
+                },
+                "required": ["key"]
+            }),
+            output_schema: Some(json!({ "type": "string" })),
+            capabilities: vec!["secret:get".into()],
+            supports_streaming: false,
+            annotations: ToolAnnotations {
+                read_only: true,
+                idempotent: true,
+                ..Default::default()
+            },
+        }
+    }
+
+    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+        let key = input.get("key").and_then(|v| v.as_str()).ok_or_else(|| ToolError::InvalidInput {
+            message: "Missing 'key'".into(),
+            field: Some("key".into()),
+        })?;
+
+        if !self.allowed_keys.contains(&key.to_string()) {
+            return Err(ToolError::AccessDenied {
+                message: format!("Secret key '{}' is not in the allowed_keys whitelist.", key),
+            });
+        }
+
+        match std::env::var(key) {
+            Ok(val) => Ok(Value::String(val)),
+            Err(_) => Err(ToolError::ExecutionFailed {
+                message: format!("Secret key '{}' is allowed but not found in the environment.", key),
+                retryable: false,
+            }),
+        }
+    }
+}
+
+// ============================================================
+// secret:list
+// ============================================================
+
+pub struct SecretListTool {
+    allowed_keys: Vec<String>,
+}
+
+#[async_trait]
+impl Tool for SecretListTool {
+    fn info(&self) -> ToolInfo {
+        ToolInfo {
+            name: "secret:list".into(),
+            description: "List the names of all allowed secrets. Does NOT return their values.".into(),
+            input_schema: json!({ "type": "object" }),
+            output_schema: Some(json!({
+                "type": "array",
+                "items": { "type": "string" }
+            })),
+            capabilities: vec!["secret:list".into()],
+            supports_streaming: false,
+            annotations: ToolAnnotations {
+                read_only: true,
+                idempotent: true,
+                ..Default::default()
+            },
+        }
+    }
+
+    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+        Ok(json!(self.allowed_keys))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mock_context() -> ToolContext {
+        ToolContext {
+            capabilities: vec!["*".into()],
+            workflow_id: "test".into(),
+            node_id: "test".into(),
+            metadata: std::collections::HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_secret_get_allowed() {
+        std::env::set_var("TEST_SECRET_ALLOWED", "secret_value");
+        let tool = SecretGetTool {
+            allowed_keys: vec!["TEST_SECRET_ALLOWED".into()],
+        };
+        let input = json!({ "key": "TEST_SECRET_ALLOWED" });
+        let result = tool.invoke(input, &mock_context()).await.unwrap();
+        assert_eq!(result, Value::String("secret_value".into()));
+    }
+
+    #[tokio::test]
+    async fn test_secret_get_denied() {
+        std::env::set_var("TEST_SECRET_HIDDEN", "hidden_value");
+        let tool = SecretGetTool {
+            allowed_keys: vec!["OTHER_KEY".into()],
+        };
+        let input = json!({ "key": "TEST_SECRET_HIDDEN" });
+        let result = tool.invoke(input, &mock_context()).await;
+        match result {
+            Err(ToolError::AccessDenied { .. }) => (),
+            _ => panic!("Expected AccessDenied error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_secret_get_missing() {
+        let tool = SecretGetTool {
+            allowed_keys: vec!["MISSING_KEY".into()],
+        };
+        let input = json!({ "key": "MISSING_KEY" });
+        let result = tool.invoke(input, &mock_context()).await;
+        match result {
+            Err(ToolError::ExecutionFailed { .. }) => (),
+            _ => panic!("Expected ExecutionFailed error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_secret_list() {
+        let tool = SecretListTool {
+            allowed_keys: vec!["A".into(), "B".into()],
+        };
+        let result = tool.invoke(json!({}), &mock_context()).await.unwrap();
+        assert_eq!(result, json!(["A", "B"]));
+    }
+}

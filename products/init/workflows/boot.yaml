@@ -1,0 +1,37 @@
+# Boot Workflow for Konf OS
+#
+# This workflow is responsible for bringing up the infrastructure.
+
+name: boot
+description: "Bootstrap the local OS infrastructure"
+register_as_tool: true
+capabilities: ["shell:exec", "http:get", "log"]
+
+nodes:
+  - id: "log_start"
+    do: "log"
+    with:
+      message: "Starting Phase 0 Boot: Provisioning Infrastructure"
+    then: "provision_infra"
+
+  - id: "provision_infra"
+    do: "shell:exec"
+    with:
+      # Thin layer: just run docker-compose
+      command: "docker-compose -f products/init/infra/docker-compose.yml up -d"
+    then: "wait_for_infisical"
+
+  - id: "wait_for_infisical"
+    do: "http:get"
+    with:
+      url: "http://localhost:8080/api/v1/health" # Assuming health endpoint
+    retry:
+      count: 10
+      interval: "5s"
+    then: "log_success"
+
+  - id: "log_success"
+    do: "log"
+    with:
+      message: "Phase 0 Boot Complete: Infrastructure is healthy and secrets are ready."
+    return: true

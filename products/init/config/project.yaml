@@ -1,0 +1,13 @@
+# The Init Product (Phase 0 Boot)
+#
+# This is the "PID 1" of Konf OS. It bootstraps external dependencies
+# like Infisical and Postgres before other products load.
+
+name: init
+description: "Konf OS Infrastructure Bootstrap"
+version: 0.1.0
+
+# Define a root admin role that only the init process uses.
+roles:
+  admin:
+    capabilities: ["*"]

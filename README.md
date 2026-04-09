@@ -18,7 +18,7 @@ Products are configurations, not code.
 
 ## What is Konf?
 
-Konf is an operating system for AI agents. It provides workflow execution, tool management, memory storage, and security — all configurable through YAML. No application code needed.
+Konf is an operating system for AI agents. It provides workflow execution, tool management, memory storage, and security — all configurable through YAML. A product (formally, a *kell* — a named computational boundary from the Kell calculus) is a directory of YAML and text files that defines a complete agent. No application code needed.
 
 The same engine runs on a phone, a laptop, a homelab server, or a cloud cluster. An agent's behavior, tools, memory, and security are defined entirely through configuration. Switching LLM providers, memory backends, or adding new tools is a config change, not a code change.
 

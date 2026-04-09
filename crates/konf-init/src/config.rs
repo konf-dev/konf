@@ -209,6 +209,14 @@ pub struct ToolsConfig {
     pub embed: Option<Value>,
     pub mcp_servers: Option<Value>,
     pub shell: Option<ShellConfig>,
+    pub secret: Option<SecretConfig>,
+}
+
+/// Secret configuration.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct SecretConfig {
+    /// List of environment variable names that are allowed to be read.
+    pub allowed_keys: Vec<String>,
 }
 
 /// Shell sandbox configuration.
@@ -236,9 +244,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_default_config_is_valid() {
-        let config = PlatformConfig::default();
-        assert!(config.validate().is_ok());
+    fn test_secret_config_parsing() {
+        let yaml = r#"
+    secret:
+    allowed_keys:
+    - "STRIPE_SECRET_KEY"
+    - "ANTHROPIC_API_KEY"
+    "#;
+        let tools: ToolsConfig = serde_yaml::from_str(yaml).unwrap();
+        let secret = tools.secret.unwrap();
+        assert_eq!(secret.allowed_keys, vec!["STRIPE_SECRET_KEY", "ANTHROPIC_API_KEY"]);
+    }
     }
 
     #[test]

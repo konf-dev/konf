@@ -1,0 +1,20 @@
+# Declarative Infrastructure State for Konf OS
+#
+# This file is used by the 'boot' workflow to bring up the world.
+
+infrastructure:
+  secrets:
+    provider: "infisical"
+    mode: "${INFRA_MODE:-local}" # 'local' or 'cloud'
+    image: "infisical/infisical:latest"
+    ports: ["8080:8080"]
+    depends_on: ["postgres"]
+  
+  database:
+    provider: "postgres"
+    image: "postgres:16-alpine"
+    volumes: ["./data/pg:/var/lib/postgresql/data"]
+    
+  compute:
+    provider: "ollama"
+    image: "ollama/ollama:latest"

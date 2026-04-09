@@ -1,0 +1,13 @@
+# Tools for the Init product.
+# 
+# The Init product needs access to the host shell to manage Docker containers.
+
+tools:
+  shell:
+    container: konf-sandbox # Always runs in a sandbox, but can be configured
+    timeout_ms: 60000       # Higher timeout for pulls
+
+  http:
+    enabled: true           # For health checks
+
+mcp_servers: {}

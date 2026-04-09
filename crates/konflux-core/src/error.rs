@@ -93,6 +93,9 @@ pub enum ToolError {
     #[error("capability denied: {capability}")]
     CapabilityDenied { capability: String },
 
+    #[error("access denied: {message}")]
+    AccessDenied { message: String },
+
     #[error("tool not found: {tool_id}")]
     NotFound { tool_id: String },
 }

@@ -13,6 +13,17 @@ Konf runs the same engine on a phone, a laptop, a homelab server, or a cloud clu
 
 ---
 
+## Terminology
+
+| Term | Definition |
+|---|---|
+| **Product** | The informal name for a directory of YAML configuration that defines an agent. This is the term used throughout most of the documentation. |
+| **Kell** | The formal name for a product. From the Kell calculus (Schmitt & Stefani, 2003) — a named computational boundary. A kell is composable, versionable, forkable, and self-modifying within its capability grants. |
+| **Kernel** | The `konflux` engine. It manages registries, executes workflows, and validates capabilities. It has no I/O. |
+| **Runtime** | The `konf-runtime` crate. Manages process lifecycle, scoping, and security boundaries. |
+
+---
+
 ## Why Konf
 
 Konf is not a library or framework — it is infrastructure. It enforces security structurally (not via prompts), attenuates capabilities mathematically (not via API keys), and separates execution mechanisms (Rust) from behavioral policies (YAML). See [Why Konf](why-konf.md) for a detailed comparison with library-based agent frameworks.
@@ -69,6 +80,7 @@ Konf follows the same design patterns as Linux, Plan 9, and Fuchsia — not by m
 |-----------|-----------------|-------|
 | Kernel | Engine — all dispatch routes through it | konflux |
 | Init system (systemd) | konf-init — reads config, boots engine, registers tools | konf-init |
+| Init Product (PID 1) | `init` kell — orchestrates external services (Docker, DBs, Secrets) | products/init |
 | Device drivers | Tools — standard interface, pluggable, hot-loadable | crates/konf-tool-* |
 | VFS (filesystem abstraction) | MemoryBackend trait — pluggable storage | crates/konf-tool-memory |
 | `/proc`, `/sys` | Resources — engine state readable by agents | konflux |

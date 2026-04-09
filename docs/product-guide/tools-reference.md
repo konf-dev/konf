@@ -127,6 +127,28 @@ In addition to `echo`, the following built-in tools are always available without
 | **Enable** | Always available |
 | **Capability** | `cancel:schedule` or `schedule:*` |
 
+### secret:get
+
+| Field | Value |
+|-------|-------|
+| **Name** | `secret:get` |
+| **Description** | Fetch a secret from the environment. Only keys listed in `tools.secret.allowed_keys` are accessible. |
+| **Input** | `key: string` |
+| **Output** | `string` (the secret value) |
+| **Enable** | `tools.secret` section in `tools.yaml` |
+| **Capability** | `secret:get` or `secret:*` |
+
+### secret:list
+
+| Field | Value |
+|-------|-------|
+| **Name** | `secret:list` |
+| **Description** | List the names of all allowed secrets. Does NOT return their values. |
+| **Input** | `{}` |
+| **Output** | `string[]` (list of allowed keys) |
+| **Enable** | `tools.secret` section in `tools.yaml` |
+| **Capability** | `secret:list` or `secret:*` |
+
 ## MCP Tools (`mcp:*`)
 
 MCP (Model Context Protocol) servers expose external tools via a standardized protocol. Any tool from an MCP server appears as `mcp:<server>:<tool_name>`.

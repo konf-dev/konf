@@ -113,6 +113,11 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     // yaml_validate_workflow — always available
     engine.register_tool(Arc::new(konf_tool_llm::ValidateWorkflowTool::new(Arc::new(engine.clone()))));
 
+    if let Some(ref secret_config) = product_config.tools.secret {
+        konf_tool_secret::register(&engine, secret_config);
+        info!(allowed_keys = ?secret_config.allowed_keys, "Secret tools registered");
+    }
+
     let tool_count = engine.registry().len();
     info!(tool_count, "Tools registered");
 

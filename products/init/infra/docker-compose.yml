@@ -1,0 +1,41 @@
+# Docker Compose for Konf OS Infrastructure
+#
+# This file is orchestrated by the 'boot' workflow in the 'init' product.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-konf}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_DB: ${POSTGRES_DB:-konf}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U konf"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  infisical:
+    image: infisical/infisical:latest
+    environment:
+      DB_URL: postgresql://${POSTGRES_USER:-konf}:${POSTGRES_PASSWORD:-secret}@postgres:5432/${POSTGRES_DB:-konf}
+      ENCRYPTION_KEY: ${INFISICAL_ENCRYPTION_KEY:-replace-me-with-a-32-char-key-in-production}
+      AUTH_SECRET: ${INFISICAL_AUTH_SECRET:-replace-me-with-a-long-secret}
+      SITE_URL: http://localhost:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
