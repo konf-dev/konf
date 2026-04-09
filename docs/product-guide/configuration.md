@@ -114,6 +114,29 @@ default:
 | `temperature` | `0.7` | Sampling temperature |
 | `max_tokens` | `4096` | Maximum tokens in the response |
 
+### Provider Switching Guide
+
+To use a local Ollama instance (OpenAI-compatible):
+```yaml
+default:
+  provider: openai
+  model: "qwen3:8b"
+```
+```bash
+export OPENAI_API_KEY=ollama
+export OPENAI_BASE_URL=http://localhost:11434/v1
+```
+
+To use Anthropic:
+```yaml
+default:
+  provider: anthropic
+  model: claude-3-5-sonnet-latest
+```
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
 ## prompts/*.md
 
 Markdown files containing prompt templates. Referenced by workflows:

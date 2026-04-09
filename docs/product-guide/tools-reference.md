@@ -21,77 +21,86 @@ nodes:
       message: "Hello from Konf!"
 ```
 
-### memory_store
+### Builtin Logic Tools
+
+In addition to `echo`, the following built-in tools are always available without configuration:
+
+- `json_get` — Extracts a value from a JSON object using a JSON pointer path. Input: `data: object`, `path: string`.
+- `concat` — Concatenates an array of strings. Input: `strings: string[]`, `separator: string` (optional).
+- `log` — Logs a message to the engine tracing output. Input: `message: string`, `level: string` (optional).
+- `template` — Renders a MiniJinja template. Input: `template: string`, `context: object` (optional).
+
+### memory:store
 
 | Field | Value |
 |-------|-------|
-| **Name** | `memory_store` |
+| **Name** | `memory:store` |
 | **Description** | Store a piece of knowledge in the memory backend. |
 | **Input** | `content: string`, `metadata: object` (optional), `namespace: string` (injected) |
 | **Enable** | `tools.memory` section in `tools.yaml` |
 
-### memory_search
+### memory:search
 
 | Field | Value |
 |-------|-------|
-| **Name** | `memory_search` |
+| **Name** | `memory:search` |
 | **Description** | Semantic search over stored memories. Returns ranked results. |
 | **Input** | `query: string`, `limit: int` (default 10), `min_similarity: float` (default 0.7) |
 | **Enable** | `tools.memory` section in `tools.yaml` |
 
-### memory_delete
+### memory:delete
 
 | Field | Value |
 |-------|-------|
-| **Name** | `memory_delete` |
+| **Name** | `memory:delete` |
 | **Description** | Delete a memory entry by ID. |
 | **Input** | `id: string` |
 | **Enable** | `tools.memory` section in `tools.yaml` |
 
-### memory_traverse
+### memory:traverse
 
 | Field | Value |
 |-------|-------|
-| **Name** | `memory_traverse` |
+| **Name** | `memory:traverse` |
 | **Description** | Graph traversal over related memory entries. |
 | **Input** | `start_id: string`, `depth: int` (default 2), `relation_type: string` (optional) |
 | **Enable** | `tools.memory` section in `tools.yaml` |
 
-### ai_complete
+### ai:complete
 
 | Field | Value |
 |-------|-------|
-| **Name** | `ai_complete` |
+| **Name** | `ai:complete` |
 | **Description** | LLM completion with capability-enforced tool-calling (ReAct loop). The kernel owns the loop — tools are resolved dynamically from the live registry, filtered by the caller's capabilities. |
 | **Input** | `prompt: string`, `system: string` (optional), `messages: array` (optional, multi-turn history), `tools: string[]` (optional, explicit tool whitelist — AND with capabilities), `model: string` (optional, override), `temperature: float` (optional, override), `max_tokens: int` (optional, override), `max_iterations: int` (optional, override, default 10) |
 | **Output** | `{ text: string, _meta: { tool, provider, model, duration_ms, iterations, tool_calls } }` |
 | **Enable** | `tools.llm` section in `tools.yaml` |
 | **Streaming** | Emits `ToolStart`, `ToolEnd`, `TextDelta`, `Status` events during the ReAct loop |
-| **Security** | Inner tools inherit the caller's capabilities. `ai_complete` excluded from inner tools unless explicitly whitelisted. Empty capabilities deny all tools. |
+| **Security** | Inner tools inherit the caller's capabilities. `ai:complete` excluded from inner tools unless explicitly whitelisted. Empty capabilities deny all tools. |
 
-### http_get
+### http:get
 
 | Field | Value |
 |-------|-------|
-| **Name** | `http_get` |
+| **Name** | `http:get` |
 | **Description** | Make an HTTP GET request. |
 | **Input** | `url: string`, `headers: object` (optional) |
 | **Enable** | `tools.http` section in `tools.yaml` |
 
-### http_post
+### http:post
 
 | Field | Value |
 |-------|-------|
-| **Name** | `http_post` |
+| **Name** | `http:post` |
 | **Description** | Make an HTTP POST request. |
 | **Input** | `url: string`, `body: object`, `headers: object` (optional) |
 | **Enable** | `tools.http` section in `tools.yaml` |
 
-### embed_text
+### ai:embed
 
 | Field | Value |
 |-------|-------|
-| **Name** | `embed_text` |
+| **Name** | `ai:embed` |
 | **Description** | Generate an embedding vector for the given text. |
 | **Input** | `text: string`, `model: string` (optional, uses default) |
 | **Enable** | `tools.embed` section in `tools.yaml` |
@@ -143,22 +152,22 @@ MCP servers run as child processes managed by the Konf runtime. They are started
 
 ## Namespace Injection
 
-All memory tools receive `namespace` automatically from the runtime scope. The LLM and workflow author never need to specify it — this prevents cross-tenant data access. See [security](../admin-guide/security.md) for details.
+All `memory:*` tools receive `namespace` automatically from the runtime scope. The LLM and workflow author never need to specify it — this prevents cross-tenant data access. See [security](../admin-guide/security.md) for details.
 
 ## tools.yaml Summary
 
 ```yaml
 tools:
-  memory:                    # enables memory_* tools
+  memory:                    # enables memory:* tools
     backend: smrti
     config:
       dsn: "postgresql://..."
-  llm:                       # enables ai_complete
+  llm:                       # enables ai:complete
     provider: openai
     model: "qwen3:8b"
-  http:                      # enables http_get, http_post
+  http:                      # enables http:get, http:post
     enabled: true
-  embed:                     # enables embed_text
+  embed:                     # enables ai:embed
     enabled: true
 
 mcp_servers:                 # enables mcp:* tools

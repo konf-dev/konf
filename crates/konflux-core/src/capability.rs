@@ -11,8 +11,11 @@ pub fn check_tool_access(tool_name: &str, capabilities: &[String]) -> Result<(),
             capability: "ALL (empty capability list)".to_string(),
         });
     }
-    
-    if capabilities.iter().any(|c| matches_capability(c, tool_name)) {
+
+    if capabilities
+        .iter()
+        .any(|c| matches_capability(c, tool_name))
+    {
         Ok(())
     } else {
         Err(ToolError::CapabilityDenied {
@@ -33,7 +36,10 @@ pub fn validate_grant(grant: &[String], parent_capabilities: &[String]) -> Resul
     }
 
     for cap in grant {
-        if !parent_capabilities.iter().any(|p| matches_capability(p, cap)) {
+        if !parent_capabilities
+            .iter()
+            .any(|p| matches_capability(p, cap))
+        {
             return Err(format!(
                 "capability '{cap}' cannot be granted — parent does not have it"
             ));
@@ -45,7 +51,7 @@ pub fn validate_grant(grant: &[String], parent_capabilities: &[String]) -> Resul
 /// Match a capability pattern against a tool name.
 /// Supports glob-style wildcards:
 ///   "memory:*" matches "memory:search", "memory:store"
-///   "ai:*" matches "ai:complete", "ai_stream"
+///   "ai:*" matches "ai:complete", "ai:stream"
 ///   "*" matches everything
 ///   "memory:search" matches only "memory:search" (exact)
 fn matches_capability(pattern: &str, tool_name: &str) -> bool {
@@ -53,7 +59,8 @@ fn matches_capability(pattern: &str, tool_name: &str) -> bool {
         return true;
     }
     if let Some(prefix) = pattern.strip_suffix(":*") {
-        return tool_name.starts_with(prefix) && tool_name.get(prefix.len()..prefix.len()+1) == Some(":");
+        return tool_name.starts_with(prefix)
+            && tool_name.get(prefix.len()..prefix.len() + 1) == Some(":");
     }
     pattern == tool_name
 }
@@ -66,17 +73,17 @@ mod tests {
     fn test_check_tool_access() {
         // Deny all if empty
         assert!(check_tool_access("echo", &[]).is_err());
-        
+
         // Exact match
         assert!(check_tool_access("echo", &["echo".to_string()]).is_ok());
-        
+
         // Wildcard match
         assert!(check_tool_access("echo", &["*".to_string()]).is_ok());
-        
+
         // Prefix match
         assert!(check_tool_access("memory:search", &["memory:*".to_string()]).is_ok());
         assert!(check_tool_access("memorysearch", &["memory:*".to_string()]).is_err());
-        
+
         // Denial
         assert!(check_tool_access("fail", &["echo".to_string()]).is_err());
     }
@@ -85,10 +92,10 @@ mod tests {
     fn test_validate_grant() {
         // Child requests none - always ok
         assert!(validate_grant(&[], &["*".to_string()]).is_ok());
-        
+
         // Parent has none - deny child request
         assert!(validate_grant(&["echo".to_string()], &[]).is_err());
-        
+
         // Subset
         assert!(validate_grant(&["mem:s".into()], &["mem:*".into()]).is_ok());
 

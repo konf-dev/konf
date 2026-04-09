@@ -1,9 +1,0 @@
-workflow: chat
-description: "Chat with a local LLM via ollama"
-capabilities: ["ai_complete"]
-nodes:
-  respond:
-    do: ai_complete
-    input:
-      prompt: "{{ message }}"
-    return: true

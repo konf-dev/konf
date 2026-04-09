@@ -42,7 +42,7 @@ nodes:
     do: config:reload
     then: run_diagnostic
   run_diagnostic:
-    do: workflow_auto_diagnostic
+    do: workflow:auto_diagnostic
     then: done
     catch: done
   report_invalid:

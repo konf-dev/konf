@@ -11,12 +11,12 @@ input_schema:
   required: []
 nodes:
   test_konf:
-    do: shell_exec
+    do: shell:exec
     with:
       command: "cd ${KONF_WORKSPACE}/konf && cargo test --workspace 2>&1 | grep -E 'test result|error\\[|FAILED' | head -30"
     then: [test_smrti, report]
   test_smrti:
-    do: shell_exec
+    do: shell:exec
     with:
       command: "cd ${KONF_WORKSPACE}/smrti && cargo test --workspace 2>&1 | grep -E 'test result|error\\[|FAILED' | head -30"
     then: report

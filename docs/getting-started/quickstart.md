@@ -10,6 +10,13 @@ Get the Konf platform running locally in 5 minutes.
 - **PostgreSQL** 15+ with pgvector extension (for smrti backend)
 - **Docker** (optional, for docker-compose setup)
 
+If you just need a local Postgres with pgvector quickly:
+```bash
+docker run -d --name konf-pg -p 5432:5432 \
+  -e POSTGRES_PASSWORD=konf -e POSTGRES_DB=konf \
+  pgvector/pgvector:pg17
+```
+
 ## Option A: Docker Compose (recommended)
 
 ```bash

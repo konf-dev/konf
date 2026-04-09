@@ -1,5 +1,7 @@
 # Unspool Migration Plan
 
+> **Note:** This plan predates the colon naming convention. Tool names below use the current kernel format.
+
 **Goal:** Validate the Konf platform by migrating Unspool to run entirely as config + workflows.
 **Depends on:** Phase D (transport shells working) in [master-plan.md](master-plan.md)
 **Success criteria:** All existing Unspool functionality works via tools.yaml + workflows/ + prompts/.
@@ -69,11 +71,11 @@ workflows:
       - workflows/chat.yaml
     stream: true
     capabilities:
-      - ai_complete
+      - ai:complete
       - ai:stream
-      - memory_search
-      - memory_store
-      - memory_traverse
+      - memory:search
+      - memory:store
+      - memory:traverse
       - memory:aggregate
       - profile:get
       - history:recent
@@ -87,18 +89,18 @@ workflows:
     workflow: workflows/extraction.yaml
     debounce: 180s
     capabilities:
-      - ai_complete
-      - memory_search
-      - memory_store
+      - ai:complete
+      - memory:search
+      - memory:store
 
   synthesis:
     trigger: cron
     schedule: "0 3 * * *"
     workflow: workflows/synthesis.yaml
     capabilities:
-      - ai_complete
-      - memory_search
-      - memory_store
+      - ai:complete
+      - memory:search
+      - memory:store
       - memory:retract
 
   maintenance:
@@ -106,7 +108,7 @@ workflows:
     schedule: "0 * * * *"
     workflow: workflows/scheduled/maintenance.yaml
     capabilities:
-      - memory_search
+      - memory:search
       - memory:aggregate
       - schedule:execute
 
@@ -114,9 +116,9 @@ workflows:
     trigger: session_start
     workflow: workflows/proactive.yaml
     capabilities:
-      - memory_search
+      - memory:search
       - memory:aggregate
-      - ai_complete
+      - ai:complete
       - profile:get
 
 scheduler:
@@ -130,7 +132,7 @@ cache:
 ## Validation checklist
 
 - [ ] Chat: send message, get streamed response with context from memory
-- [ ] Tool calling: agent calls memory_search, memory_store during chat
+- [ ] Tool calling: agent calls memory:search, memory:store during chat
 - [ ] Extraction: after chat, extraction workflow triggers (debounced 180s)
 - [ ] Extraction dedup: duplicate nodes not created (semantic similarity check)
 - [ ] Synthesis: nightly run archives done items, merges duplicates, decays edges
@@ -138,7 +140,7 @@ cache:
 - [ ] Proactive: on session start, evaluate triggers, generate message if applicable
 - [ ] Reminders: "remind me at 3pm" → scheduled job → fires at correct time
 - [ ] Namespace isolation: user A cannot access user B's data
-- [ ] Capability scoping: extraction workflow cannot call ai:stream (not in its capabilities)
+- [ ] Capability scoping: extraction workflow cannot call ai:stream (not in its capability list)
 - [ ] Config change: modify prompt, hot-reload, verify new behavior
 - [ ] Error recovery: kill backend, restart, sessions rebuild from the memory backend
 

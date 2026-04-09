@@ -18,8 +18,8 @@ workflow: my_workflow          # Required. Unique identifier (becomes workflow I
 version: "1.0"                # Optional. Default: "0.1.0"
 description: "What this does" # Optional. Human-readable description
 capabilities:                  # Required for register_as_tool. Capability grants.
-  - "memory_search"
-  - "ai_complete"
+  - "memory:search"
+  - "ai:complete"
 register_as_tool: true         # Optional. Default: false. If true, registers as workflow_{id} tool
 input_schema:                  # Optional. JSON Schema for workflow input (used by WorkflowTool)
   type: object
@@ -46,7 +46,7 @@ nodes:                         # Required. Map of node_id → node definition
 | `output_schema` | JSON Schema | No | — | Output schema for downstream tools |
 | `nodes` | map | Yes | — | Node definitions (at least one required) |
 
-> **Important:** If `register_as_tool: true`, `capabilities` must be non-empty. A workflow with `capabilities: []` will fail at runtime with capability denied errors. Use `capabilities: ["*"]` to grant access to all tools, or list specific tool patterns (e.g., `["http_get", "memory_*"]`).
+> **Important:** If `register_as_tool: true`, `capabilities` must be non-empty. A workflow with `capabilities: []` will fail at runtime with capability denied errors. Use `capabilities: ["*"]` to grant access to all tools, or list specific tool patterns (e.g., `["http:get", "memory:*"]`).
 
 ---
 
@@ -74,7 +74,7 @@ nodes:
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `do` | string | Yes | — | Tool name to invoke (e.g. `echo`, `memory_search`, `ai_complete`) |
+| `do` | string | Yes | — | Tool name to invoke (e.g. `echo`, `memory:search`, `ai:complete`) |
 | `with` | map | No | {} | Input parameters — supports both static values and `{{template}}` expressions |
 | `then` | string or string[] | No | — | Next node(s) on success. Use `then: [a, b]` for parallel fan-out. |
 | `catch` | string or array | No | — | Error handling. Simple: `catch: fallback_node`. Branch: `catch: [{when: true, then: node}]` |
@@ -104,12 +104,12 @@ nodes:
       message: "Starting parallel work"
     then: [fetch_a, fetch_b]    # Both run concurrently
   fetch_a:
-    do: http_get
+    do: http:get
     with:
       url: "{{input.url_a}}"
     then: combine
   fetch_b:
-    do: http_get
+    do: http:get
     with:
       url: "{{input.url_b}}"
     then: combine
@@ -192,15 +192,15 @@ Nodes form a DAG via `then` edges. The engine:
 ```yaml
 workflow: chat
 description: "Search memory then respond"
-capabilities: ["memory_search", "ai_complete"]
+capabilities: ["memory:search", "ai:complete"]
 nodes:
   search:
-    do: memory_search
+    do: memory:search
     with:
       query: "{{input.message}}"
     then: respond
   respond:
-    do: ai_complete
+    do: ai:complete
     with:
       prompt: "{{input.message}}"
       context: "{{search.results}}"
@@ -211,7 +211,7 @@ nodes:
 
 ```yaml
 workflow: parallel_search
-capabilities: ["http_get", "memory_search", "template"]
+capabilities: ["http:get", "memory:search", "template"]
 nodes:
   start:
     do: echo
@@ -219,12 +219,12 @@ nodes:
       message: "Searching..."
     then: [web, memory]
   web:
-    do: http_get
+    do: http:get
     with:
       url: "https://api.example.com/search?q={{input.query}}"
     then: combine
   memory:
-    do: memory_search
+    do: memory:search
     with:
       query: "{{input.query}}"
     then: combine
@@ -240,10 +240,10 @@ nodes:
 
 ```yaml
 workflow: safe_fetch
-capabilities: ["http_get", "echo"]
+capabilities: ["http:get", "echo"]
 nodes:
   fetch:
-    do: http_get
+    do: http:get
     with:
       url: "{{input.url}}"
     then: process
@@ -269,7 +269,7 @@ nodes:
 workflow: summarize
 description: "Summarize a document into key points"
 register_as_tool: true
-capabilities: ["ai_complete"]
+capabilities: ["ai:complete"]
 input_schema:
   type: object
   properties:
@@ -278,7 +278,7 @@ input_schema:
   required: [document]
 nodes:
   analyze:
-    do: ai_complete
+    do: ai:complete
     with:
       prompt: "Extract {{input.max_points}} key points from: {{input.document}}"
     return: true
@@ -296,7 +296,7 @@ nodes:
     return: true
 ```
 
-> **Capability attenuation:** When a workflow calls another workflow-as-tool, the child runs in a child execution scope. Child capabilities can only be equal to or more restrictive than the parent's — never broader. A parent with `capabilities: ["ai_complete"]` cannot call a child that requires `["ai_complete", "shell_exec"]`. See [engine.md](../architecture/engine.md#capability-validation) for details.
+> **Capability attenuation:** When a workflow calls another workflow-as-tool, the child runs in a child execution scope. Child capabilities can only be equal to or more restrictive than the parent's — never broader. A parent with `capabilities: ["ai:complete"]` cannot call a child that requires `["ai:complete", "shell:exec"]`. See [engine.md](../architecture/engine.md#capability-validation) for details.
 
 ---
 

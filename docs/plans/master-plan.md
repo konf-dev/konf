@@ -12,7 +12,7 @@
 | A-D | **Done** | Core engine, runtime, tools, transports (12 crates, 165+ tests) |
 | G1-G2 | **Done** | CI, Docker |
 | E1 | **Done** | Shell tool + sandbox container |
-| E2 | **Done** | Agent-mode ai_complete: capability-enforced ReAct loops, dynamic tool resolution, per-node config, streaming events. |
+| E2 | **Done** | Agent-mode ai:complete: capability-enforced ReAct loops, dynamic tool resolution, per-node config, streaming events. |
 | E3 | **Proven** | products/architect pattern validated in Experiment 003: AI generates workflow YAML → kernel validates → bot commits. |
 | E4 | After E3 | SQLite backend — prove portability |
 | E5 | After E3 | WASM adapter — prove open architecture |
@@ -108,19 +108,19 @@ The next phase shifts from building infrastructure to using it. The architect ag
 
 ### E1: Shell tool + sandbox container
 
-Give agents OS access through a `shell_exec` tool that runs commands inside a sandboxed container. The tool accepts a command string and returns stdout/stderr. The container is ephemeral, network-isolated, and resource-limited. This is the prerequisite for any agent that needs to read files, run tests, or execute builds.
+Give agents OS access through a `shell:exec` tool that runs commands inside a sandboxed container. The tool accepts a command string and returns stdout/stderr. The container is ephemeral, network-isolated, and resource-limited. This is the prerequisite for any agent that needs to read files, run tests, or execute builds.
 
 ### E2: Agent-mode ai_complete — DONE
 
-The kernel now owns the ReAct loop. `ai_complete` resolves tools dynamically from the engine's live registry at invocation time, filtered by the caller's capabilities. The LLM only sees tools it has been granted access to.
+The kernel now owns the ReAct loop. `ai:complete` resolves tools dynamically from the engine's live registry at invocation time, filtered by the caller's capabilities. The LLM only sees tools it has been granted access to.
 
 **Implementation** (`crates/konf-tool-llm/src/lib.rs`):
 - **Dynamic tool resolution:** `AiCompleteTool` holds `Arc<Engine>`, resolves tools per-invocation (not at registration). Hot-reloaded workflows visible immediately.
 - **Capability enforcement:** Every inner tool call passes through `capability::check_tool_access()` — same lattice the executor uses. Empty capabilities deny all tools.
-- **Per-node tool whitelist:** `with: { tools: ["echo", "http_get"] }` intersects with capabilities. Cannot bypass capability checks.
+- **Per-node tool whitelist:** `with: { tools: ["echo", "http:get"] }` intersects with capabilities. Cannot bypass capability checks.
 - **Per-node LLM config:** `with: { model: "...", temperature: 0.1, max_iterations: 5 }` overrides base config per workflow node.
 - **Owned ReAct loop:** Manual loop replaces rig's opaque `.prompt()`. Enforces `max_iterations`. Emits `ToolStart`/`ToolEnd`/`TextDelta`/`Status` streaming events at every step for full auditability.
-- **Self-recursion prevention:** `ai_complete` excluded from inner tools unless explicitly whitelisted.
+- **Self-recursion prevention:** `ai:complete` excluded from inner tools unless explicitly whitelisted.
 
 ### E3: products/architect
 

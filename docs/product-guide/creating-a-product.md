@@ -88,9 +88,9 @@ triggers:
   chat:
     workflow: chat
     capabilities:
-      - "memory_*"
-      - "ai_complete"
-      - "http_get"
+      - "memory:*"
+      - "ai:complete"
+      - "http:get"
 ```
 
 Triggers map an entry point name to a workflow and the maximum capabilities that workflow receives.

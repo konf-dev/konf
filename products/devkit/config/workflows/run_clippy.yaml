@@ -7,7 +7,7 @@ input_schema:
   properties: {}
 nodes:
   clippy:
-    do: shell_exec
+    do: shell:exec
     with:
       command: "cd ${KONF_WORKSPACE}/konf && cargo clippy --workspace -- -D warnings 2>&1 | tail -5"
     then: report

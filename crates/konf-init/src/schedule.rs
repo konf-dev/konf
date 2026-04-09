@@ -8,8 +8,8 @@
 //! it doesn't know it's being repeated. Scheduling is a separate concern.
 
 use std::collections::HashMap as StdHashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -56,7 +56,7 @@ impl ScheduleTool {
 impl Tool for ScheduleTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
-            name: "schedule".into(),
+            name: "schedule:create".into(),
             description: format!(
                 "Schedule a workflow to run after a delay. Returns immediately. \
                  delay_ms: {MIN_DELAY_MS}–{MAX_DELAY_MS}. \
@@ -85,22 +85,27 @@ impl Tool for ScheduleTool {
                 "required": ["workflow", "delay_ms"]
             }),
             output_schema: None,
-            capabilities: vec!["schedule".into()],
+            capabilities: vec!["schedule:create".into()],
             supports_streaming: false,
             annotations: Default::default(),
         }
     }
 
     async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
-        let workflow_id = input.get("workflow")
+        let workflow_id = input
+            .get("workflow")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::ExecutionFailed {
                 message: "missing required field: workflow".into(),
                 retryable: false,
             })?;
 
-        let delay_ms = input.get("delay_ms")
-            .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+        let delay_ms = input
+            .get("delay_ms")
+            .and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
             .ok_or_else(|| ToolError::ExecutionFailed {
                 message: "missing or invalid field: delay_ms (must be a positive integer)".into(),
                 retryable: false,
@@ -115,7 +120,8 @@ impl Tool for ScheduleTool {
             });
         }
 
-        let repeat = input.get("repeat")
+        let repeat = input
+            .get("repeat")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
@@ -211,7 +217,8 @@ impl Tool for CancelScheduleTool {
         ToolInfo {
             name: "cancel:schedule".into(),
             description: "Cancel a scheduled workflow by its schedule_id. \
-                Stops repeating timers and aborts pending one-shot schedules.".into(),
+                Stops repeating timers and aborts pending one-shot schedules."
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -223,14 +230,15 @@ impl Tool for CancelScheduleTool {
                 "required": ["schedule_id"]
             }),
             output_schema: None,
-            capabilities: vec!["schedule".into()],
+            capabilities: vec!["cancel:schedule".into()],
             supports_streaming: false,
             annotations: Default::default(),
         }
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let schedule_id = input.get("schedule_id")
+        let schedule_id = input
+            .get("schedule_id")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| ToolError::ExecutionFailed {
                 message: "missing required field: schedule_id".into(),
@@ -284,14 +292,16 @@ mod tests {
         let runtime = make_runtime().await;
         let tool = ScheduleTool::new(runtime);
         let info = tool.info();
-        assert_eq!(info.name, "schedule");
+        assert_eq!(info.name, "schedule:create");
         assert!(info.description.contains("repeat"));
     }
 
     #[tokio::test]
     async fn test_rejects_delay_below_minimum() {
         let tool = ScheduleTool::new(make_runtime().await);
-        let result = tool.invoke(json!({"workflow": "x", "delay_ms": 0}), &test_ctx()).await;
+        let result = tool
+            .invoke(json!({"workflow": "x", "delay_ms": 0}), &test_ctx())
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("out of range"));
     }
@@ -299,7 +309,12 @@ mod tests {
     #[tokio::test]
     async fn test_rejects_delay_above_maximum() {
         let tool = ScheduleTool::new(make_runtime().await);
-        let result = tool.invoke(json!({"workflow": "x", "delay_ms": MAX_DELAY_MS + 1}), &test_ctx()).await;
+        let result = tool
+            .invoke(
+                json!({"workflow": "x", "delay_ms": MAX_DELAY_MS + 1}),
+                &test_ctx(),
+            )
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("out of range"));
     }
@@ -307,7 +322,12 @@ mod tests {
     #[tokio::test]
     async fn test_rejects_missing_workflow() {
         let tool = ScheduleTool::new(make_runtime().await);
-        let result = tool.invoke(json!({"workflow": "nonexistent", "delay_ms": 5000}), &test_ctx()).await;
+        let result = tool
+            .invoke(
+                json!({"workflow": "nonexistent", "delay_ms": 5000}),
+                &test_ctx(),
+            )
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
@@ -315,7 +335,12 @@ mod tests {
     #[tokio::test]
     async fn test_accepts_string_delay_ms() {
         let tool = ScheduleTool::new(make_runtime().await);
-        let result = tool.invoke(json!({"workflow": "nonexistent", "delay_ms": "5000"}), &test_ctx()).await;
+        let result = tool
+            .invoke(
+                json!({"workflow": "nonexistent", "delay_ms": "5000"}),
+                &test_ctx(),
+            )
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
@@ -323,14 +348,21 @@ mod tests {
     #[tokio::test]
     async fn test_repeat_defaults_to_false() {
         let tool = ScheduleTool::new(make_runtime().await);
-        let result = tool.invoke(json!({"workflow": "nonexistent", "delay_ms": 5000}), &test_ctx()).await;
+        let result = tool
+            .invoke(
+                json!({"workflow": "nonexistent", "delay_ms": 5000}),
+                &test_ctx(),
+            )
+            .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn test_cancel_nonexistent_schedule() {
         let tool = CancelScheduleTool;
-        let result = tool.invoke(json!({"schedule_id": 99999}), &test_ctx()).await;
+        let result = tool
+            .invoke(json!({"schedule_id": 99999}), &test_ctx())
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not found"));
     }
@@ -340,6 +372,6 @@ mod tests {
         let tool = CancelScheduleTool;
         let info = tool.info();
         assert_eq!(info.name, "cancel:schedule");
-        assert_eq!(info.capabilities, vec!["schedule"]);
+        assert_eq!(info.capabilities, vec!["cancel:schedule"]);
     }
 }

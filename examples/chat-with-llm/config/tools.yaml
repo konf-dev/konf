@@ -1,4 +1,0 @@
-tools:
-  llm:
-    provider: openai
-    model: qwen3:8b

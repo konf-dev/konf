@@ -119,7 +119,7 @@ pub struct ExecutionScope {
 
 /// A capability grant with optional parameter bindings.
 pub struct CapabilityGrant {
-    /// Tool name pattern. Supports glob: "memory_*", "ai_complete", "*".
+    /// Tool name pattern. Supports glob: "memory:*", "ai:complete", "*".
     pub pattern: String,
 
     /// Parameters injected into tool input, overriding any LLM-set values.
@@ -249,7 +249,7 @@ The ProcessTable is **ephemeral** (in-memory `papaya::HashMap`). On server resta
 
 Recovery after restart: the backend does NOT reconstruct the process table from the journal. It starts fresh. Active sessions reconnect and start new workflow runs. This is acceptable because workflows are short-lived (seconds to minutes) and context is in the memory backend (graph + session state).
 
-**Why not checkpointing?** Durable execution (Temporal-style) was explicitly rejected (see `docs/research/` archive). AI agent workflows are non-deterministic — replaying from a checkpoint produces different results because LLM responses aren't reproducible. Instead, Konf follows the Kubernetes model: processes are ephemeral, state is external. Side effects from completed steps (memory writes, API calls) already happened. The client reconnects and starts fresh, reading context from the memory backend.
+**Why not checkpointing?** Durable execution (Temporal-style) was explicitly rejected (rationale archived at tag `v0.1.0` in `docs/research/`). AI agent workflows are non-deterministic — replaying from a checkpoint produces different results because LLM responses aren't reproducible. Instead, Konf follows the Kubernetes model: processes are ephemeral, state is external. Side effects from completed steps (memory writes, API calls) already happened. The client reconnects and starts fresh, reading context from the memory backend.
 
 **For long-running tasks** (hours/days), the pattern is workflow-as-tool composition: an outer workflow chains short-lived sub-workflows, each storing intermediate results in session state. If the server restarts, the outer workflow resumes from the last completed sub-workflow by reading state. No checkpointing machinery needed — composability solves it.
 
@@ -300,8 +300,8 @@ pub enum RuntimeError {
 
 `CapabilityGrant::matches(tool_name)` uses the same logic as konflux's `capability.rs`:
 - `"*"` matches everything
-- `"memory_*"` matches `"memory_search"`, `"memory_store"` (requires colon separator)
-- `"memory_search"` matches exactly
+- `"memory:*"` matches `"memory:search"`, `"memory:store"` (requires colon separator)
+- `"memory:search"` matches exactly
 
 When a match is found, the grant's `bindings` are returned and injected into the tool input by `VirtualizedTool`.
 
@@ -312,7 +312,7 @@ When the runtime starts a workflow, it wraps every tool in the engine's registry
 2. If it does, injects the grant's bindings into the tool input
 3. Bindings override any existing keys (prevents LLM from setting namespace)
 
-The LLM calls `memory_search(query="exercise routine")`. The runtime intercepts and calls `memory_search(query="exercise routine", namespace="konf:unspool:user_123")`.
+The LLM calls `memory:search(query="exercise routine")`. The runtime intercepts and calls `memory:search(query="exercise routine", namespace="konf:unspool:user_123")`.
 
 ### Process lifecycle
 
@@ -382,8 +382,8 @@ workflow = runtime.parse_yaml(yaml_str)
 scope = ExecutionScope(
     namespace="konf:unspool:user_123",
     capabilities=[
-        CapabilityGrant(pattern="memory_*", bindings={"namespace": "konf:unspool:user_123"}),
-        CapabilityGrant(pattern="ai_complete"),
+        CapabilityGrant(pattern="memory:*", bindings={"namespace": "konf:unspool:user_123"}),
+        CapabilityGrant(pattern="ai:complete"),
     ],
     limits=ResourceLimits(max_steps=500),
     actor=Actor(id="user_123", role="user"),
@@ -429,7 +429,7 @@ Guards are defined in `tools.yaml` under `tool_guards:`:
 
 ```yaml
 tool_guards:
-  shell_exec:
+  shell:exec:
     rules:
       - action: deny
         predicate:
@@ -446,8 +446,8 @@ tool_guards:
     default: allow
 
   # Aliasing: redirect calls to a wrapper workflow
-  dangerous_tool:
-    alias: workflow_safe_dangerous_tool
+  dangerous:tool:
+    alias: workflow:safe_dangerous_tool
 ```
 
 ### Rule Evaluation
@@ -473,11 +473,11 @@ Paths are dot-separated (e.g., `config.level`) and support array indexing (e.g.,
 
 ### Tool Aliasing
 
-When `alias` is set, the runtime registers the alias workflow under the original tool's name. The agent calls `shell_exec` but actually gets `workflow_safe_shell`. Combined with capability attenuation, the original tool is only accessible inside the wrapper workflow's scope.
+When `alias` is set, the runtime registers the alias workflow under the original tool's name. The agent calls `shell:exec` but actually gets `workflow:safe_shell`. Combined with capability attenuation, the original tool is only accessible inside the wrapper workflow's scope.
 
 ### No Hidden Behaviors
 
-Guards are applied at registry construction time — the tool in the registry IS the guarded version. `system_introspect` shows the tools as they appear. The executor is unchanged; it dispatches tools identically regardless of wrapping.
+Guards are applied at registry construction time — the tool in the registry IS the guarded version. `system:introspect` shows the tools as they appear. The executor is unchanged; it dispatches tools identically regardless of wrapping.
 
 ---
 
@@ -490,7 +490,7 @@ let scope = scope_from_role(
     "alice",                          // actor ID
     "agent",                          // role name
     "konf:myproduct",                 // product namespace
-    &["memory_*", "ai_complete"],     // capabilities for this role
+    &["memory:*", "ai:complete"],     // capabilities for this role
     Some("agents"),                   // namespace suffix
     ResourceLimits::default(),
 );
@@ -503,7 +503,7 @@ roles:
   admin:
     capabilities: ["*"]
   agent:
-    capabilities: ["memory_*", "ai_complete", "workflow_*"]
+    capabilities: ["memory:*", "ai:complete", "workflow:*"]
     namespace_suffix: "agents"
   guest:
     capabilities: ["echo", "template"]

@@ -26,9 +26,9 @@ fn matches_filter(pattern: &str, tool_name: &str) -> bool {
     if pattern == "*" {
         return true;
     }
-    if let Some(prefix) = pattern.strip_suffix("_*") {
+    if let Some(prefix) = pattern.strip_suffix(":*") {
         return tool_name.starts_with(prefix)
-            && tool_name.get(prefix.len()..prefix.len() + 1) == Some("_");
+            && tool_name.get(prefix.len()..prefix.len() + 1) == Some(":");
     }
     pattern == tool_name
 }
@@ -44,7 +44,7 @@ impl Tool for IntrospectTool {
                 "properties": {
                     "filter": {
                         "type": "string",
-                        "description": "Optional glob pattern to filter tools (e.g. 'memory_*' or 'ai_complete')"
+                        "description": "Optional glob pattern to filter tools (e.g. 'memory:*' or 'ai:complete')"
                     }
                 }
             }),
@@ -60,20 +60,21 @@ impl Tool for IntrospectTool {
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, KonfluxToolError> {
-        let filter = input.get("filter")
-            .and_then(|v| v.as_str());
+        let filter = input.get("filter").and_then(|v| v.as_str());
 
         let registry = self.engine.registry();
         let all_tools = registry.list();
 
         let filtered: Vec<&ToolInfo> = match filter {
-            Some(pattern) => all_tools.iter()
+            Some(pattern) => all_tools
+                .iter()
                 .filter(|info| matches_filter(pattern, &info.name))
                 .collect(),
             None => all_tools.iter().collect(),
         };
 
-        let tools_json: Vec<Value> = filtered.iter()
+        let tools_json: Vec<Value> = filtered
+            .iter()
             .map(|info| {
                 json!({
                     "name": info.name,
@@ -138,7 +139,11 @@ mod tests {
                     annotations: ToolAnnotations::default(),
                 }
             }
-            async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, KonfluxToolError> {
+            async fn invoke(
+                &self,
+                _input: Value,
+                _ctx: &ToolContext,
+            ) -> Result<Value, KonfluxToolError> {
                 Ok(Value::Null)
             }
         }
@@ -161,11 +166,11 @@ mod tests {
 
     #[test]
     fn test_matches_filter() {
-        assert!(matches_filter("memory_*", "memory_search"));
-        assert!(matches_filter("memory_*", "memory_store"));
-        assert!(!matches_filter("memory_*", "ai:complete"));
+        assert!(matches_filter("memory:*", "memory:search"));
+        assert!(matches_filter("memory:*", "memory:store"));
+        assert!(!matches_filter("memory:*", "ai:complete"));
         assert!(matches_filter("*", "anything"));
         assert!(matches_filter("ai:complete", "ai:complete"));
-        assert!(!matches_filter("ai:complete", "ai_other"));
+        assert!(!matches_filter("ai:complete", "ai:other"));
     }
 }

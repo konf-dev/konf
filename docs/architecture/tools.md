@@ -99,8 +99,8 @@ crates/
 
 | Tool | Description | Annotations |
 |------|-------------|-------------|
-| `http_get` | HTTP GET request | open_world, idempotent |
-| `http_post` | HTTP POST request with JSON body | open_world |
+| `http:get` | HTTP GET request | open_world, idempotent |
+| `http:post` | HTTP POST request with JSON body | open_world |
 
 Backed by reqwest. Configurable max timeout (default 30s, capped at 300s). Returns status, headers, body (JSON or string).
 
@@ -108,16 +108,16 @@ Backed by reqwest. Configurable max timeout (default 30s, capped at 300s). Retur
 
 | Tool | Description | Annotations |
 |------|-------------|-------------|
-| `ai_complete` | LLM completion with capability-enforced tool-calling loop (ReAct) | open_world, supports_streaming |
+| `ai:complete` | LLM completion with capability-enforced tool-calling loop (ReAct) | open_world, supports_streaming |
 
-`ai_complete` is the keystone agentic tool. The kernel owns the ReAct loop — not the LLM, not application code.
+`ai:complete` is the keystone agentic tool. The kernel owns the ReAct loop — not the LLM, not application code.
 
 **How it works:**
 1. At invocation, tools are resolved dynamically from the engine's live registry
 2. Only tools that pass the caller's `ToolContext.capabilities` (same lattice as the executor) are exposed to the LLM
 3. An optional `tools` whitelist in `with:` further restricts visibility (AND with capabilities)
 4. The LLM calls tools → kernel dispatches → feeds results back → repeats until text response or `max_iterations`
-5. `ai_complete` itself is excluded from inner tools to prevent unbounded recursion (unless explicitly whitelisted)
+5. `ai:complete` itself is excluded from inner tools to prevent unbounded recursion (unless explicitly whitelisted)
 
 **Streaming events emitted per iteration:**
 - `Status { iteration, max }` — before each LLM call
@@ -133,7 +133,7 @@ Backed by rig-core. Supports OpenAI, Anthropic, Google, and any OpenAI-compatibl
 
 | Tool | Description | Annotations |
 |------|-------------|-------------|
-| `ai_embed` | Generate text embeddings locally | read_only, idempotent |
+| `ai:embed` | Generate text embeddings locally | read_only, idempotent |
 
 Backed by fastembed (ONNX runtime). Runs locally — no API calls. Model configurable (default: AllMiniLML6V2).
 
@@ -141,13 +141,13 @@ Backed by fastembed (ONNX runtime). Runs locally — no API calls. Model configu
 
 | Tool | Description | Annotations |
 |------|-------------|-------------|
-| `memory_search` | Search the knowledge graph | read_only, idempotent |
-| `memory_store` | Add nodes to the knowledge graph | |
-| `state_set` | Set a session state key (working memory) | idempotent |
-| `state_get` | Get a session state key | read_only, idempotent |
-| `state_delete` | Delete a session state key | destructive |
-| `state_list` | List all session state keys | read_only, idempotent |
-| `state_clear` | Clear all session state | destructive |
+| `memory:search` | Search the knowledge graph | read_only, idempotent |
+| `memory:store` | Add nodes to the knowledge graph | |
+| `state:set` | Set a session state key (working memory) | idempotent |
+| `state:get` | Get a session state key | read_only, idempotent |
+| `state:delete` | Delete a session state key | destructive |
+| `state:list` | List all session state keys | read_only, idempotent |
+| `state:clear` | Clear all session state | destructive |
 
 Backed by a MemoryBackend implementation (see [memory-backends.md](memory-backends.md)). Backend selected via tools.yaml.
 
@@ -217,7 +217,7 @@ custom:
 | Path | Effort | Integration depth | When to use |
 |------|--------|-------------------|-------------|
 | MCP server | Zero Konf code | Auto-discovered tools, MCP annotations | Third-party, any language |
-| HTTP in workflow | Zero registration | `http_post` in YAML | Simple API calls |
+| HTTP in workflow | Zero registration | `http:post` in YAML | Simple API calls |
 | Python function | Config + Python file | Custom tool name, capabilities | Prototyping |
 | Rust crate | New crate in konf-tools | Full integration: streaming, namespace injection | Core tools |
 

@@ -76,7 +76,7 @@ impl Default for ToolAnnotations { /* all false */ }
 - `konf-backend/src/tools/http.rs` (HttpGetTool, HttpPostTool) — `open_world: true, idempotent: true` for GET
 - `konf-backend/src/tools/llm.rs` (AiCompleteTool) — `open_world: true`
 - `konf-backend/src/tools/embed.rs` (EmbedTool) — `read_only: true, idempotent: true`
-- `konf-backend/src/tools/memory.rs` (4 tools) — search: `read_only, idempotent`; store: none; state_set: `idempotent`; state_get: `read_only, idempotent`
+- `konf-backend/src/tools/memory.rs` (4 tools) — memory:search: `read_only, idempotent`; memory:store: none; state:set: `idempotent`; state:get: `read_only, idempotent`
 - `konf-backend/src/tools/mcp.rs` (McpToolWrapper) — map from MCP annotations
 
 Add `remove()` to ToolRegistry (needed for hot-reload tool toggling):

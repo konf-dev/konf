@@ -46,5 +46,5 @@ roles:
   admin:
     capabilities: ["*"]
   agent:
-    capabilities: ["shell:exec", "template", "echo", "log", "schedule", "config:reload", "ai:complete", "yaml:validate_workflow", "workflow:*"]
+    capabilities: ["shell:exec", "template", "echo", "log", "schedule:*", "config:reload", "ai:complete", "yaml:validate_workflow", "workflow:*"]
     namespace_suffix: "nightwatch"

@@ -41,7 +41,7 @@ pub trait Tool: Send + Sync {
 /// Fields are MCP-aligned — same metadata regardless of tool source (Rust, MCP, Python).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolInfo {
-    /// Unique tool name, e.g. "memory_search", "ai_complete", "workflow_summarize"
+    /// Unique tool name, e.g. "memory:search", "ai:complete", "workflow:summarize"
     pub name: String,
 
     /// Human-readable description shown to the LLM

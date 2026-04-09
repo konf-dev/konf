@@ -9,25 +9,18 @@
 use std::sync::Arc;
 
 use rmcp::handler::server::ServerHandler;
+use rmcp::model::{AnnotateAble, ErrorData};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult,
-    Content,
-    Implementation,
-    ListResourcesResult, ListToolsResult,
-    PaginatedRequestParams,
-    ReadResourceRequestParams, ReadResourceResult,
-    ResourceContents,
-    RawResource,
-    ServerCapabilities,
-    Tool as McpTool,
+    CallToolRequestParams, CallToolResult, Content, Implementation, ListResourcesResult,
+    ListToolsResult, PaginatedRequestParams, RawResource, ReadResourceRequestParams,
+    ReadResourceResult, ResourceContents, ServerCapabilities, Tool as McpTool,
 };
 use rmcp::service::{RequestContext, RoleServer};
-use rmcp::model::{AnnotateAble, ErrorData};
 use rmcp::ServiceExt;
 
-use konflux::Engine;
-use konflux::tool::ToolInfo;
 use konf_runtime::Runtime;
+use konflux::tool::ToolInfo;
+use konflux::Engine;
 
 /// MCP server info type alias (rmcp names it InitializeResult).
 type ServerInfo = rmcp::model::InitializeResult;
@@ -72,7 +65,9 @@ impl KonfMcpServer {
         tracing::info!("Starting MCP server on stdio");
         let mut tool_changed_rx = self.engine.subscribe_tool_changes();
         let transport = rmcp::transport::stdio();
-        let service = self.serve(transport).await
+        let service = self
+            .serve(transport)
+            .await
             .map_err(|e| anyhow::anyhow!("MCP stdio server failed: {e}"))?;
 
         // Spawn a task that watches for tool-list changes and notifies the MCP client.
@@ -86,7 +81,9 @@ impl KonfMcpServer {
             }
         });
 
-        service.waiting().await
+        service
+            .waiting()
+            .await
             .map_err(|e| anyhow::anyhow!("MCP stdio server error: {e}"))?;
         Ok(())
     }
@@ -104,10 +101,10 @@ impl KonfMcpServer {
 
 /// Convert a kernel tool name to MCP-safe name.
 ///
-/// Colons in tool names break Claude Code's identifier mapping
-/// (anthropics/claude-code#25081). The kernel uses colons for namespacing
-/// (`memory:search`, `ai:complete`). MCP clients see underscores
-/// (`memory_search`, `ai_complete`). Translation happens only at this boundary.
+/// The MCP spec (SEP-986) restricts tool names to `[A-Za-z0-9_\-.]`.
+/// The kernel uses colons for namespacing (`memory:search`, `ai:complete`).
+/// MCP clients see underscores (`memory_search`, `ai_complete`).
+/// Translation happens only at this boundary.
 fn kernel_to_mcp_name(name: &str) -> String {
     name.replace(':', "_")
 }
@@ -120,11 +117,7 @@ fn tool_info_to_mcp(info: &ToolInfo) -> McpTool {
     // NOTE: Do NOT add .with_annotations() here.
     // Claude Code silently drops ALL tools when annotations are present
     // in the tools/list response (anthropics/claude-code#25081).
-    McpTool::new(
-        mcp_name,
-        info.description.clone(),
-        Arc::new(schema_obj),
-    )
+    McpTool::new(mcp_name, info.description.clone(), Arc::new(schema_obj))
 }
 
 /// Build a ToolContext for an MCP tool call using session capabilities.
@@ -150,10 +143,12 @@ impl ServerHandler for KonfMcpServer {
                 .enable_tools()
                 .enable_tool_list_changed()
                 .enable_resources()
-                .build()
+                .build(),
         )
         .with_server_info(Implementation::new("konf", env!("CARGO_PKG_VERSION")))
-        .with_instructions("Konf AI agent platform. Provides tools for memory, LLM, HTTP, and workflow execution.")
+        .with_instructions(
+            "Konf AI agent platform. Provides tools for memory, LLM, HTTP, and workflow execution.",
+        )
     }
 
     async fn list_tools(
@@ -162,7 +157,8 @@ impl ServerHandler for KonfMcpServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         let registry = self.engine.registry();
-        let tools: Vec<McpTool> = registry.list()
+        let tools: Vec<McpTool> = registry
+            .list()
             .iter()
             .filter(|info| tool_allowed_by_session(&info.name, &self.session_capabilities))
             .map(tool_info_to_mcp)
@@ -189,7 +185,9 @@ impl ServerHandler for KonfMcpServer {
         // (e.g., "memory_search"), kernel uses colons ("memory:search").
         // Build reverse map from kernel registry to find the match.
         let registry = self.engine.registry();
-        let kernel_name = registry.list().iter()
+        let kernel_name = registry
+            .list()
+            .iter()
             .find(|info| kernel_to_mcp_name(&info.name) == *mcp_name)
             .map(|info| info.name.clone())
             .unwrap_or_else(|| mcp_name.to_string()); // fallback to exact match
@@ -215,8 +213,8 @@ impl ServerHandler for KonfMcpServer {
 
         match tool.invoke(input, &ctx).await {
             Ok(output) => {
-                let text = serde_json::to_string_pretty(&output)
-                    .unwrap_or_else(|_| output.to_string());
+                let text =
+                    serde_json::to_string_pretty(&output).unwrap_or_else(|_| output.to_string());
                 Ok(CallToolResult::success(vec![Content::text(text)]))
             }
             Err(e) => {
@@ -232,7 +230,8 @@ impl ServerHandler for KonfMcpServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
         let registry = self.engine.resources();
-        let resources = registry.list()
+        let resources = registry
+            .list()
             .iter()
             .map(|info| {
                 RawResource::new(info.uri.clone(), info.name.clone())
@@ -260,20 +259,20 @@ impl ServerHandler for KonfMcpServer {
         tracing::info!(uri = %uri, "MCP resources/read");
 
         let registry = self.engine.resources();
-        let resource = registry.get(uri).ok_or_else(|| {
-            ErrorData::invalid_params(format!("Resource not found: {uri}"), None)
-        })?;
+        let resource = registry
+            .get(uri)
+            .ok_or_else(|| ErrorData::invalid_params(format!("Resource not found: {uri}"), None))?;
 
         let content = resource.read().await.map_err(|e| {
             ErrorData::internal_error(format!("Failed to read resource: {e}"), None)
         })?;
 
-        let text = serde_json::to_string_pretty(&content)
-            .unwrap_or_else(|_| content.to_string());
+        let text = serde_json::to_string_pretty(&content).unwrap_or_else(|_| content.to_string());
 
-        Ok(ReadResourceResult::new(vec![
-            ResourceContents::text(text, uri.clone())
-        ]))
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(
+            text,
+            uri.clone(),
+        )]))
     }
 }
 
@@ -310,9 +309,8 @@ mod tests {
     fn test_server_info() {
         let engine = Arc::new(Engine::new());
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let runtime = rt.block_on(async {
-            Arc::new(Runtime::new(Engine::new(), None).await.unwrap())
-        });
+        let runtime =
+            rt.block_on(async { Arc::new(Runtime::new(Engine::new(), None).await.unwrap()) });
         let server = KonfMcpServer::new(engine, runtime);
         let info = server.get_info();
         assert_eq!(info.server_info.name, "konf");
