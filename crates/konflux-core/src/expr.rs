@@ -3,9 +3,9 @@
 //! Evaluates condition expressions against workflow state.
 //! Supports a safe subset of expressions (no arbitrary code execution).
 
-use std::collections::HashMap;
 use serde_json::Value;
-use tracing::{debug};
+use std::collections::HashMap;
+use tracing::debug;
 
 /// The result of evaluating an expression
 #[derive(Debug, Clone, PartialEq)]
@@ -64,34 +64,45 @@ impl<'a> ExprEvaluator<'a> {
         debug!("Evaluated '{}' to {}", expr, b);
         Ok(b)
     }
-    
+
     fn eval_expr(expr: &str, context: &HashMap<String, ExprValue>) -> Result<ExprValue, ExprError> {
         let expr = expr.trim();
-        
+
         // 1. Logical OR (lowest precedence)
         if let Some(idx) = expr.rfind(" || ") {
             let left = Self::eval_expr(&expr[..idx], context)?;
             let right = Self::eval_expr(&expr[idx + 4..], context)?;
-            return Ok(ExprValue::Bool(Self::to_bool(&left) || Self::to_bool(&right)));
+            return Ok(ExprValue::Bool(
+                Self::to_bool(&left) || Self::to_bool(&right),
+            ));
         }
 
         // 2. Logical AND
         if let Some(idx) = expr.rfind(" && ") {
             let left = Self::eval_expr(&expr[..idx], context)?;
             let right = Self::eval_expr(&expr[idx + 4..], context)?;
-            return Ok(ExprValue::Bool(Self::to_bool(&left) && Self::to_bool(&right)));
+            return Ok(ExprValue::Bool(
+                Self::to_bool(&left) && Self::to_bool(&right),
+            ));
         }
 
         // 3. Comparisons
-        let ops = [(" == ", "=="), (" != ", "!="), (" >= ", ">="), (" <= ", "<="), (" > ", ">"), (" < ", "<")];
+        let ops = [
+            (" == ", "=="),
+            (" != ", "!="),
+            (" >= ", ">="),
+            (" <= ", "<="),
+            (" > ", ">"),
+            (" < ", "<"),
+        ];
         for (sep, op) in ops {
             if let Some(idx) = expr.find(sep) {
                 let left_str = expr[..idx].trim();
                 let right_str = expr[idx + sep.len()..].trim();
-                
+
                 let left = Self::eval_expr(left_str, context)?;
                 let right = Self::eval_expr(right_str, context)?;
-                
+
                 let result = match op {
                     "==" => ExprValue::Bool(Self::equals(&left, &right)),
                     "!=" => ExprValue::Bool(!Self::equals(&left, &right)),
@@ -101,7 +112,10 @@ impl<'a> ExprEvaluator<'a> {
                     "<=" => ExprValue::Bool(Self::compare(&left, &right)? <= 0),
                     _ => unreachable!(),
                 };
-                debug!("Comparison result: {:?} {} {:?} -> {:?}", left, op, right, result);
+                debug!(
+                    "Comparison result: {:?} {} {:?} -> {:?}",
+                    left, op, right, result
+                );
                 return Ok(result);
             }
         }
@@ -121,7 +135,10 @@ impl<'a> ExprEvaluator<'a> {
         Self::eval_value(expr, context)
     }
 
-    fn try_keyword_op(expr: &str, context: &HashMap<String, ExprValue>) -> Result<Option<ExprValue>, ExprError> {
+    fn try_keyword_op(
+        expr: &str,
+        context: &HashMap<String, ExprValue>,
+    ) -> Result<Option<ExprValue>, ExprError> {
         if let Some(stripped) = expr.strip_suffix(" exists") {
             let reference = stripped.trim();
             return match Self::eval_value(reference, context) {
@@ -129,7 +146,7 @@ impl<'a> ExprEvaluator<'a> {
                 Err(_) => Ok(Some(ExprValue::Bool(false))),
             };
         }
-        
+
         if let Some(stripped) = expr.strip_suffix(" is empty") {
             let reference = stripped.trim();
             let val = Self::eval_value(reference, context)?;
@@ -147,23 +164,36 @@ impl<'a> ExprEvaluator<'a> {
         }
         Ok(None)
     }
-    
-    fn eval_value(expr: &str, context: &HashMap<String, ExprValue>) -> Result<ExprValue, ExprError> {
+
+    fn eval_value(
+        expr: &str,
+        context: &HashMap<String, ExprValue>,
+    ) -> Result<ExprValue, ExprError> {
         let expr = expr.trim();
-        if expr == "true" { return Ok(ExprValue::Bool(true)); }
-        if expr == "false" { return Ok(ExprValue::Bool(false)); }
-        if expr == "null" || expr == "None" { return Ok(ExprValue::Null); }
-        
+        if expr == "true" {
+            return Ok(ExprValue::Bool(true));
+        }
+        if expr == "false" {
+            return Ok(ExprValue::Bool(false));
+        }
+        if expr == "null" || expr == "None" {
+            return Ok(ExprValue::Null);
+        }
+
         if expr.len() >= 2
             && ((expr.starts_with('"') && expr.ends_with('"'))
                 || (expr.starts_with('\'') && expr.ends_with('\'')))
         {
-            return Ok(ExprValue::String(expr[1..expr.len()-1].to_string()));
+            return Ok(ExprValue::String(expr[1..expr.len() - 1].to_string()));
         }
-        
-        if let Ok(n) = expr.parse::<i64>() { return Ok(ExprValue::Int(n)); }
-        if let Ok(f) = expr.parse::<f64>() { return Ok(ExprValue::Float(f)); }
-        
+
+        if let Ok(n) = expr.parse::<i64>() {
+            return Ok(ExprValue::Int(n));
+        }
+        if let Ok(f) = expr.parse::<f64>() {
+            return Ok(ExprValue::Float(f));
+        }
+
         let parts: Vec<&str> = expr.split('.').collect();
         if let Some(mut current) = context.get(parts[0]).cloned() {
             for part in &parts[1..] {
@@ -172,43 +202,62 @@ impl<'a> ExprEvaluator<'a> {
                         if let Some(v) = m.get(*part) {
                             current = v.clone();
                         } else {
-                            return Err(ExprError::UnknownReference(format!("{}: field '{}' not found", expr, part)));
+                            return Err(ExprError::UnknownReference(format!(
+                                "{}: field '{}' not found",
+                                expr, part
+                            )));
                         }
                     }
                     ExprValue::Json(ref j) => {
                         if let Some(v) = j.get(*part) {
                             current = Self::json_to_expr_value(v);
                         } else {
-                            return Err(ExprError::UnknownReference(format!("{}: field '{}' not found in JSON", expr, part)));
+                            return Err(ExprError::UnknownReference(format!(
+                                "{}: field '{}' not found in JSON",
+                                expr, part
+                            )));
                         }
                     }
-                    _ => return Err(ExprError::TypeError { expected: "map or object".into(), got: format!("{:?}", current) }),
+                    _ => {
+                        return Err(ExprError::TypeError {
+                            expected: "map or object".into(),
+                            got: format!("{:?}", current),
+                        })
+                    }
                 }
             }
             return Ok(current);
         }
         Err(ExprError::UnknownReference(expr.to_string()))
     }
-    
+
     pub fn json_to_expr_value(json: &Value) -> ExprValue {
         match json {
             Value::Null => ExprValue::Null,
             Value::Bool(b) => ExprValue::Bool(*b),
             Value::Number(n) => {
-                if let Some(i) = n.as_i64() { ExprValue::Int(i) }
-                else if let Some(f) = n.as_f64() { ExprValue::Float(f) }
-                else { ExprValue::String(n.to_string()) }
+                if let Some(i) = n.as_i64() {
+                    ExprValue::Int(i)
+                } else if let Some(f) = n.as_f64() {
+                    ExprValue::Float(f)
+                } else {
+                    ExprValue::String(n.to_string())
+                }
             }
             Value::String(s) => ExprValue::String(s.clone()),
-            Value::Array(arr) => ExprValue::List(arr.iter().map(Self::json_to_expr_value).collect()),
+            Value::Array(arr) => {
+                ExprValue::List(arr.iter().map(Self::json_to_expr_value).collect())
+            }
             Value::Object(obj) => {
                 let mut map = HashMap::new();
-                for (k, v) in obj { map.insert(k.clone(), Self::json_to_expr_value(v)); }
+                for (k, v) in obj {
+                    map.insert(k.clone(), Self::json_to_expr_value(v));
+                }
                 ExprValue::Map(map)
             }
         }
     }
-    
+
     fn to_bool(val: &ExprValue) -> bool {
         match val {
             ExprValue::Bool(b) => *b,
@@ -218,14 +267,18 @@ impl<'a> ExprEvaluator<'a> {
             ExprValue::List(l) => !l.is_empty(),
             ExprValue::Map(m) => !m.is_empty(),
             ExprValue::Json(j) => {
-                if let Some(b) = j.as_bool() { b }
-                else if let Some(s) = j.as_str() { !s.is_empty() }
-                else { !j.is_null() }
+                if let Some(b) = j.as_bool() {
+                    b
+                } else if let Some(s) = j.as_str() {
+                    !s.is_empty()
+                } else {
+                    !j.is_null()
+                }
             }
             ExprValue::Null => false,
         }
     }
-    
+
     fn equals(a: &ExprValue, b: &ExprValue) -> bool {
         match (a, b) {
             (ExprValue::Bool(a), ExprValue::Bool(b)) => a == b,
@@ -248,11 +301,17 @@ impl<'a> ExprEvaluator<'a> {
             }
         }
     }
-    
+
     fn compare(a: &ExprValue, b: &ExprValue) -> Result<i32, ExprError> {
         let va = Self::to_float(a)?;
         let vb = Self::to_float(b)?;
-        Ok(if va < vb { -1 } else if va > vb { 1 } else { 0 })
+        Ok(if va < vb {
+            -1
+        } else if va > vb {
+            1
+        } else {
+            0
+        })
     }
 
     fn to_float(val: &ExprValue) -> Result<f64, ExprError> {
@@ -261,17 +320,22 @@ impl<'a> ExprEvaluator<'a> {
             ExprValue::Float(f) => Ok(*f),
             ExprValue::String(s) => s.parse::<f64>().map_err(|e| ExprError::TypeError {
                 expected: "numeric string".into(),
-                got: format!("'{}' error: {}", s, e)
+                got: format!("'{}' error: {}", s, e),
             }),
-            ExprValue::Json(Value::Number(n)) => n.as_f64().ok_or(ExprError::TypeError { 
-                expected: "number".into(), 
-                got: format!("json non-number: {:?}", n) 
+            ExprValue::Json(Value::Number(n)) => n.as_f64().ok_or(ExprError::TypeError {
+                expected: "number".into(),
+                got: format!("json non-number: {:?}", n),
             }),
-            ExprValue::Json(Value::String(s)) => s.parse::<f64>().map_err(|e| ExprError::TypeError {
-                expected: "numeric string".into(),
-                got: format!("'{}' error: {}", s, e)
+            ExprValue::Json(Value::String(s)) => {
+                s.parse::<f64>().map_err(|e| ExprError::TypeError {
+                    expected: "numeric string".into(),
+                    got: format!("'{}' error: {}", s, e),
+                })
+            }
+            _ => Err(ExprError::TypeError {
+                expected: "number".into(),
+                got: format!("{:?}", val),
             }),
-            _ => Err(ExprError::TypeError { expected: "number".into(), got: format!("{:?}", val) }),
         }
     }
 }

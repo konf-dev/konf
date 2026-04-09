@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use serde_json::json;
-use konflux::template::{render, has_templates, resolve_expr};
+use konflux::template::{has_templates, render, resolve_expr};
 use konflux::workflow::Expr;
+use serde_json::json;
+use std::collections::HashMap;
 
 #[test]
 fn test_simple_render() {
@@ -62,12 +62,15 @@ fn test_resolve_expr_json_with_templates() {
         }
     }));
     let result = resolve_expr(&expr, &vars).unwrap();
-    assert_eq!(result, json!({
-        "greeting": "Hello Alice",
-        "meta": {
-            "id": 123
-        }
-    }));
+    assert_eq!(
+        result,
+        json!({
+            "greeting": "Hello Alice",
+            "meta": {
+                "id": 123
+            }
+        })
+    );
 }
 
 #[test]

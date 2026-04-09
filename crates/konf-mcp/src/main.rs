@@ -17,13 +17,13 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 
     let args: Vec<String> = std::env::args().collect();
-    let config_dir = args.iter()
+    let config_dir = args
+        .iter()
         .position(|a| a == "--config")
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from)
@@ -40,10 +40,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Serve via stdio (Claude Desktop, CLI, piped connections)
-    let server = konf_mcp::KonfMcpServer::new(
-        Arc::new(engine.clone()),
-        instance.runtime.clone(),
-    );
+    let server = konf_mcp::KonfMcpServer::new(Arc::new(engine.clone()), instance.runtime.clone());
     server.serve_stdio().await?;
 
     Ok(())

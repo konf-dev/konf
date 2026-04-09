@@ -1,6 +1,6 @@
 //! Template rendering using minijinja for {{ }} expressions.
 
-use minijinja::{Environment};
+use minijinja::Environment;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 

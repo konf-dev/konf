@@ -125,12 +125,20 @@ impl Scheduler {
             namespace: workflow_job.namespace,
             capabilities: workflow_job.capabilities,
             limits: ResourceLimits::default(),
-            actor: Actor { id: "scheduler".into(), role: ActorRole::System },
+            actor: Actor {
+                id: "scheduler".into(),
+                role: ActorRole::System,
+            },
             depth: 0,
         };
 
         self.runtime
-            .run(&workflow, workflow_job.input, scope, workflow_job.session_id)
+            .run(
+                &workflow,
+                workflow_job.input,
+                scope,
+                workflow_job.session_id,
+            )
             .await?;
 
         Ok(())
@@ -222,7 +230,8 @@ mod tests {
             "name": "nightly-synthesis",
             "schedule": "0 3 * * *",
             "workflow": "workflows/synthesis.yaml"
-        })).unwrap();
+        }))
+        .unwrap();
 
         assert_eq!(config.name, "nightly-synthesis");
         assert_eq!(config.schedule, "0 3 * * *");

@@ -1,17 +1,17 @@
 //! YAML schema types for Konflux workflows.
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use indexmap::IndexMap;
 
 /// Root structure of a workflow YAML file.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WorkflowSchema {
     pub workflow: String,
-    
+
     #[serde(default = "default_version")]
     pub version: String,
-    
+
     pub description: Option<String>,
 
     #[serde(default)]
@@ -71,7 +71,7 @@ pub struct NodeSchema {
 
     #[serde(default)]
     pub credentials: HashMap<String, String>,
-    
+
     pub grant: Option<Vec<String>>,
 }
 
@@ -225,12 +225,10 @@ impl StreamConfigSchema {
             StreamConfigSchema::None => crate::workflow::StreamMode::Default,
             StreamConfigSchema::Enabled(true) => crate::workflow::StreamMode::Passthrough,
             StreamConfigSchema::Enabled(false) => crate::workflow::StreamMode::Default,
-            StreamConfigSchema::Mode(s) => {
-                match s.to_lowercase().as_str() {
-                    "passthrough" | "pass" | "stream" => crate::workflow::StreamMode::Passthrough,
-                    _ => crate::workflow::StreamMode::Default,
-                }
-            }
+            StreamConfigSchema::Mode(s) => match s.to_lowercase().as_str() {
+                "passthrough" | "pass" | "stream" => crate::workflow::StreamMode::Passthrough,
+                _ => crate::workflow::StreamMode::Default,
+            },
         }
     }
 }

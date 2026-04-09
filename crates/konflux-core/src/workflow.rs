@@ -2,11 +2,11 @@
 //!
 //! This module defines the data structures that represent a workflow.
 
-use std::collections::HashMap;
-use std::time::Duration;
-use std::fmt;
-use serde::{Deserialize, Serialize};
 use crate::error::ValidationError;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt;
+use std::time::Duration;
 
 // ============================================================
 // ID Newtypes
@@ -86,40 +86,40 @@ pub struct Workflow {
 pub struct Step {
     pub id: StepId,
     pub tool: ToolId,
-    
+
     /// Input arguments (key → expression that resolves from state)
     pub input: HashMap<String, Expr>,
-    
+
     /// Outgoing edges (where to go next)
     pub edges: Vec<Edge>,
-    
+
     /// Steps that must complete before this step runs
     pub depends_on: Vec<StepId>,
-    
+
     /// How to handle waiting for dependencies
     pub join: JoinPolicy,
-    
+
     /// What to do when this step fails
     pub on_error: ErrorAction,
-    
+
     /// Retry policy for transient failures
     pub retry: Option<RetryPolicy>,
-    
+
     /// Maximum time to wait for this step
     pub timeout: Option<Duration>,
-    
+
     /// Credentials this step requires
     pub credentials: HashMap<String, String>,
-    
+
     /// Grants for nested workflows
     pub grant: Option<Vec<String>>,
-    
+
     /// Post-processing pipeline
     pub pipe: Vec<PipeStep>,
-    
+
     /// Streaming mode for this step
     pub stream: StreamMode,
-    
+
     /// Repeat configuration for bounded loops
     pub repeat: Option<RepeatConfig>,
 }
@@ -163,7 +163,9 @@ pub enum JoinPolicy {
     #[default]
     All,
     Any,
-    Quorum { min: u32 },
+    Quorum {
+        min: u32,
+    },
     Lenient,
 }
 
@@ -172,8 +174,12 @@ pub enum ErrorAction {
     #[default]
     Fail,
     Skip,
-    Fallback { value: String },
-    Goto { step: StepId },
+    Fallback {
+        value: String,
+    },
+    Goto {
+        step: StepId,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -189,7 +195,9 @@ pub enum BackoffStrategy {
     Fixed,
     #[default]
     Exponential,
-    Linear { increment: Duration },
+    Linear {
+        increment: Duration,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -300,7 +308,8 @@ impl Workflow {
     fn detect_cycles(&self) -> Result<(), ValidationError> {
         let mut adjacency: HashMap<&StepId, Vec<&StepId>> = HashMap::new();
         for step in &self.steps {
-            let targets: Vec<&StepId> = step.edges
+            let targets: Vec<&StepId> = step
+                .edges
                 .iter()
                 .filter_map(|e| match &e.target {
                     EdgeTarget::Step(id) => Some(id),
@@ -314,8 +323,8 @@ impl Workflow {
         let mut path: Vec<StepId> = Vec::new();
 
         if self.dfs_detect_cycle(&self.entry, &adjacency, &mut color, &mut path) {
-            return Err(ValidationError::CycleDetected { 
-                path: path.into_iter().map(|id| id.to_string()).collect() 
+            return Err(ValidationError::CycleDetected {
+                path: path.into_iter().map(|id| id.to_string()).collect(),
             });
         }
 
@@ -323,8 +332,8 @@ impl Workflow {
             if !color.contains_key(&step.id)
                 && self.dfs_detect_cycle(&step.id, &adjacency, &mut color, &mut path)
             {
-                return Err(ValidationError::CycleDetected { 
-                    path: path.into_iter().map(|id| id.to_string()).collect() 
+                return Err(ValidationError::CycleDetected {
+                    path: path.into_iter().map(|id| id.to_string()).collect(),
                 });
             }
         }
@@ -397,9 +406,9 @@ impl Step {
     }
 
     pub fn with_edge(mut self, target: EdgeTarget) -> Self {
-        self.edges.push(Edge { 
-            target, 
-            condition: None, 
+        self.edges.push(Edge {
+            target,
+            condition: None,
             priority: 0,
         });
         self

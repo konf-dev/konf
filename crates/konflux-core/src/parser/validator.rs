@@ -3,7 +3,9 @@
 use std::collections::HashSet;
 
 use crate::error::ValidationError;
-use crate::parser::schema::{WorkflowSchema, NodeSchema, DoBlock, ThenBlock, PipeStepSchema, CatchBlock};
+use crate::parser::schema::{
+    CatchBlock, DoBlock, NodeSchema, PipeStepSchema, ThenBlock, WorkflowSchema,
+};
 
 /// Validate a parsed workflow schema.
 pub fn validate(schema: &WorkflowSchema) -> Result<(), ValidationError> {
@@ -19,10 +21,7 @@ struct Validator<'a> {
 impl<'a> Validator<'a> {
     fn new(schema: &'a WorkflowSchema) -> Self {
         let node_names = schema.nodes.keys().cloned().collect();
-        Self {
-            schema,
-            node_names,
-        }
+        Self { schema, node_names }
     }
 
     fn validate(&mut self) -> Result<(), ValidationError> {
@@ -32,7 +31,7 @@ impl<'a> Validator<'a> {
 
         // 1. Check if entry node is valid
         let entry_id = self.schema.nodes.keys().next().unwrap();
-        
+
         // 2. Validate each node
         for (name, node) in &self.schema.nodes {
             self.validate_node(name, node)?;
@@ -122,7 +121,11 @@ impl<'a> Validator<'a> {
             }
             CatchBlock::Branches(branches) => {
                 for branch in branches {
-                    if let Some(target) = branch.then.as_ref().filter(|t| !self.node_names.contains(*t)) {
+                    if let Some(target) = branch
+                        .then
+                        .as_ref()
+                        .filter(|t| !self.node_names.contains(*t))
+                    {
                         return Err(ValidationError::UnknownNode {
                             node: target.clone(),
                             from: name.to_string(),
@@ -147,7 +150,8 @@ impl<'a> Validator<'a> {
                 if cap == "*" {
                     true
                 } else if let Some(prefix) = cap.strip_suffix(":*") {
-                    tool.starts_with(prefix) && tool.get(prefix.len()..prefix.len()+1) == Some(":")
+                    tool.starts_with(prefix)
+                        && tool.get(prefix.len()..prefix.len() + 1) == Some(":")
                 } else {
                     cap == tool
                 }

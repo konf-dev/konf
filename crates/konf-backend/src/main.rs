@@ -9,10 +9,14 @@ mod error;
 mod scheduling;
 mod templates;
 
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use axum::{Router, routing::{get, post}, middleware};
+use axum::{
+    middleware,
+    routing::{get, post},
+    Router,
+};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -25,8 +29,7 @@ async fn main() -> anyhow::Result<()> {
     // 1. Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .init();
 
@@ -47,7 +50,10 @@ async fn main() -> anyhow::Result<()> {
     // 4. Set up scheduler (only if DB pool is available from konf-init)
     #[cfg(feature = "scheduling")]
     if let Some(ref pool) = instance.pool {
-        let scheduler = Arc::new(scheduling::Scheduler::new(pool.clone(), instance.runtime.clone()));
+        let scheduler = Arc::new(scheduling::Scheduler::new(
+            pool.clone(),
+            instance.runtime.clone(),
+        ));
         scheduler.migrate().await?;
         scheduler.clone().start_polling(10);
         info!("Scheduler started");
@@ -63,10 +69,16 @@ async fn main() -> anyhow::Result<()> {
         // Check if any workflow file exists and use the first one
         let workflows_dir = config_dir.join("workflows");
         if workflows_dir.is_dir() {
-            std::fs::read_dir(&workflows_dir).ok()
+            std::fs::read_dir(&workflows_dir)
+                .ok()
                 .and_then(|entries| {
-                    entries.filter_map(|e| e.ok())
-                        .find(|e| e.path().extension().is_some_and(|ext| ext == "yaml" || ext == "yml"))
+                    entries
+                        .filter_map(|e| e.ok())
+                        .find(|e| {
+                            e.path()
+                                .extension()
+                                .is_some_and(|ext| ext == "yaml" || ext == "yml")
+                        })
                         .and_then(|e| std::fs::read_to_string(e.path()).ok())
                 })
                 .unwrap_or_else(|| templates::CHAT_WORKFLOW.to_string())
@@ -78,9 +90,7 @@ async fn main() -> anyhow::Result<()> {
     let app_state = api::chat::AppState {
         runtime: instance.runtime.clone(),
         default_workflow_yaml: default_workflow,
-        default_capabilities: vec![
-            konf_runtime::scope::CapabilityGrant::new("*"),
-        ],
+        default_capabilities: vec![konf_runtime::scope::CapabilityGrant::new("*")],
         default_limits: instance.config.runtime.clone(),
         namespace_template: "konf:default:${user_id}".into(),
     };
@@ -90,7 +100,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/v1/me", get(api::me::me))
         .route("/v1/chat", post(api::chat::chat))
         .route("/v1/monitor/runs", get(api::monitor::list_runs))
-        .route("/v1/monitor/runs/{id}", get(api::monitor::get_run).delete(api::monitor::cancel_run))
+        .route(
+            "/v1/monitor/runs/{id}",
+            get(api::monitor::get_run).delete(api::monitor::cancel_run),
+        )
         .route("/v1/monitor/runs/{id}/tree", get(api::monitor::get_tree))
         .route("/v1/monitor/metrics", get(api::monitor::metrics))
         .route("/v1/admin/config", get(api::admin::get_config))
@@ -111,7 +124,11 @@ async fn main() -> anyhow::Result<()> {
             .allow_methods(Any)
             .allow_headers(Any)
     } else {
-        let origins: Vec<_> = instance.config.server.cors_origins.iter()
+        let origins: Vec<_> = instance
+            .config
+            .server
+            .cors_origins
+            .iter()
             .filter_map(|o| o.parse::<axum::http::HeaderValue>().ok())
             .collect();
         CorsLayer::new()
@@ -130,7 +147,10 @@ async fn main() -> anyhow::Result<()> {
         .layer(TraceLayer::new_for_http());
 
     // 8. Bind and serve with graceful shutdown
-    let addr = format!("{}:{}", instance.config.server.host, instance.config.server.port);
+    let addr = format!(
+        "{}:{}",
+        instance.config.server.host, instance.config.server.port
+    );
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     info!(addr = %addr, "Listening");
 

@@ -59,12 +59,24 @@ impl Tool for SearchTool {
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
         let params = SearchParams {
-            query: input.get("query").and_then(|v| v.as_str()).map(String::from),
+            query: input
+                .get("query")
+                .and_then(|v| v.as_str())
+                .map(String::from),
             mode: input.get("mode").and_then(|v| v.as_str()).map(String::from),
             limit: input.get("limit").and_then(|v| v.as_i64()),
-            namespace: input.get("namespace").and_then(|v| v.as_str()).map(String::from),
-            node_type: input.get("node_type").and_then(|v| v.as_str()).map(String::from),
-            edge_type: input.get("edge_type").and_then(|v| v.as_str()).map(String::from),
+            namespace: input
+                .get("namespace")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            node_type: input
+                .get("node_type")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            edge_type: input
+                .get("edge_type")
+                .and_then(|v| v.as_str())
+                .map(String::from),
             metadata_filter: input.get("metadata_filter").cloned(),
             min_similarity: input.get("min_similarity").and_then(|v| v.as_f64()),
         };
@@ -121,12 +133,17 @@ impl Tool for StoreTool {
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
         let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let nodes = input.get("nodes").and_then(|v| v.as_array())
+        let nodes = input
+            .get("nodes")
+            .and_then(|v| v.as_array())
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "missing 'nodes' array".into(),
                 field: Some("nodes".into()),
             })?;
-        self.backend.add_nodes(nodes, namespace).await.map_err(mem_err)
+        self.backend
+            .add_nodes(nodes, namespace)
+            .await
+            .map_err(mem_err)
     }
 }
 
@@ -165,21 +182,40 @@ impl Tool for StateSetTool {
             output_schema: None,
             capabilities: vec!["state:set".into()],
             supports_streaming: false,
-            annotations: ToolAnnotations { idempotent: true, ..Default::default() },
+            annotations: ToolAnnotations {
+                idempotent: true,
+                ..Default::default()
+            },
         }
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
         let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let key = input.get("key").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidInput { message: "missing 'key'".into(), field: Some("key".into()) })?;
-        let value = input.get("value")
-            .ok_or_else(|| ToolError::InvalidInput { message: "missing 'value'".into(), field: Some("value".into()) })?;
-        let session_id = input.get("session_id").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidInput { message: "missing 'session_id'".into(), field: Some("session_id".into()) })?;
+        let key =
+            input
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidInput {
+                    message: "missing 'key'".into(),
+                    field: Some("key".into()),
+                })?;
+        let value = input.get("value").ok_or_else(|| ToolError::InvalidInput {
+            message: "missing 'value'".into(),
+            field: Some("value".into()),
+        })?;
+        let session_id = input
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'session_id'".into(),
+                field: Some("session_id".into()),
+            })?;
         let ttl = input.get("ttl_seconds").and_then(|v| v.as_i64());
 
-        self.backend.state_set(key, value, session_id, namespace, ttl).await.map_err(mem_err)
+        self.backend
+            .state_set(key, value, session_id, namespace, ttl)
+            .await
+            .map_err(mem_err)
     }
 }
 
@@ -216,18 +252,36 @@ impl Tool for StateGetTool {
             output_schema: None,
             capabilities: vec!["state:get".into()],
             supports_streaming: false,
-            annotations: ToolAnnotations { read_only: true, idempotent: true, ..Default::default() },
+            annotations: ToolAnnotations {
+                read_only: true,
+                idempotent: true,
+                ..Default::default()
+            },
         }
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
         let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let key = input.get("key").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidInput { message: "missing 'key'".into(), field: Some("key".into()) })?;
-        let session_id = input.get("session_id").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidInput { message: "missing 'session_id'".into(), field: Some("session_id".into()) })?;
+        let key =
+            input
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidInput {
+                    message: "missing 'key'".into(),
+                    field: Some("key".into()),
+                })?;
+        let session_id = input
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'session_id'".into(),
+                field: Some("session_id".into()),
+            })?;
 
-        self.backend.state_get(key, session_id, namespace).await.map_err(mem_err)
+        self.backend
+            .state_get(key, session_id, namespace)
+            .await
+            .map_err(mem_err)
     }
 }
 
@@ -264,18 +318,35 @@ impl Tool for StateDeleteTool {
             output_schema: None,
             capabilities: vec!["state:delete".into()],
             supports_streaming: false,
-            annotations: ToolAnnotations { destructive: true, ..Default::default() },
+            annotations: ToolAnnotations {
+                destructive: true,
+                ..Default::default()
+            },
         }
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
         let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let key = input.get("key").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidInput { message: "missing 'key'".into(), field: Some("key".into()) })?;
-        let session_id = input.get("session_id").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidInput { message: "missing 'session_id'".into(), field: Some("session_id".into()) })?;
+        let key =
+            input
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidInput {
+                    message: "missing 'key'".into(),
+                    field: Some("key".into()),
+                })?;
+        let session_id = input
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'session_id'".into(),
+                field: Some("session_id".into()),
+            })?;
 
-        self.backend.state_delete(key, session_id, namespace).await.map_err(mem_err)
+        self.backend
+            .state_delete(key, session_id, namespace)
+            .await
+            .map_err(mem_err)
     }
 }
 
@@ -311,16 +382,28 @@ impl Tool for StateListTool {
             output_schema: None,
             capabilities: vec!["state:list".into()],
             supports_streaming: false,
-            annotations: ToolAnnotations { read_only: true, idempotent: true, ..Default::default() },
+            annotations: ToolAnnotations {
+                read_only: true,
+                idempotent: true,
+                ..Default::default()
+            },
         }
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
         let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let session_id = input.get("session_id").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidInput { message: "missing 'session_id'".into(), field: Some("session_id".into()) })?;
+        let session_id = input
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'session_id'".into(),
+                field: Some("session_id".into()),
+            })?;
 
-        self.backend.state_list(session_id, namespace).await.map_err(mem_err)
+        self.backend
+            .state_list(session_id, namespace)
+            .await
+            .map_err(mem_err)
     }
 }
 
@@ -356,15 +439,26 @@ impl Tool for StateClearTool {
             output_schema: None,
             capabilities: vec!["state:clear".into()],
             supports_streaming: false,
-            annotations: ToolAnnotations { destructive: true, ..Default::default() },
+            annotations: ToolAnnotations {
+                destructive: true,
+                ..Default::default()
+            },
         }
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
         let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let session_id = input.get("session_id").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidInput { message: "missing 'session_id'".into(), field: Some("session_id".into()) })?;
+        let session_id = input
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'session_id'".into(),
+                field: Some("session_id".into()),
+            })?;
 
-        self.backend.state_clear(session_id, namespace).await.map_err(mem_err)
+        self.backend
+            .state_clear(session_id, namespace)
+            .await
+            .map_err(mem_err)
     }
 }

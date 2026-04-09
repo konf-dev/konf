@@ -11,10 +11,7 @@ use crate::auth::middleware::AuthUser;
 use crate::error::AppError;
 
 /// GET /v1/monitor/runs — list active workflow runs.
-pub async fn list_runs(
-    AuthUser(claims): AuthUser,
-    State(state): State<AppState>,
-) -> Json<Value> {
+pub async fn list_runs(AuthUser(claims): AuthUser, State(state): State<AppState>) -> Json<Value> {
     info!(user_id = %claims.sub, "Listing workflow runs");
     let runs = state.runtime.list_runs(None);
     Json(json!({ "runs": runs }))
@@ -26,10 +23,13 @@ pub async fn get_run(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let run_id: uuid::Uuid = id.parse()
+    let run_id: uuid::Uuid = id
+        .parse()
         .map_err(|_| AppError::BadRequest("Invalid run ID".into()))?;
 
-    state.runtime.get_run(run_id)
+    state
+        .runtime
+        .get_run(run_id)
         .map(|detail| Json(json!(detail)))
         .ok_or_else(|| AppError::NotFound(format!("Run {id} not found")))
 }
@@ -40,19 +40,19 @@ pub async fn get_tree(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let run_id: uuid::Uuid = id.parse()
+    let run_id: uuid::Uuid = id
+        .parse()
         .map_err(|_| AppError::BadRequest("Invalid run ID".into()))?;
 
-    state.runtime.get_tree(run_id)
+    state
+        .runtime
+        .get_tree(run_id)
         .map(|tree| Json(json!(tree)))
         .ok_or_else(|| AppError::NotFound(format!("Run {id} not found")))
 }
 
 /// GET /v1/monitor/metrics — runtime metrics.
-pub async fn metrics(
-    AuthUser(_claims): AuthUser,
-    State(state): State<AppState>,
-) -> Json<Value> {
+pub async fn metrics(AuthUser(_claims): AuthUser, State(state): State<AppState>) -> Json<Value> {
     let m = state.runtime.metrics();
     Json(json!(m))
 }
@@ -63,11 +63,15 @@ pub async fn cancel_run(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, AppError> {
-    let run_id: uuid::Uuid = id.parse()
+    let run_id: uuid::Uuid = id
+        .parse()
         .map_err(|_| AppError::BadRequest("Invalid run ID".into()))?;
 
     info!(user_id = %claims.sub, run_id = %id, "Run cancellation requested");
-    state.runtime.cancel(run_id, "cancelled via API").await
+    state
+        .runtime
+        .cancel(run_id, "cancelled via API")
+        .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     Ok(Json(json!({"cancelled": true, "run_id": id})))

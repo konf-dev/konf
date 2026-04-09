@@ -3,14 +3,14 @@
 //! Lightweight, stateless tools for workflow composition.
 //! All builtins are read-only and idempotent — safe to retry and call speculatively.
 
-use std::sync::Arc;
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
+use std::sync::Arc;
 use tracing::info;
 
-use crate::tool::{Tool, ToolInfo, ToolAnnotations, ToolContext};
-use crate::error::ToolError;
 use crate::engine::Engine;
+use crate::error::ToolError;
+use crate::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
 
 /// Annotations shared by all builtins: read-only, idempotent, no external I/O.
 const BUILTIN_ANNOTATIONS: ToolAnnotations = ToolAnnotations {
@@ -75,21 +75,29 @@ impl Tool for JsonGetTool {
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
         let data = input.get("data").ok_or_else(|| ToolError::InvalidInput {
             message: "Missing 'data'".into(),
-            field: Some("data".into())
+            field: Some("data".into()),
         })?;
-        let path = input.get("path").and_then(|v| v.as_str()).ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing 'path'".into(),
-            field: Some("path".into())
-        })?;
+        let path =
+            input
+                .get("path")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidInput {
+                    message: "Missing 'path'".into(),
+                    field: Some("path".into()),
+                })?;
 
         let parts: Vec<&str> = path.split('.').collect();
         let mut current = data;
         for part in parts {
-            if part.is_empty() { continue; }
-            current = current.get(part).ok_or_else(|| ToolError::ExecutionFailed {
-                message: format!("Path not found: {}", path),
-                retryable: false,
-            })?;
+            if part.is_empty() {
+                continue;
+            }
+            current = current
+                .get(part)
+                .ok_or_else(|| ToolError::ExecutionFailed {
+                    message: format!("Path not found: {}", path),
+                    retryable: false,
+                })?;
         }
 
         Ok(current.clone())
@@ -124,19 +132,28 @@ impl Tool for ConcatTool {
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let parts = input.get("parts").and_then(|v| v.as_array()).ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing 'parts' array".into(),
-            field: Some("parts".into())
-        })?;
-        let separator = input.get("separator").and_then(|v| v.as_str()).unwrap_or("");
+        let parts = input
+            .get("parts")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing 'parts' array".into(),
+                field: Some("parts".into()),
+            })?;
+        let separator = input
+            .get("separator")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
-        let strings: Vec<String> = parts.iter().map(|v| {
-            if v.is_string() {
-                v.as_str().unwrap().to_string()
-            } else {
-                v.to_string()
-            }
-        }).collect();
+        let strings: Vec<String> = parts
+            .iter()
+            .map(|v| {
+                if v.is_string() {
+                    v.as_str().unwrap().to_string()
+                } else {
+                    v.to_string()
+                }
+            })
+            .collect();
 
         Ok(Value::String(strings.join(separator)))
     }
@@ -196,19 +213,28 @@ impl Tool for TemplateTool {
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let template = input.get("template").and_then(|v| v.as_str()).ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing 'template'".into(),
-            field: Some("template".into())
-        })?;
-        let vars = input.get("vars").and_then(|v| v.as_object()).ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing 'vars' object".into(),
-            field: Some("vars".into())
-        })?;
+        let template = input
+            .get("template")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing 'template'".into(),
+                field: Some("template".into()),
+            })?;
+        let vars = input
+            .get("vars")
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing 'vars' object".into(),
+                field: Some("vars".into()),
+            })?;
 
-        let vars_map: std::collections::HashMap<String, Value> = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let rendered = crate::template::render(template, &vars_map).map_err(|e| ToolError::ExecutionFailed {
-            message: format!("Template error: {}", e),
-            retryable: false,
+        let vars_map: std::collections::HashMap<String, Value> =
+            vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let rendered = crate::template::render(template, &vars_map).map_err(|e| {
+            ToolError::ExecutionFailed {
+                message: format!("Template error: {}", e),
+                retryable: false,
+            }
         })?;
 
         Ok(Value::String(rendered))

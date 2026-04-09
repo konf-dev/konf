@@ -44,11 +44,9 @@ impl EventJournal {
         .execute(&pool)
         .await?;
 
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_runtime_events_run ON runtime_events (run_id)",
-        )
-        .execute(&pool)
-        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_runtime_events_run ON runtime_events (run_id)")
+            .execute(&pool)
+            .await?;
 
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_runtime_events_session ON runtime_events (session_id, created_at DESC)",

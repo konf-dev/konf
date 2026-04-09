@@ -143,9 +143,7 @@ impl Tool for ShellExecTool {
         let output = tokio::time::timeout(timeout_duration, child.wait_with_output())
             .await
             .map_err(|_| ToolError::ExecutionFailed {
-                message: format!(
-                    "command timed out after {timeout_ms}ms: {command}"
-                ),
+                message: format!("command timed out after {timeout_ms}ms: {command}"),
                 retryable: false,
             })?
             .map_err(|e| ToolError::ExecutionFailed {
@@ -179,9 +177,8 @@ mod tests {
 
     #[test]
     fn test_shell_config_defaults() {
-        let config: ShellConfig =
-            serde_json::from_value(json!({ "container": "my-sandbox" }))
-                .expect("should deserialize with defaults");
+        let config: ShellConfig = serde_json::from_value(json!({ "container": "my-sandbox" }))
+            .expect("should deserialize with defaults");
         assert_eq!(config.container, "my-sandbox");
         assert_eq!(config.timeout_ms, 30_000);
     }

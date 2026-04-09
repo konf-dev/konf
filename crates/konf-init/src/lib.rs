@@ -17,10 +17,13 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use tracing::info;
 
-use konflux::engine::Engine;
 use konf_runtime::Runtime;
+use konflux::engine::Engine;
 
-pub use config::{PlatformConfig, ProductConfig, ToolsConfig, AuthConfig, ServerConfig, ShellConfig, ToolGuardConfig, RoleConfig};
+pub use config::{
+    AuthConfig, PlatformConfig, ProductConfig, RoleConfig, ServerConfig, ShellConfig,
+    ToolGuardConfig, ToolsConfig,
+};
 
 /// A fully booted Konf instance, ready for transport shells to serve.
 pub struct KonfInstance {
@@ -99,19 +102,21 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
 
     // 6b. Register architect tools (shell, introspect, validate)
     if let Some(ref shell_config) = product_config.tools.shell {
-        let shell_tool = konf_tool_shell::ShellExecTool::new(
-            &shell_config.container,
-            shell_config.timeout_ms,
-        );
+        let shell_tool =
+            konf_tool_shell::ShellExecTool::new(&shell_config.container, shell_config.timeout_ms);
         engine.register_tool(Arc::new(shell_tool));
         info!(container = %shell_config.container, "Shell tool registered");
     }
 
     // system_introspect — always available (read-only metadata)
-    engine.register_tool(Arc::new(konf_tool_llm::IntrospectTool::new(Arc::new(engine.clone()))));
+    engine.register_tool(Arc::new(konf_tool_llm::IntrospectTool::new(Arc::new(
+        engine.clone(),
+    ))));
 
     // yaml_validate_workflow — always available
-    engine.register_tool(Arc::new(konf_tool_llm::ValidateWorkflowTool::new(Arc::new(engine.clone()))));
+    engine.register_tool(Arc::new(konf_tool_llm::ValidateWorkflowTool::new(
+        Arc::new(engine.clone()),
+    )));
 
     if let Some(ref secret_config) = product_config.tools.secret {
         konf_tool_secret::register(&engine, secret_config);
@@ -128,7 +133,8 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     #[cfg(feature = "postgres")]
     let pool = match &config.database {
         Some(db) => {
-            let pool = sqlx::PgPool::connect(&db.url).await
+            let pool = sqlx::PgPool::connect(&db.url)
+                .await
                 .map_err(|e| anyhow::anyhow!("Failed to connect to database: {e}"))?;
             info!("Connected to database");
             Some(pool)
@@ -149,24 +155,29 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     let runtime_pool = None;
 
     let runtime = Arc::new(
-        Runtime::new(engine.clone(), runtime_pool).await
-            .map_err(|e| anyhow::anyhow!("Failed to initialize runtime: {e}"))?
+        Runtime::new(engine.clone(), runtime_pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to initialize runtime: {e}"))?,
     );
     info!("Runtime initialized");
 
     // 9b. Register config_reload tool into the runtime's engine.
     // ConfigReloadTool must operate on the same engine the runtime uses
     // so that reloaded workflow tools are visible in child scopes.
-    runtime.engine().register_tool(Arc::new(ConfigReloadTool::new(
-        runtime.clone(),
-        config_dir.to_path_buf(),
-    )));
+    runtime
+        .engine()
+        .register_tool(Arc::new(ConfigReloadTool::new(
+            runtime.clone(),
+            config_dir.to_path_buf(),
+        )));
 
     // 9c. Register schedule + cancel_schedule tools (timer primitives for autonomous agents).
-    runtime.engine().register_tool(Arc::new(schedule::ScheduleTool::new(
-        runtime.clone(),
-    )));
-    runtime.engine().register_tool(Arc::new(schedule::CancelScheduleTool));
+    runtime
+        .engine()
+        .register_tool(Arc::new(schedule::ScheduleTool::new(runtime.clone())));
+    runtime
+        .engine()
+        .register_tool(Arc::new(schedule::CancelScheduleTool));
 
     // 10. Register workflows as tools (needs runtime for WorkflowTool)
     // IMPORTANT: Register into the runtime's engine, not the original clone.
@@ -182,7 +193,11 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     apply_tool_guards(&runtime, &product_config);
 
     let final_tool_count = runtime.engine().registry().len();
-    info!(tools = final_tool_count, resources = engine.resources().len(), "Registration complete");
+    info!(
+        tools = final_tool_count,
+        resources = engine.resources().len(),
+        "Registration complete"
+    );
 
     // 11. Return instance
     let config = Arc::new(config);
@@ -278,7 +293,8 @@ async fn register_tools(engine: &Engine, tools: &ToolsConfig) -> anyhow::Result<
                     );
                 } else {
                     anyhow::bail!(
-                        "Unknown memory backend: '{other}'. Available: {}", available.join(", ")
+                        "Unknown memory backend: '{other}'. Available: {}",
+                        available.join(", ")
                     );
                 }
             }
@@ -359,8 +375,9 @@ impl konflux::Resource for FileResource {
     }
 
     async fn read(&self) -> Result<serde_json::Value, konflux::ResourceError> {
-        let content = std::fs::read_to_string(&self.path)
-            .map_err(|e| konflux::ResourceError::ReadFailed(format!("{}: {e}", self.path.display())))?;
+        let content = std::fs::read_to_string(&self.path).map_err(|e| {
+            konflux::ResourceError::ReadFailed(format!("{}: {e}", self.path.display()))
+        })?;
         Ok(serde_json::Value::String(content))
     }
 }
@@ -383,7 +400,10 @@ impl ConfigReloadTool {
     /// Uses the runtime's engine for tool registration so that reloaded
     /// workflow tools are visible in child scopes during nested execution.
     pub fn new(runtime: Arc<Runtime>, config_dir: std::path::PathBuf) -> Self {
-        Self { runtime, config_dir }
+        Self {
+            runtime,
+            config_dir,
+        }
     }
 }
 
@@ -421,7 +441,8 @@ impl konflux::tool::Tool for ConfigReloadTool {
 
         // Remove existing workflow_* tools before re-registering
         let existing_tools = self.runtime.engine().registry().list();
-        let workflow_tool_names: Vec<String> = existing_tools.iter()
+        let workflow_tool_names: Vec<String> = existing_tools
+            .iter()
             .filter(|t| t.name.starts_with("workflow:"))
             .map(|t| t.name.clone())
             .collect();
@@ -433,7 +454,12 @@ impl konflux::tool::Tool for ConfigReloadTool {
         // Re-register workflows from disk
         match register_workflows(self.runtime.engine(), &self.runtime, &workflows_dir) {
             Ok(()) => {
-                let new_workflow_count = self.runtime.engine().registry().list().iter()
+                let new_workflow_count = self
+                    .runtime
+                    .engine()
+                    .registry()
+                    .list()
+                    .iter()
                     .filter(|t| t.name.starts_with("workflow:"))
                     .count();
 
@@ -484,12 +510,10 @@ impl konflux::tool::Tool for ConfigReloadTool {
                     "total_tools": total_tools,
                 }))
             }
-            Err(e) => {
-                Err(konflux::error::ToolError::ExecutionFailed {
-                    message: format!("Config reload failed: {e}"),
-                    retryable: true,
-                })
-            }
+            Err(e) => Err(konflux::error::ToolError::ExecutionFailed {
+                message: format!("Config reload failed: {e}"),
+                retryable: true,
+            }),
         }
     }
 }
@@ -520,7 +544,10 @@ fn apply_tool_guards(runtime: &Arc<Runtime>, product_config: &ProductConfig) {
 
     let count = guards.len();
     runtime.set_tool_guards(guards);
-    info!(guard_count = count, "Tool guards applied from product config");
+    info!(
+        guard_count = count,
+        "Tool guards applied from product config"
+    );
 }
 
 fn register_workflows(
@@ -566,7 +593,9 @@ fn register_workflows(
         if workflow.register_as_tool {
             let scope = konf_runtime::scope::ExecutionScope {
                 namespace: "konf:system".into(),
-                capabilities: workflow.capabilities.iter()
+                capabilities: workflow
+                    .capabilities
+                    .iter()
                     .map(|c| konf_runtime::scope::CapabilityGrant::new(c.as_str()))
                     .collect(),
                 limits: konf_runtime::scope::ResourceLimits::default(),
@@ -577,11 +606,7 @@ fn register_workflows(
                 depth: 0,
             };
 
-            let tool = konf_runtime::WorkflowTool::new(
-                workflow.clone(),
-                runtime.clone(),
-                scope,
-            );
+            let tool = konf_runtime::WorkflowTool::new(workflow.clone(), runtime.clone(), scope);
 
             engine.register_tool(Arc::new(tool));
             info!(workflow = %workflow.id, "Registered workflow as tool: workflow:{}", workflow.id);
@@ -664,7 +689,9 @@ mod tests {
         std::fs::create_dir(&workflows_dir).unwrap();
 
         // Write a simple workflow
-        std::fs::write(workflows_dir.join("echo.yaml"), r#"
+        std::fs::write(
+            workflows_dir.join("echo.yaml"),
+            r#"
 workflow: echo_test
 description: "Test workflow"
 register_as_tool: true
@@ -673,50 +700,71 @@ nodes:
   step1:
     do: echo
     return: true
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         // Write a non-tool workflow
-        std::fs::write(workflows_dir.join("helper.yaml"), r#"
+        std::fs::write(
+            workflows_dir.join("helper.yaml"),
+            r#"
 workflow: helper
 nodes:
   step1:
     do: echo
     return: true
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let engine = Engine::new();
         konflux::builtin::register_builtins(&engine);
 
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let runtime = rt.block_on(async {
-            Arc::new(Runtime::new(Engine::new(), None).await.unwrap())
-        });
+        let runtime =
+            rt.block_on(async { Arc::new(Runtime::new(Engine::new(), None).await.unwrap()) });
 
         register_workflows(&engine, &runtime, &workflows_dir).unwrap();
 
         // echo_test should be registered as a tool
-        assert!(engine.registry().contains("workflow:echo_test"),
+        assert!(
+            engine.registry().contains("workflow:echo_test"),
             "Expected workflow:echo_test in registry, got: {:?}",
-            engine.registry().list().iter().map(|t| &t.name).collect::<Vec<_>>());
+            engine
+                .registry()
+                .list()
+                .iter()
+                .map(|t| &t.name)
+                .collect::<Vec<_>>()
+        );
 
         // helper should NOT be registered as a tool (no register_as_tool)
         assert!(!engine.registry().contains("workflow:helper"));
 
         // Both should be registered as resources
-        assert!(engine.resources().get("konf://workflows/echo.yaml").is_some());
-        assert!(engine.resources().get("konf://workflows/helper.yaml").is_some());
+        assert!(engine
+            .resources()
+            .get("konf://workflows/echo.yaml")
+            .is_some());
+        assert!(engine
+            .resources()
+            .get("konf://workflows/helper.yaml")
+            .is_some());
     }
 
     #[test]
     fn test_register_workflows_skips_invalid_yaml() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("bad.yaml"), "not: valid: workflow_ yaml: {{{{").unwrap();
+        std::fs::write(
+            dir.path().join("bad.yaml"),
+            "not: valid: workflow_ yaml: {{{{",
+        )
+        .unwrap();
 
         let engine = Engine::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let runtime = rt.block_on(async {
-            Arc::new(Runtime::new(Engine::new(), None).await.unwrap())
-        });
+        let runtime =
+            rt.block_on(async { Arc::new(Runtime::new(Engine::new(), None).await.unwrap()) });
 
         // Should not panic, should skip the bad file
         register_workflows(&engine, &runtime, dir.path()).unwrap();
@@ -783,9 +831,8 @@ nodes:
 
         let engine = Engine::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let runtime = rt.block_on(async {
-            Arc::new(Runtime::new(Engine::new(), None).await.unwrap())
-        });
+        let runtime =
+            rt.block_on(async { Arc::new(Runtime::new(Engine::new(), None).await.unwrap()) });
 
         register_workflows(&engine, &runtime, dir.path()).unwrap();
         assert!(engine.registry().is_empty());

@@ -41,7 +41,8 @@ jobs:
         run: |
           # Test each crate that doesn't need external deps
           for crate in konflux-core konf-runtime konf-tool-http konf-tool-llm \
-                       konf-tool-embed konf-tool-mcp konf-tool-memory konf-mcp; do
+                       konf-tool-embed konf-tool-mcp konf-tool-memory \
+                       konf-tool-secret konf-tool-shell konf-mcp; do
             echo "::group::Check $crate"
             cargo clippy -p "$crate" --all-targets -- -D warnings
             cargo test -p "$crate"

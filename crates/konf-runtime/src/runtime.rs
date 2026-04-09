@@ -4,22 +4,22 @@
 //! capability routing, monitoring, and event journaling.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
 use serde_json::Value;
 use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, debug, warn, error};
+use tracing::{debug, error, info, warn};
 
 use konflux::engine::{Engine, EngineConfig};
 use konflux::Workflow;
 
 use crate::context::VirtualizedTool;
 use crate::error::{RunId, RuntimeError};
-use crate::guard::{GuardedTool, Rule, DefaultAction};
+use crate::guard::{DefaultAction, GuardedTool, Rule};
 use crate::hooks::RuntimeHooks;
 use crate::journal::{EventJournal, JournalEntry};
 use crate::monitor::{ProcessTree, RunDetail, RunSummary, RuntimeMetrics};
@@ -72,7 +72,10 @@ impl Runtime {
                 let journal = Arc::new(EventJournal::new(pool).await?);
                 let reconciled = journal.reconcile_zombies().await?;
                 if reconciled > 0 {
-                    info!(count = reconciled, "Reconciled zombie workflows from previous run");
+                    info!(
+                        count = reconciled,
+                        "Reconciled zombie workflows from previous run"
+                    );
                 }
                 Some(journal)
             }
@@ -246,20 +249,23 @@ impl Runtime {
 
         // Journal: workflow started (if journal is available)
         if let Some(ref journal) = self.journal {
-        if let Err(e) = journal.append(JournalEntry {
-            run_id,
-            session_id: session_id.clone(),
-            namespace: scope.namespace.clone(),
-            event_type: "workflow_started".into(),
-            payload: serde_json::json!({
-                "workflow_id": workflow.id.to_string(),
-                "namespace": &scope.namespace,
-                "actor_id": &scope.actor.id,
-                "actor_role": &scope.actor.role,
-            }),
-        }).await {
-            warn!(error = %e, run_id = %run_id, "Failed to journal workflow_started event");
-        }
+            if let Err(e) = journal
+                .append(JournalEntry {
+                    run_id,
+                    session_id: session_id.clone(),
+                    namespace: scope.namespace.clone(),
+                    event_type: "workflow_started".into(),
+                    payload: serde_json::json!({
+                        "workflow_id": workflow.id.to_string(),
+                        "namespace": &scope.namespace,
+                        "actor_id": &scope.actor.id,
+                        "actor_role": &scope.actor.role,
+                    }),
+                })
+                .await
+            {
+                warn!(error = %e, run_id = %run_id, "Failed to journal workflow_started event");
+            }
         }
 
         // Build scoped engine with VirtualizedTool + GuardedTool wrapping
@@ -300,7 +306,8 @@ impl Runtime {
             let now = Utc::now();
             let is_cancellation = match &result {
                 Ok(_) => false,
-                Err(e) => matches!(e,
+                Err(e) => matches!(
+                    e,
                     konflux::KonfluxError::Execution(
                         konflux::error::ExecutionError::Cancelled { .. }
                     )
@@ -311,7 +318,10 @@ impl Runtime {
                 *run.completed_at.lock().unwrap_or_else(|p| p.into_inner()) = Some(now);
                 let duration_ms = (now - run.started_at).num_milliseconds().max(0) as u64;
                 let new_status = match &result {
-                    Ok(output) => RunStatus::Completed { duration_ms, output: output.clone() },
+                    Ok(output) => RunStatus::Completed {
+                        duration_ms,
+                        output: output.clone(),
+                    },
                     Err(e) if is_cancellation => RunStatus::Cancelled {
                         reason: e.to_string(),
                         duration_ms,
@@ -326,29 +336,40 @@ impl Runtime {
 
             // Increment metrics counters
             match (&result, is_cancellation) {
-                (Ok(_), _) => { total_completed.fetch_add(1, Ordering::Relaxed); }
-                (Err(_), true) => { total_cancelled.fetch_add(1, Ordering::Relaxed); }
-                (Err(_), false) => { total_failed.fetch_add(1, Ordering::Relaxed); }
+                (Ok(_), _) => {
+                    total_completed.fetch_add(1, Ordering::Relaxed);
+                }
+                (Err(_), true) => {
+                    total_cancelled.fetch_add(1, Ordering::Relaxed);
+                }
+                (Err(_), false) => {
+                    total_failed.fetch_add(1, Ordering::Relaxed);
+                }
             }
 
             // Journal: workflow completed/failed/cancelled
             let (event_type, payload) = match &result {
                 Ok(_) => ("workflow_completed", serde_json::json!({})),
-                Err(e) if is_cancellation => {
-                    ("workflow_cancelled", serde_json::json!({"reason": e.to_string()}))
-                }
-                Err(e) => {
-                    ("workflow_failed", serde_json::json!({"error": e.to_string()}))
-                }
+                Err(e) if is_cancellation => (
+                    "workflow_cancelled",
+                    serde_json::json!({"reason": e.to_string()}),
+                ),
+                Err(e) => (
+                    "workflow_failed",
+                    serde_json::json!({"error": e.to_string()}),
+                ),
             };
             if let Some(ref journal) = journal {
-                if let Err(e) = journal.append(JournalEntry {
-                    run_id,
-                    session_id,
-                    namespace,
-                    event_type: event_type.into(),
-                    payload,
-                }).await {
+                if let Err(e) = journal
+                    .append(JournalEntry {
+                        run_id,
+                        session_id,
+                        namespace,
+                        event_type: event_type.into(),
+                        payload,
+                    })
+                    .await
+                {
                     error!(error = %e, run_id = %run_id, "Failed to record workflow completion in journal");
                 }
             }
@@ -364,7 +385,9 @@ impl Runtime {
         debug!(run_id = %run_id, "runtime.wait");
         // Poll the process table for completion
         loop {
-            let status = self.table.get(&run_id, |run| run.status.lock().unwrap_or_else(|p| p.into_inner()).clone());
+            let status = self.table.get(&run_id, |run| {
+                run.status.lock().unwrap_or_else(|p| p.into_inner()).clone()
+            });
             match status {
                 Some(RunStatus::Completed { output, .. }) => return Ok(output),
                 Some(RunStatus::Failed { error, .. }) => {
@@ -454,18 +477,21 @@ impl Runtime {
 
         // Journal: workflow started
         if let Some(ref journal) = self.journal {
-            if let Err(e) = journal.append(JournalEntry {
-                run_id,
-                session_id: session_id.clone(),
-                namespace: scope.namespace.clone(),
-                event_type: "workflow_started".into(),
-                payload: serde_json::json!({
-                    "workflow_id": workflow.id.to_string(),
-                    "namespace": &scope.namespace,
-                    "actor_id": &scope.actor.id,
-                    "streaming": true,
-                }),
-            }).await {
+            if let Err(e) = journal
+                .append(JournalEntry {
+                    run_id,
+                    session_id: session_id.clone(),
+                    namespace: scope.namespace.clone(),
+                    event_type: "workflow_started".into(),
+                    payload: serde_json::json!({
+                        "workflow_id": workflow.id.to_string(),
+                        "namespace": &scope.namespace,
+                        "actor_id": &scope.actor.id,
+                        "streaming": true,
+                    }),
+                })
+                .await
+            {
                 warn!(error = %e, run_id = %run_id, "Failed to journal workflow_started event");
             }
         }
@@ -497,9 +523,8 @@ impl Runtime {
             .map_err(RuntimeError::Engine)?;
 
         // Create a forwarding channel: engine_rx → (caller_rx + process table update)
-        let (caller_tx, caller_rx) = konflux::stream::stream_channel(
-            self.engine.config().stream_buffer,
-        );
+        let (caller_tx, caller_rx) =
+            konflux::stream::stream_channel(self.engine.config().stream_buffer);
 
         let table = self.table.clone();
         let journal = self.journal.clone();
@@ -513,7 +538,11 @@ impl Runtime {
             let mut final_status = None;
 
             while let Some(event) = engine_rx.recv().await {
-                let is_terminal = matches!(event, konflux::stream::StreamEvent::Done { .. } | konflux::stream::StreamEvent::Error { .. });
+                let is_terminal = matches!(
+                    event,
+                    konflux::stream::StreamEvent::Done { .. }
+                        | konflux::stream::StreamEvent::Error { .. }
+                );
 
                 match &event {
                     konflux::stream::StreamEvent::Done { .. } => {
@@ -522,9 +551,17 @@ impl Runtime {
                     konflux::stream::StreamEvent::Error { code, message, .. } => {
                         let is_cancel = code == "cancelled" || message.contains("cancelled");
                         if is_cancel {
-                            final_status = Some(("workflow_cancelled", serde_json::json!({"reason": message}), false));
+                            final_status = Some((
+                                "workflow_cancelled",
+                                serde_json::json!({"reason": message}),
+                                false,
+                            ));
                         } else {
-                            final_status = Some(("workflow_failed", serde_json::json!({"error": message}), false));
+                            final_status = Some((
+                                "workflow_failed",
+                                serde_json::json!({"error": message}),
+                                false,
+                            ));
                         }
                     }
                     _ => {}
@@ -546,13 +583,20 @@ impl Runtime {
                 *run.completed_at.lock().unwrap_or_else(|p| p.into_inner()) = Some(now);
                 let duration_ms = (now - run.started_at).num_milliseconds().max(0) as u64;
                 let new_status = match &final_status {
-                    Some((_, _, true)) => RunStatus::Completed { duration_ms, output: Value::Null },
+                    Some((_, _, true)) => RunStatus::Completed {
+                        duration_ms,
+                        output: Value::Null,
+                    },
                     Some(("workflow_cancelled", _, _)) => RunStatus::Cancelled {
                         reason: "cancelled".into(),
                         duration_ms,
                     },
                     Some((_, payload, _)) => RunStatus::Failed {
-                        error: payload.get("error").and_then(|e| e.as_str()).unwrap_or("unknown").to_string(),
+                        error: payload
+                            .get("error")
+                            .and_then(|e| e.as_str())
+                            .unwrap_or("unknown")
+                            .to_string(),
                         duration_ms,
                     },
                     None => RunStatus::Failed {
@@ -565,21 +609,30 @@ impl Runtime {
 
             // Increment metrics
             match &final_status {
-                Some((_, _, true)) => { total_completed.fetch_add(1, Ordering::Relaxed); }
-                Some(("workflow_cancelled", _, _)) => { total_cancelled.fetch_add(1, Ordering::Relaxed); }
-                _ => { total_failed.fetch_add(1, Ordering::Relaxed); }
+                Some((_, _, true)) => {
+                    total_completed.fetch_add(1, Ordering::Relaxed);
+                }
+                Some(("workflow_cancelled", _, _)) => {
+                    total_cancelled.fetch_add(1, Ordering::Relaxed);
+                }
+                _ => {
+                    total_failed.fetch_add(1, Ordering::Relaxed);
+                }
             }
 
             // Journal completion
             if let Some((event_type, payload, _)) = final_status {
                 if let Some(ref journal) = journal {
-                    if let Err(e) = journal.append(JournalEntry {
-                        run_id,
-                        session_id,
-                        namespace,
-                        event_type: event_type.into(),
-                        payload,
-                    }).await {
+                    if let Err(e) = journal
+                        .append(JournalEntry {
+                            run_id,
+                            session_id,
+                            namespace,
+                            event_type: event_type.into(),
+                            payload,
+                        })
+                        .await
+                    {
                         tracing::error!(error = %e, run_id = %run_id, "Failed to record workflow completion in journal");
                     }
                 }
@@ -595,7 +648,10 @@ impl Runtime {
     pub async fn cancel(&self, run_id: RunId, reason: &str) -> Result<(), RuntimeError> {
         info!(run_id = %run_id, reason, "runtime.cancel");
         let is_running = self.table.get(&run_id, |run| {
-            matches!(*run.status.lock().unwrap_or_else(|p| p.into_inner()), RunStatus::Running)
+            matches!(
+                *run.status.lock().unwrap_or_else(|p| p.into_inner()),
+                RunStatus::Running
+            )
         });
 
         match is_running {
@@ -629,7 +685,11 @@ impl Runtime {
     /// Get detailed info about a specific run.
     pub fn get_run(&self, run_id: RunId) -> Option<RunDetail> {
         self.table.get(&run_id, |run| {
-            let active_nodes = run.active_nodes.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            let active_nodes = run
+                .active_nodes
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
             RunDetail {
                 summary: run.to_summary(),
                 active_nodes,
@@ -646,7 +706,11 @@ impl Runtime {
 
     fn build_tree(&self, run_id: RunId) -> Option<ProcessTree> {
         self.table.get(&run_id, |run| {
-            let active_nodes = run.active_nodes.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            let active_nodes = run
+                .active_nodes
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
             let children: Vec<ProcessTree> = self
                 .table
                 .children_of(run_id)

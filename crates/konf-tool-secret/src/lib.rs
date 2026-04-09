@@ -1,9 +1,9 @@
 //! Standard library tools for managing secrets via environment variables.
 
-use std::sync::Arc;
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 use konflux::error::ToolError;
 use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
@@ -59,10 +59,14 @@ impl Tool for SecretGetTool {
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let key = input.get("key").and_then(|v| v.as_str()).ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing 'key'".into(),
-            field: Some("key".into()),
-        })?;
+        let key =
+            input
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidInput {
+                    message: "Missing 'key'".into(),
+                    field: Some("key".into()),
+                })?;
 
         if !self.allowed_keys.contains(&key.to_string()) {
             return Err(ToolError::AccessDenied {
@@ -73,7 +77,10 @@ impl Tool for SecretGetTool {
         match std::env::var(key) {
             Ok(val) => Ok(Value::String(val)),
             Err(_) => Err(ToolError::ExecutionFailed {
-                message: format!("Secret key '{}' is allowed but not found in the environment.", key),
+                message: format!(
+                    "Secret key '{}' is allowed but not found in the environment.",
+                    key
+                ),
                 retryable: false,
             }),
         }
@@ -93,7 +100,8 @@ impl Tool for SecretListTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
             name: "secret:list".into(),
-            description: "List the names of all allowed secrets. Does NOT return their values.".into(),
+            description: "List the names of all allowed secrets. Does NOT return their values."
+                .into(),
             input_schema: json!({ "type": "object" }),
             output_schema: Some(json!({
                 "type": "array",

@@ -55,10 +55,7 @@ impl GuardedTool {
                 Rule::Deny { predicate, message } => {
                     if predicate.matches(input) {
                         return Err(ToolError::CapabilityDenied {
-                            capability: format!(
-                                "guard denied: {}",
-                                message
-                            ),
+                            capability: format!("guard denied: {}", message),
                         });
                     }
                 }
@@ -189,24 +186,16 @@ impl Predicate {
     /// Evaluate this predicate against a JSON input.
     pub fn matches(&self, input: &Value) -> bool {
         match self {
-            Predicate::Contains { path, value } => {
-                resolve_path(input, path)
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|s| s.contains(value.as_str()))
-            }
-            Predicate::Matches { path, pattern } => {
-                resolve_path(input, path)
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|s| glob_matches(pattern, s))
-            }
+            Predicate::Contains { path, value } => resolve_path(input, path)
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.contains(value.as_str())),
+            Predicate::Matches { path, pattern } => resolve_path(input, path)
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| glob_matches(pattern, s)),
             Predicate::Equals { path, value } => {
-                resolve_path(input, path)
-                    .is_some_and(|v| v == value)
+                resolve_path(input, path).is_some_and(|v| v == value)
             }
-            Predicate::Exists { path } => {
-                resolve_path(input, path)
-                    .is_some_and(|v| !v.is_null())
-            }
+            Predicate::Exists { path } => resolve_path(input, path).is_some_and(|v| !v.is_null()),
             Predicate::Not { predicate } => !predicate.matches(input),
             Predicate::All { predicates } => predicates.iter().all(|p| p.matches(input)),
             Predicate::Any { predicates } => predicates.iter().any(|p| p.matches(input)),
@@ -352,7 +341,9 @@ mod tests {
 
     #[test]
     fn exists_present_field() {
-        let pred = Predicate::Exists { path: "token".into() };
+        let pred = Predicate::Exists {
+            path: "token".into(),
+        };
         assert!(pred.matches(&json!({"token": "abc"})));
         assert!(!pred.matches(&json!({"token": null})));
         assert!(!pred.matches(&json!({"other": "abc"})));
@@ -360,27 +351,46 @@ mod tests {
 
     #[test]
     fn not_negates() {
-        let pred = Predicate::Not { predicate: Box::new(Predicate::Exists { path: "admin".into() }) };
+        let pred = Predicate::Not {
+            predicate: Box::new(Predicate::Exists {
+                path: "admin".into(),
+            }),
+        };
         assert!(pred.matches(&json!({"user": "alice"})));
         assert!(!pred.matches(&json!({"admin": true})));
     }
 
     #[test]
     fn all_requires_all_true() {
-        let pred = Predicate::All { predicates: vec![
-            Predicate::Exists { path: "command".into() },
-            Predicate::Contains { path: "command".into(), value: "sudo".into() },
-        ] };
+        let pred = Predicate::All {
+            predicates: vec![
+                Predicate::Exists {
+                    path: "command".into(),
+                },
+                Predicate::Contains {
+                    path: "command".into(),
+                    value: "sudo".into(),
+                },
+            ],
+        };
         assert!(pred.matches(&json!({"command": "sudo ls"})));
         assert!(!pred.matches(&json!({"command": "ls"})));
     }
 
     #[test]
     fn any_requires_one_true() {
-        let pred = Predicate::Any { predicates: vec![
-            Predicate::Contains { path: "command".into(), value: "sudo".into() },
-            Predicate::Contains { path: "command".into(), value: "rm".into() },
-        ] };
+        let pred = Predicate::Any {
+            predicates: vec![
+                Predicate::Contains {
+                    path: "command".into(),
+                    value: "sudo".into(),
+                },
+                Predicate::Contains {
+                    path: "command".into(),
+                    value: "rm".into(),
+                },
+            ],
+        };
         assert!(pred.matches(&json!({"command": "sudo ls"})));
         assert!(pred.matches(&json!({"command": "rm file"})));
         assert!(!pred.matches(&json!({"command": "ls"})));
@@ -493,7 +503,9 @@ mod tests {
             DefaultAction::Allow,
         );
 
-        let result = tool.invoke(json!({"command": "sudo rm -rf /"}), &test_ctx()).await;
+        let result = tool
+            .invoke(json!({"command": "sudo rm -rf /"}), &test_ctx())
+            .await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("sudo is not allowed"), "got: {err}");
@@ -513,7 +525,9 @@ mod tests {
             DefaultAction::Allow,
         );
 
-        let result = tool.invoke(json!({"command": "ls /tmp"}), &test_ctx()).await;
+        let result = tool
+            .invoke(json!({"command": "ls /tmp"}), &test_ctx())
+            .await;
         assert!(result.is_ok());
     }
 
@@ -529,7 +543,9 @@ mod tests {
                     },
                 },
                 Rule::Deny {
-                    predicate: Predicate::Exists { path: "command".into() },
+                    predicate: Predicate::Exists {
+                        path: "command".into(),
+                    },
                     message: "all commands denied".into(),
                 },
             ],
@@ -558,7 +574,9 @@ mod tests {
             DefaultAction::Deny,
         );
 
-        let result = tool.invoke(json!({"command": "cat /etc/passwd"}), &test_ctx()).await;
+        let result = tool
+            .invoke(json!({"command": "cat /etc/passwd"}), &test_ctx())
+            .await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("default: deny"), "got: {err}");
@@ -584,33 +602,21 @@ mod tests {
 
     #[tokio::test]
     async fn no_rules_with_default_allow() {
-        let tool = GuardedTool::new(
-            Arc::new(MockTool),
-            vec![],
-            DefaultAction::Allow,
-        );
+        let tool = GuardedTool::new(Arc::new(MockTool), vec![], DefaultAction::Allow);
         let result = tool.invoke(json!({"anything": true}), &test_ctx()).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn no_rules_with_default_deny() {
-        let tool = GuardedTool::new(
-            Arc::new(MockTool),
-            vec![],
-            DefaultAction::Deny,
-        );
+        let tool = GuardedTool::new(Arc::new(MockTool), vec![], DefaultAction::Deny);
         let result = tool.invoke(json!({"anything": true}), &test_ctx()).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn info_delegates_to_inner() {
-        let tool = GuardedTool::new(
-            Arc::new(MockTool),
-            vec![],
-            DefaultAction::Allow,
-        );
+        let tool = GuardedTool::new(Arc::new(MockTool), vec![], DefaultAction::Allow);
         assert_eq!(tool.info().name, "mock");
     }
 

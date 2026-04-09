@@ -21,24 +21,26 @@
 //! client from stalling the workflow. Done and Error events use `send().await`
 //! to guarantee delivery.
 
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-use serde_json::Value;
 use tracing::{info_span, warn, Instrument};
 
-use crate::workflow::{Workflow, Step, StepId, EdgeTarget, JoinPolicy, ErrorAction, RetryPolicy, BackoffStrategy};
-use crate::tool::{ToolRegistry, ToolContext, Tool};
-use crate::stream::{StreamSender, StreamEvent, ProgressType};
-use crate::error::{KonfluxError, ExecutionError, ToolError};
 use crate::capability;
-use crate::template;
 use crate::engine::EngineConfig;
-use crate::expr::{ExprValue, ExprEvaluator};
+use crate::error::{ExecutionError, KonfluxError, ToolError};
+use crate::expr::{ExprEvaluator, ExprValue};
 use crate::hooks::ExecutionHooks;
+use crate::stream::{ProgressType, StreamEvent, StreamSender};
+use crate::template;
+use crate::tool::{Tool, ToolContext, ToolRegistry};
+use crate::workflow::{
+    BackoffStrategy, EdgeTarget, ErrorAction, JoinPolicy, RetryPolicy, Step, StepId, Workflow,
+};
 
 /// Thread-safe state for workflow execution.
 #[derive(Debug, Default)]
@@ -51,7 +53,10 @@ struct State {
 
 impl State {
     async fn set_output(&self, node_id: &str, value: Value) {
-        self.outputs.write().await.insert(node_id.to_string(), value);
+        self.outputs
+            .write()
+            .await
+            .insert(node_id.to_string(), value);
     }
 
     async fn set_error(&self, node_id: &str, err: String) {
@@ -118,7 +123,9 @@ impl Executor {
         state.set_output("input", input).await;
 
         let workflow_id = workflow.id.to_string();
-        let _ = tx.try_send(StreamEvent::Start { workflow_id: workflow_id.clone() });
+        let _ = tx.try_send(StreamEvent::Start {
+            workflow_id: workflow_id.clone(),
+        });
 
         let mut executed_nodes = HashSet::new();
         let mut reachable_nodes = HashSet::new();
@@ -140,7 +147,14 @@ impl Executor {
         let mut total_finished = 0;
         let workflow_arc = Arc::new(workflow.clone());
 
-        self.spawn_node(entry_node, workflow_arc.clone(), state.clone(), tx.clone(), &mut active_tasks, finished_tx.clone());
+        self.spawn_node(
+            entry_node,
+            workflow_arc.clone(),
+            state.clone(),
+            tx.clone(),
+            &mut active_tasks,
+            finished_tx.clone(),
+        );
 
         let mut steps_count = 0;
         let mut final_output = Value::Null;
@@ -231,19 +245,29 @@ impl Executor {
                 }
                 else => break,
             }
-            if total_spawned == total_finished && active_tasks.is_empty() { break; }
+            if total_spawned == total_finished && active_tasks.is_empty() {
+                break;
+            }
         }
 
         // Done event must be delivered (use send, not try_send)
-        tx.send(StreamEvent::Done { output: final_output }).await.ok();
+        tx.send(StreamEvent::Done {
+            output: final_output,
+        })
+        .await
+        .ok();
         Ok(())
     }
 
     async fn can_run(&self, step: &Step, state: Arc<State>) -> bool {
-        if step.depends_on.is_empty() { return true; }
+        if step.depends_on.is_empty() {
+            return true;
+        }
         let mut completed_deps = 0;
         for dep in &step.depends_on {
-            if state.is_completed(dep.as_str()).await { completed_deps += 1; }
+            if state.is_completed(dep.as_str()).await {
+                completed_deps += 1;
+            }
         }
         match step.join {
             JoinPolicy::All => completed_deps == step.depends_on.len(),
@@ -281,7 +305,9 @@ impl Executor {
             loop {
                 // Check cancellation before each step
                 if step_ctx.cancel_token.is_cancelled() {
-                    let _ = finished_tx.send(FinishedInfo::Node(current_step.id.to_string())).await;
+                    let _ = finished_tx
+                        .send(FinishedInfo::Node(current_step.id.to_string()))
+                        .await;
                     return Err(KonfluxError::Execution(ExecutionError::Cancelled {
                         workflow_id: step_ctx.workflow_id.clone(),
                     }));
@@ -308,7 +334,7 @@ impl Executor {
                         tx.clone(),
                         &step_ctx,
                     )
-                    .instrument(node_span)
+                    .instrument(node_span),
                 )
                 .catch_unwind()
                 .await
@@ -337,18 +363,25 @@ impl Executor {
                                     }
                                 }
                                 Err(e) => {
-                                    let _ = finished_tx.send(FinishedInfo::Node(node_id.clone())).await;
-                                    return Err(KonfluxError::Execution(ExecutionError::NodeFailed {
-                                        workflow_id: step_ctx.workflow_id.clone(),
-                                        node: node_id,
-                                        message: format!("Repeat condition evaluation failed: {}", e),
-                                    }));
+                                    let _ =
+                                        finished_tx.send(FinishedInfo::Node(node_id.clone())).await;
+                                    return Err(KonfluxError::Execution(
+                                        ExecutionError::NodeFailed {
+                                            workflow_id: step_ctx.workflow_id.clone(),
+                                            node: node_id,
+                                            message: format!(
+                                                "Repeat condition evaluation failed: {}",
+                                                e
+                                            ),
+                                        },
+                                    ));
                                 }
                             }
                         }
 
                         let outputs = state.get_outputs().await;
-                        match evaluate_edges_targets(&current_step, &outputs, &step_ctx.workflow_id) {
+                        match evaluate_edges_targets(&current_step, &outputs, &step_ctx.workflow_id)
+                        {
                             Ok(targets) => {
                                 if targets.len() == 1 {
                                     match &targets[0] {
@@ -360,22 +393,34 @@ impl Executor {
                                                     continue;
                                                 }
                                             }
-                                            let _ = finished_tx.send(FinishedInfo::SpawnNext(target_id.clone())).await;
+                                            let _ = finished_tx
+                                                .send(FinishedInfo::SpawnNext(target_id.clone()))
+                                                .await;
                                         }
                                         EdgeTarget::Return => {
-                                            let _ = finished_tx.send(FinishedInfo::Node(node_id.clone())).await;
-                                            return Ok(NodeExecutionResult { output: Some(final_node_val), steps: steps_executed });
+                                            let _ = finished_tx
+                                                .send(FinishedInfo::Node(node_id.clone()))
+                                                .await;
+                                            return Ok(NodeExecutionResult {
+                                                output: Some(final_node_val),
+                                                steps: steps_executed,
+                                            });
                                         }
                                     }
                                 } else {
                                     for target in targets {
                                         if let EdgeTarget::Step(target_id) = target {
-                                            let _ = finished_tx.send(FinishedInfo::SpawnNext(target_id)).await;
+                                            let _ = finished_tx
+                                                .send(FinishedInfo::SpawnNext(target_id))
+                                                .await;
                                         }
                                     }
                                 }
                                 let _ = finished_tx.send(FinishedInfo::Node(node_id)).await;
-                                return Ok(NodeExecutionResult { output: Some(final_node_val), steps: steps_executed });
+                                return Ok(NodeExecutionResult {
+                                    output: Some(final_node_val),
+                                    steps: steps_executed,
+                                });
                             }
                             Err(e) => {
                                 let _ = finished_tx.send(FinishedInfo::Node(node_id)).await;
@@ -383,36 +428,40 @@ impl Executor {
                             }
                         }
                     }
-                    Err(err) => {
-                        match current_step.on_error {
-                            ErrorAction::Fail => {
-                                state.set_error(&node_id, err.to_string()).await;
+                    Err(err) => match current_step.on_error {
+                        ErrorAction::Fail => {
+                            state.set_error(&node_id, err.to_string()).await;
+                            let _ = finished_tx.send(FinishedInfo::Node(node_id)).await;
+                            return Err(err);
+                        }
+                        ErrorAction::Skip => {
+                            state.set_output(&node_id, Value::Null).await;
+                            let _ = finished_tx.send(FinishedInfo::Node(node_id)).await;
+                            return Ok(NodeExecutionResult {
+                                output: None,
+                                steps: steps_executed,
+                            });
+                        }
+                        ErrorAction::Fallback { ref value } => {
+                            let val = Value::String(value.clone());
+                            state.set_output(&node_id, val.clone()).await;
+                            let _ = finished_tx.send(FinishedInfo::Node(node_id)).await;
+                            return Ok(NodeExecutionResult {
+                                output: Some(val),
+                                steps: steps_executed,
+                            });
+                        }
+                        ErrorAction::Goto { ref step } => {
+                            if let Some(next_step) = workflow.get_step(step) {
+                                current_step = next_step.clone();
+                                iteration = 0;
+                                continue;
+                            } else {
                                 let _ = finished_tx.send(FinishedInfo::Node(node_id)).await;
                                 return Err(err);
                             }
-                            ErrorAction::Skip => {
-                                state.set_output(&node_id, Value::Null).await;
-                                let _ = finished_tx.send(FinishedInfo::Node(node_id)).await;
-                                return Ok(NodeExecutionResult { output: None, steps: steps_executed });
-                            }
-                            ErrorAction::Fallback { ref value } => {
-                                let val = Value::String(value.clone());
-                                state.set_output(&node_id, val.clone()).await;
-                                let _ = finished_tx.send(FinishedInfo::Node(node_id)).await;
-                                return Ok(NodeExecutionResult { output: Some(val), steps: steps_executed });
-                            }
-                            ErrorAction::Goto { ref step } => {
-                                if let Some(next_step) = workflow.get_step(step) {
-                                    current_step = next_step.clone();
-                                    iteration = 0;
-                                    continue;
-                                } else {
-                                    let _ = finished_tx.send(FinishedInfo::Node(node_id)).await;
-                                    return Err(err);
-                                }
-                            }
                         }
-                    }
+                    },
                 }
             }
         });
@@ -442,18 +491,21 @@ async fn execute_step(
     let start_time = std::time::Instant::now();
 
     let outputs = state.get_outputs().await;
-    let resolved_inputs = template::resolve_inputs(&step.input, &outputs)
-        .map_err(|e| KonfluxError::Execution(ExecutionError::NodeFailed {
+    let resolved_inputs = template::resolve_inputs(&step.input, &outputs).map_err(|e| {
+        KonfluxError::Execution(ExecutionError::NodeFailed {
             workflow_id: ctx.workflow_id.clone(),
             node: node_id.clone(),
             message: format!("Failed to resolve inputs: {}", e),
-        }))?;
+        })
+    })?;
 
     capability::check_tool_access(step.tool.as_str(), &ctx.capabilities)
         .map_err(KonfluxError::Tool)?;
 
     let tool = ctx.registry.get(step.tool.as_str()).ok_or_else(|| {
-        KonfluxError::Tool(ToolError::NotFound { tool_id: step.tool.to_string() })
+        KonfluxError::Tool(ToolError::NotFound {
+            tool_id: step.tool.to_string(),
+        })
     })?;
 
     let tool_capabilities = if let Some(grant) = &step.grant {
@@ -471,11 +523,23 @@ async fn execute_step(
         metadata: ctx.metadata.clone(),
     };
 
-    let result = invoke_with_retry(tool, Value::Object(resolved_inputs.into_iter().collect()), &tool_ctx, step, ctx, &tx).await;
+    let result = invoke_with_retry(
+        tool,
+        Value::Object(resolved_inputs.into_iter().collect()),
+        &tool_ctx,
+        step,
+        ctx,
+        &tx,
+    )
+    .await;
     let duration_ms = start_time.elapsed().as_millis() as u64;
     match &result {
-        Ok(output) => ctx.hooks.on_node_complete(&node_id, &tool_name, duration_ms, output),
-        Err(e) => ctx.hooks.on_node_failed(&node_id, &tool_name, &e.to_string()),
+        Ok(output) => ctx
+            .hooks
+            .on_node_complete(&node_id, &tool_name, duration_ms, output),
+        Err(e) => ctx
+            .hooks
+            .on_node_failed(&node_id, &tool_name, &e.to_string()),
     }
     result
 }
@@ -525,9 +589,17 @@ async fn invoke_with_retry(
 
         let start_time = std::time::Instant::now();
         let dur = timeout_duration.unwrap_or(Duration::from_millis(ctx.config.default_timeout_ms));
-        let invoke_res = match timeout(dur, tool.invoke_streaming(input.clone(), tool_ctx, tx.clone()).instrument(tool_span)).await {
-             Ok(res) => res,
-             Err(_) => Err(ToolError::Timeout { after_ms: dur.as_millis() as u64 }),
+        let invoke_res = match timeout(
+            dur,
+            tool.invoke_streaming(input.clone(), tool_ctx, tx.clone())
+                .instrument(tool_span),
+        )
+        .await
+        {
+            Ok(res) => res,
+            Err(_) => Err(ToolError::Timeout {
+                after_ms: dur.as_millis() as u64,
+            }),
         };
 
         match invoke_res {
@@ -552,20 +624,29 @@ async fn invoke_with_retry(
                     _ => false,
                 };
                 last_err = Some(e.clone());
-                if !retryable || attempt >= max_attempts { break; }
-                ctx.hooks.on_tool_retry(node_id, &tool.info().name, attempt, &e.to_string());
+                if !retryable || attempt >= max_attempts {
+                    break;
+                }
+                ctx.hooks
+                    .on_tool_retry(node_id, &tool.info().name, attempt, &e.to_string());
                 warn!(tool = %tool.info().name, attempt, error = %e, "Tool failed, retrying");
             }
         }
     }
 
-    Err(KonfluxError::Tool(last_err.unwrap_or_else(|| ToolError::ExecutionFailed {
-        message: "No execution attempts were permitted by retry policy".to_string(),
-        retryable: false,
+    Err(KonfluxError::Tool(last_err.unwrap_or_else(|| {
+        ToolError::ExecutionFailed {
+            message: "No execution attempts were permitted by retry policy".to_string(),
+            retryable: false,
+        }
     })))
 }
 
-fn calculate_backoff(policy: Option<&RetryPolicy>, attempt: u32, config: &EngineConfig) -> Duration {
+fn calculate_backoff(
+    policy: Option<&RetryPolicy>,
+    attempt: u32,
+    config: &EngineConfig,
+) -> Duration {
     let policy = match policy {
         Some(p) => p,
         None => return Duration::from_millis(config.default_retry_backoff_ms),
@@ -583,8 +664,14 @@ fn calculate_backoff(policy: Option<&RetryPolicy>, attempt: u32, config: &Engine
     delay.min(max)
 }
 
-fn evaluate_edges_targets(step: &Step, outputs: &HashMap<String, Value>, workflow_id: &str) -> Result<Vec<EdgeTarget>, KonfluxError> {
-    if step.edges.is_empty() { return Ok(vec![EdgeTarget::Return]); }
+fn evaluate_edges_targets(
+    step: &Step,
+    outputs: &HashMap<String, Value>,
+    workflow_id: &str,
+) -> Result<Vec<EdgeTarget>, KonfluxError> {
+    if step.edges.is_empty() {
+        return Ok(vec![EdgeTarget::Return]);
+    }
 
     let mut branches: Vec<&crate::workflow::Edge> = step.edges.iter().collect();
     branches.sort_by_key(|e| e.priority);
@@ -596,27 +683,41 @@ fn evaluate_edges_targets(step: &Step, outputs: &HashMap<String, Value>, workflo
 
     for edge in branches {
         if let Some(condition) = &edge.condition {
-            let cleaned = condition.trim().strip_prefix("{{").and_then(|s| s.strip_suffix("}}")).unwrap_or(condition).trim();
+            let cleaned = condition
+                .trim()
+                .strip_prefix("{{")
+                .and_then(|s| s.strip_suffix("}}"))
+                .unwrap_or(condition)
+                .trim();
             match eval.evaluate_as_bool(cleaned) {
                 Ok(true) => {
                     targets.push(edge.target.clone());
                     return Ok(targets);
                 }
                 Ok(false) => continue,
-                Err(e) => return Err(KonfluxError::Execution(ExecutionError::NodeFailed {
-                    workflow_id: workflow_id.to_string(),
-                    node: step.id.to_string(),
-                    message: format!("Condition evaluation failed: {}", e),
-                })),
+                Err(e) => {
+                    return Err(KonfluxError::Execution(ExecutionError::NodeFailed {
+                        workflow_id: workflow_id.to_string(),
+                        node: step.id.to_string(),
+                        message: format!("Condition evaluation failed: {}", e),
+                    }))
+                }
             }
         } else {
             targets.push(edge.target.clone());
         }
     }
 
-    if targets.is_empty() { Ok(vec![EdgeTarget::Return]) } else { Ok(targets) }
+    if targets.is_empty() {
+        Ok(vec![EdgeTarget::Return])
+    } else {
+        Ok(targets)
+    }
 }
 
 fn to_expr_context(outputs: &HashMap<String, Value>) -> HashMap<String, ExprValue> {
-    outputs.iter().map(|(k, v)| (k.clone(), ExprEvaluator::json_to_expr_value(v))).collect()
+    outputs
+        .iter()
+        .map(|(k, v)| (k.clone(), ExprEvaluator::json_to_expr_value(v)))
+        .collect()
 }

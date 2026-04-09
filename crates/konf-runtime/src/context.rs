@@ -10,9 +10,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use konflux::tool::{Tool, ToolInfo, ToolContext};
 use konflux::error::ToolError;
 use konflux::stream::StreamSender;
+use konflux::tool::{Tool, ToolContext, ToolInfo};
 
 /// A tool wrapper that injects bound parameters into input before invocation.
 ///
@@ -104,7 +104,10 @@ mod tests {
         bindings.insert("namespace".to_string(), json!("konf:unspool:user_123"));
 
         let tool = VirtualizedTool::new(Arc::new(MockTool), bindings);
-        let result = tool.invoke(json!({"query": "hello"}), &test_ctx()).await.unwrap();
+        let result = tool
+            .invoke(json!({"query": "hello"}), &test_ctx())
+            .await
+            .unwrap();
 
         assert_eq!(result["query"], "hello");
         assert_eq!(result["namespace"], "konf:unspool:user_123");
@@ -117,10 +120,13 @@ mod tests {
 
         let tool = VirtualizedTool::new(Arc::new(MockTool), bindings);
         // LLM tries to set namespace to something else — should be overridden
-        let result = tool.invoke(
-            json!({"query": "hello", "namespace": "konf:unspool:admin"}),
-            &test_ctx(),
-        ).await.unwrap();
+        let result = tool
+            .invoke(
+                json!({"query": "hello", "namespace": "konf:unspool:admin"}),
+                &test_ctx(),
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result["namespace"], "konf:unspool:user_123");
     }
@@ -128,7 +134,10 @@ mod tests {
     #[tokio::test]
     async fn test_no_bindings_passthrough() {
         let tool = VirtualizedTool::new(Arc::new(MockTool), HashMap::new());
-        let result = tool.invoke(json!({"query": "hello"}), &test_ctx()).await.unwrap();
+        let result = tool
+            .invoke(json!({"query": "hello"}), &test_ctx())
+            .await
+            .unwrap();
 
         assert_eq!(result["query"], "hello");
         assert!(result.get("namespace").is_none());

@@ -1,12 +1,12 @@
-use std::sync::Arc;
-use std::collections::HashMap;
-use serde_json::{json, Value};
 use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use konflux::engine::{Engine, EngineConfig};
-use konflux::tool::{Tool, ToolInfo, ToolContext};
 use konflux::error::ToolError;
-use konflux::stream::{StreamEvent, ProgressType};
+use konflux::stream::{ProgressType, StreamEvent};
+use konflux::tool::{Tool, ToolContext, ToolInfo};
 
 // ============================================================
 // Mock Tools
@@ -74,9 +74,16 @@ impl Tool for RetryTool {
         let count = attempts.entry(ctx.node_id.clone()).or_insert(0);
         *count += 1;
 
-        let fail_until = input.get("fail_until").and_then(|v| v.as_u64()).or_else(|| {
-             input.get("fail_until").and_then(|v| v.as_str()).and_then(|s| s.parse::<u64>().ok())
-        }).unwrap_or(0) as u32;
+        let fail_until = input
+            .get("fail_until")
+            .and_then(|v| v.as_u64())
+            .or_else(|| {
+                input
+                    .get("fail_until")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<u64>().ok())
+            })
+            .unwrap_or(0) as u32;
 
         if *count <= fail_until {
             Err(ToolError::ExecutionFailed {
@@ -114,11 +121,14 @@ impl Tool for StreamingTool {
     ) -> Result<Value, ToolError> {
         let chunks = vec!["Hello", " ", "world", "!"];
         for chunk in chunks {
-            sender.send(StreamEvent::Progress {
-                node_id: ctx.node_id.clone(),
-                event_type: ProgressType::TextDelta,
-                data: json!(chunk),
-            }).await.ok();
+            sender
+                .send(StreamEvent::Progress {
+                    node_id: ctx.node_id.clone(),
+                    event_type: ProgressType::TextDelta,
+                    data: json!(chunk),
+                })
+                .await
+                .ok();
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         Ok(json!({ "status": "streamed" }))
@@ -134,7 +144,7 @@ fn setup_engine() -> Engine {
         .with_max_level(tracing::Level::DEBUG)
         .with_test_writer()
         .try_init();
-    
+
     let engine = Engine::new();
     engine.register_tool(Arc::new(EchoTool));
     engine.register_tool(Arc::new(FailTool));
@@ -168,7 +178,17 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    let result = engine.run(&workflow, json!({}), &["*".to_string()], HashMap::new(), None, None).await.unwrap();
+    let result = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     assert_eq!(result["val"], "hello world");
 }
 
@@ -198,7 +218,17 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    let result = engine.run(&workflow, json!({}), &["*".to_string()], HashMap::new(), None, None).await.unwrap();
+    let result = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     let s = result.as_str().unwrap();
     assert!(s == "b1-b2" || s == "b2-b1");
 }
@@ -233,14 +263,44 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    
-    let res_a = engine.run(&workflow, json!({"val": "a"}), &["*".to_string()], HashMap::new(), None, None).await.unwrap();
+
+    let res_a = engine
+        .run(
+            &workflow,
+            json!({"val": "a"}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     assert_eq!(res_a["res"], "A");
 
-    let res_b = engine.run(&workflow, json!({"val": "b"}), &["*".to_string()], HashMap::new(), None, None).await.unwrap();
+    let res_b = engine
+        .run(
+            &workflow,
+            json!({"val": "b"}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     assert_eq!(res_b["res"], "B");
 
-    let res_d = engine.run(&workflow, json!({"val": "c"}), &["*".to_string()], HashMap::new(), None, None).await.unwrap();
+    let res_d = engine
+        .run(
+            &workflow,
+            json!({"val": "c"}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     assert_eq!(res_d["res"], "D");
 }
 
@@ -261,7 +321,17 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    let result = engine.run(&workflow, json!({}), &["*".to_string()], HashMap::new(), None, None).await.unwrap();
+    let result = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     assert_eq!(result["status"], "recovered");
 }
 
@@ -281,7 +351,17 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    let result = engine.run(&workflow, json!({}), &["*".to_string()], HashMap::new(), None, None).await.unwrap();
+    let result = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     assert_eq!(result["attempts"], 3);
 }
 
@@ -302,9 +382,23 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    let result = engine.run(&workflow, json!({}), &["*".to_string()], HashMap::new(), None, None).await.unwrap();
+    let result = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     let c_str = result["count"].to_string();
-    assert!(c_str.contains('5'), "Expected count to contain 5, got {}", c_str);
+    assert!(
+        c_str.contains('5'),
+        "Expected count to contain 5, got {}",
+        c_str
+    );
 }
 
 #[tokio::test]
@@ -323,11 +417,24 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    
-    let res = engine.run(&workflow, json!({}), &[ "echo".to_string() ], HashMap::new(), None, None).await;
+
+    let res = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["echo".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await;
     assert!(res.is_err());
     let err = res.unwrap_err().to_string();
-    assert!(err.contains("capability denied") || err.contains("not granted") || err.contains("MissingCapability"));
+    assert!(
+        err.contains("capability denied")
+            || err.contains("not granted")
+            || err.contains("MissingCapability")
+    );
 }
 
 #[tokio::test]
@@ -341,15 +448,30 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    let mut rx = engine.run_streaming(&workflow, json!({}), &[ "*".to_string() ], HashMap::new(), None, None).await.unwrap();
-    
+    let mut rx = engine
+        .run_streaming(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
     let mut deltas = Vec::new();
     while let Some(event) = rx.recv().await {
-        if let StreamEvent::Progress { event_type: ProgressType::TextDelta, data, .. } = event {
+        if let StreamEvent::Progress {
+            event_type: ProgressType::TextDelta,
+            data,
+            ..
+        } = event
+        {
             deltas.push(data.as_str().unwrap().to_string());
         }
     }
-    
+
     assert_eq!(deltas.join(""), "Hello world!");
 }
 
@@ -371,8 +493,17 @@ async fn test_large_workflow_max_steps() {
     }
 
     let workflow = engine.parse_yaml(&yaml).unwrap();
-    let res = engine.run(&workflow, json!({}), &["*".to_string()], HashMap::new(), None, None).await;
-    
+    let res = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await;
+
     assert!(res.is_err());
     let err = res.unwrap_err().to_string();
     assert!(err.to_lowercase().contains("max steps exceeded"));
@@ -397,11 +528,32 @@ async fn test_nested_workflow_capabilities() {
             }
         }
         async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
-            let yaml = input["yaml"].as_str().ok_or(ToolError::InvalidInput { message: "missing yaml".into(), field: None })?;
-            let workflow = self.engine.parse_yaml(yaml).map_err(|e| ToolError::ExecutionFailed { message: e.to_string(), retryable: false })?;
+            let yaml = input["yaml"].as_str().ok_or(ToolError::InvalidInput {
+                message: "missing yaml".into(),
+                field: None,
+            })?;
+            let workflow =
+                self.engine
+                    .parse_yaml(yaml)
+                    .map_err(|e| ToolError::ExecutionFailed {
+                        message: e.to_string(),
+                        retryable: false,
+                    })?;
             let granted = ctx.capabilities.clone();
-            self.engine.run(&workflow, input["input"].clone(), &granted, HashMap::new(), None, None).await
-                .map_err(|e| ToolError::ExecutionFailed { message: e.to_string(), retryable: false })
+            self.engine
+                .run(
+                    &workflow,
+                    input["input"].clone(),
+                    &granted,
+                    HashMap::new(),
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: e.to_string(),
+                    retryable: false,
+                })
         }
     }
 
@@ -426,13 +578,24 @@ nodes:
       input: {}
     return: true
 "#;
-    
+
     let workflow = engine.parse_yaml(yaml).unwrap();
-    let caps = vec!["workflow_execute".to_string(), "echo".to_string(), "fail".to_string()];
-    let res = engine.run(&workflow, json!({}), &caps, HashMap::new(), None, None).await;
+    let caps = vec![
+        "workflow_execute".to_string(),
+        "echo".to_string(),
+        "fail".to_string(),
+    ];
+    let res = engine
+        .run(&workflow, json!({}), &caps, HashMap::new(), None, None)
+        .await;
     assert!(res.is_err());
     let err = res.unwrap_err().to_string();
-    assert!(err.contains("capability") || err.contains("denied") || err.contains("granted") || err.contains("MissingCapability"));
+    assert!(
+        err.contains("capability")
+            || err.contains("denied")
+            || err.contains("granted")
+            || err.contains("MissingCapability")
+    );
 }
 
 #[tokio::test]
@@ -445,7 +608,11 @@ nodes: {}
     let res = engine.parse_yaml(yaml);
     assert!(res.is_err());
     let err = res.unwrap_err().to_string();
-    assert!(err.to_lowercase().contains("entry node") || err.to_lowercase().contains("at least one node") || err.to_lowercase().contains("no nodes"));
+    assert!(
+        err.to_lowercase().contains("entry node")
+            || err.to_lowercase().contains("at least one node")
+            || err.to_lowercase().contains("no nodes")
+    );
 }
 
 #[tokio::test]
@@ -458,7 +625,17 @@ nodes:
     return: "static"
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    let res = engine.run(&workflow, json!({}), &["*".to_string()], HashMap::new(), None, None).await.unwrap();
+    let res = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     assert_eq!(res["__return__"], "static");
 }
 
@@ -468,13 +645,21 @@ async fn test_panic_tool() {
     #[async_trait]
     impl Tool for PanicTool {
         fn info(&self) -> ToolInfo {
-            ToolInfo { name: "panic".into(), description: "".into(), input_schema: json!({}), output_schema: None, capabilities: vec![], supports_streaming: false, annotations: Default::default() }
+            ToolInfo {
+                name: "panic".into(),
+                description: "".into(),
+                input_schema: json!({}),
+                output_schema: None,
+                capabilities: vec![],
+                supports_streaming: false,
+                annotations: Default::default(),
+            }
         }
         async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
             panic!("Intentional panic!");
         }
     }
-    
+
     let engine = setup_engine();
     engine.register_tool(Arc::new(PanicTool));
     let yaml = r#"
@@ -485,7 +670,16 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    let res = engine.run(&workflow, json!({}), &["*".to_string()], HashMap::new(), None, None).await;
+    let res = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await;
     assert!(res.is_err());
     assert!(res.unwrap_err().to_string().contains("panic"));
 }
@@ -502,16 +696,25 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    
+
     let mut handles = Vec::new();
     for _ in 0..10 {
         let e = engine.clone();
         let w = workflow.clone();
         handles.push(tokio::spawn(async move {
-            e.run(&w, json!({}), &["*".to_string()], HashMap::new(), None, None).await.unwrap()
+            e.run(
+                &w,
+                json!({}),
+                &["*".to_string()],
+                HashMap::new(),
+                None,
+                None,
+            )
+            .await
+            .unwrap()
         }));
     }
-    
+
     for h in handles {
         let res = h.await.unwrap();
         assert_eq!(res["val"], "ok");
@@ -530,10 +733,20 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    
+
     // Create a 10MB string
     let large_string = "A".repeat(10 * 1024 * 1024);
-    let res = engine.run(&workflow, json!({ "large": large_string }), &["*".to_string()], HashMap::new(), None, None).await.unwrap();
+    let res = engine
+        .run(
+            &workflow,
+            json!({ "large": large_string }),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
     assert_eq!(res["large"].as_str().unwrap().len(), 10 * 1024 * 1024);
 }
 
@@ -551,14 +764,23 @@ nodes:
     let result = engine.parse_yaml(yaml);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("invalid") && err.contains("duration"), "Expected duration parse error, got: {err}");
+    assert!(
+        err.contains("invalid") && err.contains("duration"),
+        "Expected duration parse error, got: {err}"
+    );
 }
 
 #[tokio::test]
 async fn test_valid_timeout_parses() {
     let engine = setup_engine();
-    for (duration, _label) in [("30s", "seconds"), ("500ms", "millis"), ("2m", "minutes"), ("10", "bare number")] {
-        let yaml = format!(r#"
+    for (duration, _label) in [
+        ("30s", "seconds"),
+        ("500ms", "millis"),
+        ("2m", "minutes"),
+        ("10", "bare number"),
+    ] {
+        let yaml = format!(
+            r#"
 workflow: timeout_test
 nodes:
   step1:
@@ -566,9 +788,14 @@ nodes:
     with: {{ val: "ok" }}
     timeout: "{duration}"
     return: true
-"#);
+"#
+        );
         let result = engine.parse_yaml(&yaml);
-        assert!(result.is_ok(), "Failed to parse timeout '{duration}': {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse timeout '{duration}': {:?}",
+            result.err()
+        );
     }
 }
 
@@ -590,11 +817,22 @@ nodes:
     return: true
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
-    let res = engine.run(&workflow, json!({}), &["*".to_string()], HashMap::new(), None, None).await;
+    let res = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await;
     assert!(res.is_err());
     let err = res.unwrap_err().to_string();
-    assert!(err.to_lowercase().contains("timeout") || err.to_lowercase().contains("timed out"),
-        "Expected timeout error, got: {err}");
+    assert!(
+        err.to_lowercase().contains("timeout") || err.to_lowercase().contains("timed out"),
+        "Expected timeout error, got: {err}"
+    );
 }
 
 #[tokio::test]
@@ -665,10 +903,22 @@ nodes:
         token_clone.cancel();
     });
 
-    let res = engine.run(&workflow, json!({}), &["*".to_string()], HashMap::new(), Some(token), None).await;
+    let res = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            Some(token),
+            None,
+        )
+        .await;
     assert!(res.is_err());
     let err = res.unwrap_err().to_string();
-    assert!(err.contains("cancelled"), "Expected cancelled error, got: {err}");
+    assert!(
+        err.contains("cancelled"),
+        "Expected cancelled error, got: {err}"
+    );
 }
 
 // --- Hooks test ---
@@ -683,13 +933,22 @@ async fn test_hooks_receive_events() {
     }
     impl konflux::hooks::ExecutionHooks for TestHooks {
         fn on_node_start(&self, node_id: &str, tool: &str) {
-            self.events.lock().unwrap().push(format!("start:{node_id}:{tool}"));
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("start:{node_id}:{tool}"));
         }
         fn on_node_complete(&self, node_id: &str, tool: &str, _duration_ms: u64, _output: &Value) {
-            self.events.lock().unwrap().push(format!("complete:{node_id}:{tool}"));
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("complete:{node_id}:{tool}"));
         }
         fn on_node_failed(&self, node_id: &str, tool: &str, _error: &str) {
-            self.events.lock().unwrap().push(format!("failed:{node_id}:{tool}"));
+            self.events
+                .lock()
+                .unwrap()
+                .push(format!("failed:{node_id}:{tool}"));
         }
     }
 
@@ -710,11 +969,37 @@ nodes:
     let hooks = Arc::new(TestHooks::default());
     let hooks_clone: Arc<dyn konflux::hooks::ExecutionHooks> = hooks.clone();
 
-    let _result = engine.run(&workflow, json!({}), &["*".to_string()], HashMap::new(), None, Some(hooks_clone)).await.unwrap();
+    let _result = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            Some(hooks_clone),
+        )
+        .await
+        .unwrap();
 
     let events = hooks.events.lock().unwrap();
-    assert!(events.contains(&"start:step1:echo".to_string()), "Missing step1 start, got: {:?}", events);
-    assert!(events.contains(&"complete:step1:echo".to_string()), "Missing step1 complete, got: {:?}", events);
-    assert!(events.contains(&"start:step2:echo".to_string()), "Missing step2 start, got: {:?}", events);
-    assert!(events.contains(&"complete:step2:echo".to_string()), "Missing step2 complete, got: {:?}", events);
+    assert!(
+        events.contains(&"start:step1:echo".to_string()),
+        "Missing step1 start, got: {:?}",
+        events
+    );
+    assert!(
+        events.contains(&"complete:step1:echo".to_string()),
+        "Missing step1 complete, got: {:?}",
+        events
+    );
+    assert!(
+        events.contains(&"start:step2:echo".to_string()),
+        "Missing step2 start, got: {:?}",
+        events
+    );
+    assert!(
+        events.contains(&"complete:step2:echo".to_string()),
+        "Missing step2 complete, got: {:?}",
+        events
+    );
 }

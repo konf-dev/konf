@@ -1,10 +1,10 @@
-use std::sync::Arc;
-use std::collections::HashMap;
-use serde_json::json;
 use async_trait::async_trait;
-use konflux::tool::{Tool, ToolInfo, ToolContext, ToolRegistry};
 use konflux::error::ToolError;
 use konflux::stream::stream_channel;
+use konflux::tool::{Tool, ToolContext, ToolInfo, ToolRegistry};
+use serde_json::json;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 struct MockTool {
     info: ToolInfo,
@@ -16,7 +16,11 @@ impl Tool for MockTool {
         self.info.clone()
     }
 
-    async fn invoke(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<serde_json::Value, ToolError> {
+    async fn invoke(
+        &self,
+        input: serde_json::Value,
+        _ctx: &ToolContext,
+    ) -> Result<serde_json::Value, ToolError> {
         Ok(input)
     }
 }
@@ -88,6 +92,9 @@ async fn test_default_invoke_streaming() {
     };
 
     let (tx, _rx) = stream_channel(10);
-    let result = tool.invoke_streaming(json!({"foo": "bar"}), &ctx, tx).await.unwrap();
+    let result = tool
+        .invoke_streaming(json!({"foo": "bar"}), &ctx, tx)
+        .await
+        .unwrap();
     assert_eq!(result, json!({"foo": "bar"}));
 }

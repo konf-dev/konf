@@ -63,16 +63,28 @@ pub enum ValidationError {
 #[derive(Debug, Error)]
 pub enum ExecutionError {
     #[error("[{workflow_id}] node '{node}' failed: {message}")]
-    NodeFailed { workflow_id: String, node: String, message: String },
+    NodeFailed {
+        workflow_id: String,
+        node: String,
+        message: String,
+    },
 
     #[error("[{workflow_id}] node '{node}' timed out after {timeout_ms}ms")]
-    Timeout { workflow_id: String, node: String, timeout_ms: u64 },
+    Timeout {
+        workflow_id: String,
+        node: String,
+        timeout_ms: u64,
+    },
 
     #[error("[{workflow_id}] max steps exceeded ({max})")]
     MaxStepsExceeded { workflow_id: String, max: usize },
 
     #[error("[{workflow_id}] join failed on node '{node}': {message}")]
-    JoinFailed { workflow_id: String, node: String, message: String },
+    JoinFailed {
+        workflow_id: String,
+        node: String,
+        message: String,
+    },
 
     #[error("[{workflow_id}] workflow cancelled")]
     Cancelled { workflow_id: String },
@@ -82,7 +94,10 @@ pub enum ExecutionError {
 #[derive(Debug, Clone, Error)]
 pub enum ToolError {
     #[error("invalid input: {message}")]
-    InvalidInput { message: String, field: Option<String> },
+    InvalidInput {
+        message: String,
+        field: Option<String>,
+    },
 
     #[error("execution failed: {message}")]
     ExecutionFailed { message: String, retryable: bool },

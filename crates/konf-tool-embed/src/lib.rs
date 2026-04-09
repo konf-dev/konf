@@ -25,7 +25,9 @@ impl EmbedTool {
         let options = fastembed::TextInitOptions::new(fastembed::EmbeddingModel::AllMiniLML6V2);
         let model = fastembed::TextEmbedding::try_new(options)?;
         info!("fastembed model loaded");
-        Ok(Self { model: Arc::new(std::sync::Mutex::new(model)) })
+        Ok(Self {
+            model: Arc::new(std::sync::Mutex::new(model)),
+        })
     }
 }
 
@@ -49,7 +51,11 @@ impl Tool for EmbedTool {
             capabilities: vec!["ai:embed".into()],
             supports_streaming: false,
             output_schema: None,
-            annotations: ToolAnnotations { read_only: true, idempotent: true, ..Default::default() },
+            annotations: ToolAnnotations {
+                read_only: true,
+                idempotent: true,
+                ..Default::default()
+            },
         }
     }
 
@@ -59,7 +65,9 @@ impl Tool for EmbedTool {
         let texts: Vec<String> = if let Some(text) = input.get("text").and_then(|v| v.as_str()) {
             vec![text.to_string()]
         } else if let Some(arr) = input.get("texts").and_then(|v| v.as_array()) {
-            arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
         } else {
             return Err(ToolError::InvalidInput {
                 message: "Provide 'text' or 'texts'".into(),
@@ -138,7 +146,11 @@ mod tests {
             output_schema: None,
             capabilities: vec!["ai:embed".into()],
             supports_streaming: false,
-            annotations: konflux::tool::ToolAnnotations { read_only: true, idempotent: true, ..Default::default() },
+            annotations: konflux::tool::ToolAnnotations {
+                read_only: true,
+                idempotent: true,
+                ..Default::default()
+            },
         };
         assert_eq!(info.name, "ai:embed");
         assert!(info.annotations.read_only);
@@ -152,7 +164,8 @@ mod tests {
         let engine = konflux::Engine::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
         // This may or may not register the tool depending on model availability
-        rt.block_on(register(&engine, &serde_json::json!({}))).unwrap();
+        rt.block_on(register(&engine, &serde_json::json!({})))
+            .unwrap();
         // No assertion on tool count — model may or may not load in test env
     }
 }

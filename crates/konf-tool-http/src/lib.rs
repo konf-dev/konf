@@ -37,10 +37,12 @@ fn validate_url(url: &str) -> Result<(), ToolError> {
     // Only allow http/https schemes
     match parsed.scheme() {
         "http" | "https" => {}
-        scheme => return Err(ToolError::InvalidInput {
-            message: format!("Unsupported URL scheme: {scheme}"),
-            field: Some("url".into()),
-        }),
+        scheme => {
+            return Err(ToolError::InvalidInput {
+                message: format!("Unsupported URL scheme: {scheme}"),
+                field: Some("url".into()),
+            })
+        }
     }
 
     // Block internal/private IP ranges
@@ -57,7 +59,8 @@ fn validate_url(url: &str) -> Result<(), ToolError> {
             }
             url::Host::Ipv4(ip) => {
                 // Block: loopback, private (RFC1918), link-local (169.254.x.x including AWS IMDS), unspecified
-                if ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified() {
+                if ip.is_loopback() || ip.is_private() || ip.is_link_local() || ip.is_unspecified()
+                {
                     return Err(ToolError::InvalidInput {
                         message: format!("URL host '{ip}' is a private/internal IP"),
                         field: Some("url".into()),
@@ -83,14 +86,19 @@ async fn read_body_limited(resp: reqwest::Response) -> Result<String, ToolError>
     let content_length = resp.content_length().unwrap_or(0) as usize;
     if content_length > MAX_RESPONSE_BYTES {
         return Err(ToolError::ExecutionFailed {
-            message: format!("Response too large: {content_length} bytes (max {MAX_RESPONSE_BYTES})"),
+            message: format!(
+                "Response too large: {content_length} bytes (max {MAX_RESPONSE_BYTES})"
+            ),
             retryable: false,
         });
     }
     let bytes = resp.bytes().await.map_err(tool_err)?;
     if bytes.len() > MAX_RESPONSE_BYTES {
         return Err(ToolError::ExecutionFailed {
-            message: format!("Response too large: {} bytes (max {MAX_RESPONSE_BYTES})", bytes.len()),
+            message: format!(
+                "Response too large: {} bytes (max {MAX_RESPONSE_BYTES})",
+                bytes.len()
+            ),
             retryable: false,
         });
     }
@@ -149,18 +157,34 @@ impl Tool for HttpGetTool {
             output_schema: None,
             capabilities: vec!["http:get".into()],
             supports_streaming: false,
-            annotations: ToolAnnotations { open_world: true, idempotent: true, ..Default::default() },
+            annotations: ToolAnnotations {
+                open_world: true,
+                idempotent: true,
+                ..Default::default()
+            },
         }
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let url = input.get("url").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidInput { message: "missing 'url'".into(), field: Some("url".into()) })?;
+        let url =
+            input
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidInput {
+                    message: "missing 'url'".into(),
+                    field: Some("url".into()),
+                })?;
         validate_url(url)?;
 
-        let timeout_secs = input.get("timeout").and_then(|v| v.as_u64()).unwrap_or(30).min(MAX_TIMEOUT_SECS);
+        let timeout_secs = input
+            .get("timeout")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30)
+            .min(MAX_TIMEOUT_SECS);
 
-        let mut req = self.client.get(url)
+        let mut req = self
+            .client
+            .get(url)
             .timeout(std::time::Duration::from_secs(timeout_secs));
 
         if let Some(headers) = input.get("headers").and_then(|v| v.as_object()) {
@@ -178,10 +202,13 @@ impl Tool for HttpGetTool {
         })?;
 
         let status = resp.status().as_u16();
-        let headers: serde_json::Map<String, Value> = resp.headers()
+        let headers: serde_json::Map<String, Value> = resp
+            .headers()
             .iter()
             .filter_map(|(k, v)| {
-                v.to_str().ok().map(|s| (k.to_string(), Value::String(s.to_string())))
+                v.to_str()
+                    .ok()
+                    .map(|s| (k.to_string(), Value::String(s.to_string())))
             })
             .collect();
 
@@ -246,19 +273,34 @@ impl Tool for HttpPostTool {
             output_schema: None,
             capabilities: vec!["http:post".into()],
             supports_streaming: false,
-            annotations: ToolAnnotations { open_world: true, ..Default::default() },
+            annotations: ToolAnnotations {
+                open_world: true,
+                ..Default::default()
+            },
         }
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let url = input.get("url").and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidInput { message: "missing 'url'".into(), field: Some("url".into()) })?;
+        let url =
+            input
+                .get("url")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| ToolError::InvalidInput {
+                    message: "missing 'url'".into(),
+                    field: Some("url".into()),
+                })?;
         validate_url(url)?;
 
-        let timeout_secs = input.get("timeout").and_then(|v| v.as_u64()).unwrap_or(30).min(MAX_TIMEOUT_SECS);
+        let timeout_secs = input
+            .get("timeout")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30)
+            .min(MAX_TIMEOUT_SECS);
         let body = input.get("body").cloned().unwrap_or(Value::Null);
 
-        let mut req = self.client.post(url)
+        let mut req = self
+            .client
+            .post(url)
             .json(&body)
             .timeout(std::time::Duration::from_secs(timeout_secs));
 
@@ -281,7 +323,8 @@ impl Tool for HttpPostTool {
         let duration_ms = start.elapsed().as_millis() as u64;
         debug!(url = %url, status, duration_ms, "HTTP POST completed");
 
-        let body_value = serde_json::from_str::<Value>(&resp_body).unwrap_or(Value::String(resp_body));
+        let body_value =
+            serde_json::from_str::<Value>(&resp_body).unwrap_or(Value::String(resp_body));
 
         Ok(json!({
             "status": status,
@@ -407,7 +450,12 @@ mod tests {
             node_id: "test".into(),
             metadata: std::collections::HashMap::new(),
         };
-        let result = tool.invoke(json!({"url": "http://169.254.169.254/latest/meta-data/"}), &ctx).await;
+        let result = tool
+            .invoke(
+                json!({"url": "http://169.254.169.254/latest/meta-data/"}),
+                &ctx,
+            )
+            .await;
         assert!(result.is_err());
     }
 

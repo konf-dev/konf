@@ -5,13 +5,7 @@
 
 use std::sync::Arc;
 
-use axum::{
-    extract::Request,
-    http::StatusCode,
-    middleware::Next,
-    response::Response,
-    Json,
-};
+use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response, Json};
 use serde_json::json;
 
 use super::jwt::{Claims, JwtVerifier};
@@ -44,10 +38,12 @@ pub async fn auth_middleware(
         .and_then(|v| v.to_str().ok());
 
     let token = match auth_header {
-        Some(header) => {
-            JwtVerifier::extract_token(header)
-                .map_err(|e| (StatusCode::UNAUTHORIZED, Json(json!({"error": e.to_string()}))))?
-        }
+        Some(header) => JwtVerifier::extract_token(header).map_err(|e| {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": e.to_string()})),
+            )
+        })?,
         None => {
             return Err((
                 StatusCode::UNAUTHORIZED,
@@ -56,10 +52,12 @@ pub async fn auth_middleware(
         }
     };
 
-    let claims = verifier
-        .verify(token)
-        .await
-        .map_err(|e| (StatusCode::UNAUTHORIZED, Json(json!({"error": e.to_string()}))))?;
+    let claims = verifier.verify(token).await.map_err(|e| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": e.to_string()})),
+        )
+    })?;
 
     // Inject claims into request extensions for handlers to access
     request.extensions_mut().insert(claims);

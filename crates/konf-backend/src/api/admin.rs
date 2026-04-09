@@ -10,10 +10,7 @@ use crate::auth::middleware::AuthUser;
 use crate::error::AppError;
 
 /// GET /v1/admin/config — read the current product config.
-pub async fn get_config(
-    AuthUser(claims): AuthUser,
-    State(state): State<AppState>,
-) -> Json<Value> {
+pub async fn get_config(AuthUser(claims): AuthUser, State(state): State<AppState>) -> Json<Value> {
     info!(user_id = %claims.sub, "Admin: reading product config");
     let product_config = state.runtime.engine().config().clone();
     Json(json!({
@@ -50,15 +47,15 @@ pub async fn get_audit(
 
     match state.runtime.journal() {
         Some(journal) => {
-            let events = journal.recent(100).await
+            let events = journal
+                .recent(100)
+                .await
                 .map_err(|e| AppError::Internal(format!("Journal query failed: {e}")))?;
             Ok(Json(json!({ "events": events })))
         }
-        None => {
-            Ok(Json(json!({
-                "events": [],
-                "note": "Event journal is not available (no database configured)"
-            })))
-        }
+        None => Ok(Json(json!({
+            "events": [],
+            "note": "Event journal is not available (no database configured)"
+        }))),
     }
 }

@@ -19,8 +19,8 @@ use serde::Deserialize;
 use serde_json::json;
 use tracing::info;
 
-use konflux::stream::{StreamEvent, ProgressType};
 use konf_runtime::scope::{Actor, ActorRole, CapabilityGrant, ExecutionScope, ResourceLimits};
+use konflux::stream::{ProgressType, StreamEvent};
 
 use crate::auth::middleware::AuthUser;
 use crate::error::AppError;
@@ -61,8 +61,7 @@ pub async fn chat(
     Json(req): Json<ChatRequest>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AppError> {
     let user_id = &claims.sub;
-    let namespace = state.namespace_template
-        .replace("${user_id}", user_id);
+    let namespace = state.namespace_template.replace("${user_id}", user_id);
 
     info!(
         user_id = %user_id,
@@ -78,7 +77,9 @@ pub async fn chat(
         limits: state.default_limits.clone(),
         actor: Actor {
             id: user_id.clone(),
-            role: claims.role.as_deref()
+            role: claims
+                .role
+                .as_deref()
                 .and_then(|r| serde_json::from_value(json!(r)).ok())
                 .unwrap_or(ActorRole::User),
         },
@@ -86,7 +87,9 @@ pub async fn chat(
     };
 
     // Parse workflow
-    let workflow = state.runtime.parse_yaml(&state.default_workflow_yaml)
+    let workflow = state
+        .runtime
+        .parse_yaml(&state.default_workflow_yaml)
         .map_err(|e| AppError::BadRequest(format!("Invalid workflow: {e}")))?;
 
     // Build input
@@ -97,7 +100,8 @@ pub async fn chat(
     });
 
     // Start streaming execution
-    let (run_id, mut rx) = state.runtime
+    let (run_id, mut rx) = state
+        .runtime
         .start_streaming(&workflow, input, scope, req.session_id.clone())
         .await
         .map_err(|e| AppError::Internal(format!("Failed to start workflow: {e}")))?;

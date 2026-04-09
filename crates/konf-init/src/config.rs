@@ -6,7 +6,10 @@
 
 use std::path::PathBuf;
 
-use figment::{Figment, providers::{Env, Format, Toml}};
+use figment::{
+    providers::{Env, Format, Toml},
+    Figment,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -63,7 +66,11 @@ impl PlatformConfig {
             errors.push("server.port must be > 0".into());
         }
 
-        if errors.is_empty() { Ok(()) } else { Err(errors) }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
     }
 }
 
@@ -88,8 +95,12 @@ impl std::fmt::Debug for DatabaseConfig {
     }
 }
 
-fn default_pool_min() -> u32 { 5 }
-fn default_pool_max() -> u32 { 20 }
+fn default_pool_min() -> u32 {
+    5
+}
+fn default_pool_max() -> u32 {
+    20
+}
 
 /// Auth settings.
 #[derive(Debug, Clone, Deserialize)]
@@ -134,8 +145,8 @@ impl Default for ServerConfig {
 #[serde(default)]
 pub struct ProductConfig {
     pub tools: ToolsConfig,
-    pub workflows: Vec<String>,  // paths to workflow YAML files
-    pub prompts: Vec<String>,    // paths to prompt template files
+    pub workflows: Vec<String>, // paths to workflow YAML files
+    pub prompts: Vec<String>,   // paths to prompt template files
     pub tool_guards: std::collections::HashMap<String, ToolGuardConfig>,
     pub roles: std::collections::HashMap<String, RoleConfig>,
 }
@@ -224,7 +235,9 @@ pub struct ShellConfig {
     pub timeout_ms: u64,
 }
 
-fn default_shell_timeout_ms() -> u64 { 30000 }
+fn default_shell_timeout_ms() -> u64 {
+    30000
+}
 
 /// Memory backend configuration.
 #[derive(Debug, Clone, Deserialize)]
@@ -248,7 +261,10 @@ secret:
 "#;
         let tools: ToolsConfig = serde_yaml::from_str(yaml).unwrap();
         let secret = tools.secret.expect("SecretConfig should not be None");
-        assert_eq!(secret.allowed_keys, vec!["STRIPE_SECRET_KEY", "ANTHROPIC_API_KEY"]);
+        assert_eq!(
+            secret.allowed_keys,
+            vec!["STRIPE_SECRET_KEY", "ANTHROPIC_API_KEY"]
+        );
     }
 
     #[test]
@@ -298,7 +314,10 @@ tool_guards:
 
         let shell_guard = &config.tool_guards["shell:exec"];
         assert_eq!(shell_guard.rules.len(), 2);
-        assert_eq!(shell_guard.default, konf_runtime::guard::DefaultAction::Deny);
+        assert_eq!(
+            shell_guard.default,
+            konf_runtime::guard::DefaultAction::Deny
+        );
         assert!(shell_guard.alias.is_none());
 
         let echo_guard = &config.tool_guards["echo"];

@@ -3,8 +3,8 @@
 //! Implements `konflux::hooks::ExecutionHooks` to update the process table
 //! and event journal in real-time during workflow execution.
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use chrono::Utc;
 use serde_json::Value;

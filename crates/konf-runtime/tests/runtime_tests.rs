@@ -14,8 +14,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use konflux::engine::Engine;
-use konflux::tool::{Tool, ToolInfo, ToolContext};
 use konflux::error::ToolError;
+use konflux::tool::{Tool, ToolContext, ToolInfo};
 
 use konf_runtime::scope::*;
 use konf_runtime::Runtime;
@@ -76,7 +76,10 @@ fn test_scope(namespace: &str) -> ExecutionScope {
         namespace: namespace.into(),
         capabilities: vec![CapabilityGrant::new("*")],
         limits: ResourceLimits::default(),
-        actor: Actor { id: "test_user".into(), role: ActorRole::User },
+        actor: Actor {
+            id: "test_user".into(),
+            role: ActorRole::User,
+        },
         depth: 0,
     }
 }
@@ -99,18 +102,28 @@ async fn test_runtime_start_and_wait() {
         return;
     };
 
-    let workflow = runtime.parse_yaml(r#"
+    let workflow = runtime
+        .parse_yaml(
+            r#"
 workflow: test_start_wait
 nodes:
   step1:
     do: echo
     with: { val: "hello" }
     return: true
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
     let scope = test_scope("konf:test:user_1");
-    let result = runtime.run(&workflow, json!({}), scope, "sess_1".into()).await;
-    assert!(result.is_ok(), "Workflow should complete: {:?}", result.err());
+    let result = runtime
+        .run(&workflow, json!({}), scope, "sess_1".into())
+        .await;
+    assert!(
+        result.is_ok(),
+        "Workflow should complete: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -120,16 +133,23 @@ async fn test_runtime_cancel() {
         return;
     };
 
-    let workflow = runtime.parse_yaml(r#"
+    let workflow = runtime
+        .parse_yaml(
+            r#"
 workflow: test_cancel
 nodes:
   step1:
     do: slow
     return: true
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
     let scope = test_scope("konf:test:user_1");
-    let run_id = runtime.start(&workflow, json!({}), scope, "sess_1".into()).await.unwrap();
+    let run_id = runtime
+        .start(&workflow, json!({}), scope, "sess_1".into())
+        .await
+        .unwrap();
 
     // Cancel after 50ms
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -147,17 +167,24 @@ async fn test_runtime_list_runs() {
         return;
     };
 
-    let workflow = runtime.parse_yaml(r#"
+    let workflow = runtime
+        .parse_yaml(
+            r#"
 workflow: test_list
 nodes:
   step1:
     do: echo
     with: { val: "ok" }
     return: true
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
     let scope = test_scope("konf:test:user_list");
-    let _run_id = runtime.start(&workflow, json!({}), scope, "sess_list".into()).await.unwrap();
+    let _run_id = runtime
+        .start(&workflow, json!({}), scope, "sess_list".into())
+        .await
+        .unwrap();
 
     // Give it a moment to register
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -174,7 +201,10 @@ async fn test_runtime_metrics() {
     };
 
     let metrics = runtime.metrics();
-    assert!(metrics.uptime_seconds < 10, "Uptime should be small in tests");
+    assert!(
+        metrics.uptime_seconds < 10,
+        "Uptime should be small in tests"
+    );
 }
 
 #[tokio::test]
@@ -184,13 +214,17 @@ async fn test_runtime_resource_limit() {
         return;
     };
 
-    let workflow = runtime.parse_yaml(r#"
+    let workflow = runtime
+        .parse_yaml(
+            r#"
 workflow: test_limit
 nodes:
   step1:
     do: slow
     return: true
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
     let scope = ExecutionScope {
         namespace: "konf:test:limited".into(),
@@ -199,15 +233,23 @@ nodes:
             max_active_runs_per_namespace: 1,
             ..Default::default()
         },
-        actor: Actor { id: "test".into(), role: ActorRole::User },
+        actor: Actor {
+            id: "test".into(),
+            role: ActorRole::User,
+        },
         depth: 0,
     };
 
     // First start should succeed
-    let _run1 = runtime.start(&workflow, json!({}), scope.clone(), "sess_a".into()).await.unwrap();
+    let _run1 = runtime
+        .start(&workflow, json!({}), scope.clone(), "sess_a".into())
+        .await
+        .unwrap();
 
     // Second start should fail (limit = 1)
-    let result = runtime.start(&workflow, json!({}), scope, "sess_b".into()).await;
+    let result = runtime
+        .start(&workflow, json!({}), scope, "sess_b".into())
+        .await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("max_active_runs"));
 }
@@ -219,25 +261,35 @@ async fn test_runtime_capability_denial() {
         return;
     };
 
-    let workflow = runtime.parse_yaml(r#"
+    let workflow = runtime
+        .parse_yaml(
+            r#"
 workflow: test_cap_deny
 nodes:
   step1:
     do: echo
     with: { val: "hello" }
     return: true
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
     // Scope without "echo" capability
     let scope = ExecutionScope {
         namespace: "konf:test:denied".into(),
         capabilities: vec![CapabilityGrant::new("ai:complete")], // no echo
         limits: ResourceLimits::default(),
-        actor: Actor { id: "test".into(), role: ActorRole::User },
+        actor: Actor {
+            id: "test".into(),
+            role: ActorRole::User,
+        },
         depth: 0,
     };
 
-    let run_id = runtime.start(&workflow, json!({}), scope, "sess_deny".into()).await.unwrap();
+    let run_id = runtime
+        .start(&workflow, json!({}), scope, "sess_deny".into())
+        .await
+        .unwrap();
     let result = runtime.wait(run_id).await;
     assert!(result.is_err(), "Should fail due to capability denial");
 }
@@ -262,17 +314,29 @@ async fn test_runtime_edge_mode_start_and_wait() {
     let engine = setup_engine();
     let runtime = Runtime::new(engine, None).await.unwrap();
 
-    let workflow = runtime.parse_yaml(r#"
+    let workflow = runtime
+        .parse_yaml(
+            r#"
 workflow: edge_test
 nodes:
   step1:
     do: echo
     with: { message: "edge" }
     return: true
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
     let scope = test_scope("konf:edge:test");
-    let run_id = runtime.start(&workflow, json!({"input": "test"}), scope, "edge_sess".into()).await.unwrap();
+    let run_id = runtime
+        .start(
+            &workflow,
+            json!({"input": "test"}),
+            scope,
+            "edge_sess".into(),
+        )
+        .await
+        .unwrap();
     let result = runtime.wait(run_id).await;
     // Workflow should complete (echo tool just returns input)
     assert!(result.is_ok(), "Edge mode workflow failed: {result:?}");
@@ -283,17 +347,23 @@ async fn test_runtime_edge_mode_metrics_update() {
     let engine = setup_engine();
     let runtime = Runtime::new(engine, None).await.unwrap();
 
-    let workflow = runtime.parse_yaml(r#"
+    let workflow = runtime
+        .parse_yaml(
+            r#"
 workflow: metrics_test
 nodes:
   step1:
     do: echo
     with: { val: 1 }
     return: true
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
     let scope = test_scope("konf:edge:metrics");
-    let _result = runtime.run(&workflow, json!({}), scope, "metrics_sess".into()).await;
+    let _result = runtime
+        .run(&workflow, json!({}), scope, "metrics_sess".into())
+        .await;
 
     let metrics = runtime.metrics();
     // After completion, total_completed should increment
@@ -302,7 +372,8 @@ nodes:
     assert!(
         metrics.total_completed > 0 || metrics.total_failed > 0,
         "Expected non-zero metrics after run, got: completed={}, failed={}",
-        metrics.total_completed, metrics.total_failed
+        metrics.total_completed,
+        metrics.total_failed
     );
 }
 
@@ -311,16 +382,23 @@ async fn test_runtime_cancel_in_edge_mode() {
     let engine = setup_engine();
     let runtime = Runtime::new(engine, None).await.unwrap();
 
-    let workflow = runtime.parse_yaml(r#"
+    let workflow = runtime
+        .parse_yaml(
+            r#"
 workflow: cancel_test
 nodes:
   step1:
     do: slow
     return: true
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
     let scope = test_scope("konf:edge:cancel");
-    let run_id = runtime.start(&workflow, json!({}), scope, "cancel_sess".into()).await.unwrap();
+    let run_id = runtime
+        .start(&workflow, json!({}), scope, "cancel_sess".into())
+        .await
+        .unwrap();
 
     // Cancel immediately
     let cancel_result = runtime.cancel(run_id, "test cancel").await;

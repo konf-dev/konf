@@ -64,12 +64,12 @@ impl Tool for ValidateWorkflowTool {
     }
 
     async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, KonfluxToolError> {
-        let yaml = input.get("yaml")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| KonfluxToolError::InvalidInput {
+        let yaml = input.get("yaml").and_then(|v| v.as_str()).ok_or_else(|| {
+            KonfluxToolError::InvalidInput {
                 message: "Missing required field 'yaml' (string)".into(),
                 field: Some("yaml".into()),
-            })?;
+            }
+        })?;
 
         // Step 1: Parse the YAML into a Workflow
         let workflow = match self.engine.parse_yaml(yaml) {
@@ -89,15 +89,19 @@ impl Tool for ValidateWorkflowTool {
         for step in &workflow.steps {
             let tool_name = step.tool.as_str();
             if !registry.contains(tool_name) {
-                errors.push(format!("Tool '{}' (used in step '{}') is not registered", tool_name, step.id));
+                errors.push(format!(
+                    "Tool '{}' (used in step '{}') is not registered",
+                    tool_name, step.id
+                ));
             }
         }
 
         // Step 3: Check capability attenuation — caller must cover workflow capabilities
         for cap in &workflow.capabilities {
-            let covered = ctx.capabilities.iter().any(|grant| {
-                matches_capability_pattern(grant, cap)
-            });
+            let covered = ctx
+                .capabilities
+                .iter()
+                .any(|grant| matches_capability_pattern(grant, cap));
             if !covered {
                 errors.push(format!(
                     "Workflow requires '{}' but caller does not have a matching grant",
@@ -107,9 +111,8 @@ impl Tool for ValidateWorkflowTool {
         }
 
         if errors.is_empty() {
-            let capabilities_required: Vec<&str> = workflow.capabilities.iter()
-                .map(|s| s.as_str())
-                .collect();
+            let capabilities_required: Vec<&str> =
+                workflow.capabilities.iter().map(|s| s.as_str()).collect();
 
             Ok(json!({
                 "valid": true,

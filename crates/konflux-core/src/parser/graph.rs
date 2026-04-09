@@ -1,7 +1,7 @@
 //! Dependency Graph — determines execution order and parallelism.
 
-use std::collections::{HashMap, HashSet};
 use crate::parser::schema::WorkflowSchema;
+use std::collections::{HashMap, HashSet};
 
 /// Analyzes the workflow to build a dependency graph.
 #[derive(Debug, Clone)]

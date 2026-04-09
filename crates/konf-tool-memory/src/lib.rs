@@ -73,22 +73,51 @@ pub trait MemoryBackend: Send + Sync {
     async fn search(&self, params: SearchParams) -> Result<Value, MemoryError>;
 
     /// Add nodes to the knowledge graph.
-    async fn add_nodes(&self, nodes: &[Value], namespace: Option<&str>) -> Result<Value, MemoryError>;
+    async fn add_nodes(
+        &self,
+        nodes: &[Value],
+        namespace: Option<&str>,
+    ) -> Result<Value, MemoryError>;
 
     /// Set a session state key (working memory scratchpad).
-    async fn state_set(&self, key: &str, value: &Value, session_id: &str, namespace: Option<&str>, ttl: Option<i64>) -> Result<Value, MemoryError>;
+    async fn state_set(
+        &self,
+        key: &str,
+        value: &Value,
+        session_id: &str,
+        namespace: Option<&str>,
+        ttl: Option<i64>,
+    ) -> Result<Value, MemoryError>;
 
     /// Get a session state key.
-    async fn state_get(&self, key: &str, session_id: &str, namespace: Option<&str>) -> Result<Value, MemoryError>;
+    async fn state_get(
+        &self,
+        key: &str,
+        session_id: &str,
+        namespace: Option<&str>,
+    ) -> Result<Value, MemoryError>;
 
     /// Delete a session state key.
-    async fn state_delete(&self, key: &str, session_id: &str, namespace: Option<&str>) -> Result<Value, MemoryError>;
+    async fn state_delete(
+        &self,
+        key: &str,
+        session_id: &str,
+        namespace: Option<&str>,
+    ) -> Result<Value, MemoryError>;
 
     /// List all session state keys for a session.
-    async fn state_list(&self, session_id: &str, namespace: Option<&str>) -> Result<Value, MemoryError>;
+    async fn state_list(
+        &self,
+        session_id: &str,
+        namespace: Option<&str>,
+    ) -> Result<Value, MemoryError>;
 
     /// Clear all session state for a session.
-    async fn state_clear(&self, session_id: &str, namespace: Option<&str>) -> Result<Value, MemoryError>;
+    async fn state_clear(
+        &self,
+        session_id: &str,
+        namespace: Option<&str>,
+    ) -> Result<Value, MemoryError>;
 
     /// Which search modes this backend supports (e.g. \["text", "vector", "hybrid"\]).
     /// Used to dynamically build the input schema for memory_search.
@@ -124,16 +153,37 @@ mod tests {
         async fn search(&self, params: SearchParams) -> Result<Value, MemoryError> {
             Ok(json!({"results": [], "query": params.query}))
         }
-        async fn add_nodes(&self, nodes: &[Value], _ns: Option<&str>) -> Result<Value, MemoryError> {
+        async fn add_nodes(
+            &self,
+            nodes: &[Value],
+            _ns: Option<&str>,
+        ) -> Result<Value, MemoryError> {
             Ok(json!({"added": nodes.len()}))
         }
-        async fn state_set(&self, key: &str, value: &Value, _sid: &str, _ns: Option<&str>, _ttl: Option<i64>) -> Result<Value, MemoryError> {
+        async fn state_set(
+            &self,
+            key: &str,
+            value: &Value,
+            _sid: &str,
+            _ns: Option<&str>,
+            _ttl: Option<i64>,
+        ) -> Result<Value, MemoryError> {
             Ok(json!({"key": key, "value": value}))
         }
-        async fn state_get(&self, key: &str, _sid: &str, _ns: Option<&str>) -> Result<Value, MemoryError> {
+        async fn state_get(
+            &self,
+            key: &str,
+            _sid: &str,
+            _ns: Option<&str>,
+        ) -> Result<Value, MemoryError> {
             Ok(json!({"key": key, "value": null}))
         }
-        async fn state_delete(&self, key: &str, _sid: &str, _ns: Option<&str>) -> Result<Value, MemoryError> {
+        async fn state_delete(
+            &self,
+            key: &str,
+            _sid: &str,
+            _ns: Option<&str>,
+        ) -> Result<Value, MemoryError> {
             Ok(json!({"deleted": key}))
         }
         async fn state_list(&self, _sid: &str, _ns: Option<&str>) -> Result<Value, MemoryError> {
@@ -178,7 +228,13 @@ mod tests {
     async fn test_search_tool_delegates_to_backend() {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = SearchTool::new(backend);
-        let result = tool.invoke(json!({"query": "hello", "mode": "text", "limit": 5}), &test_ctx()).await.unwrap();
+        let result = tool
+            .invoke(
+                json!({"query": "hello", "mode": "text", "limit": 5}),
+                &test_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(result["query"], "hello");
     }
 
@@ -187,7 +243,9 @@ mod tests {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = SearchTool::new(backend);
         let info = tool.info();
-        let modes = info.input_schema["properties"]["mode"]["enum"].as_array().unwrap();
+        let modes = info.input_schema["properties"]["mode"]["enum"]
+            .as_array()
+            .unwrap();
         assert!(modes.contains(&json!("text")));
         assert!(modes.contains(&json!("hybrid")));
     }
@@ -196,7 +254,10 @@ mod tests {
     async fn test_store_tool_delegates_to_backend() {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StoreTool::new(backend);
-        let result = tool.invoke(json!({"nodes": [{"content": "test"}]}), &test_ctx()).await.unwrap();
+        let result = tool
+            .invoke(json!({"nodes": [{"content": "test"}]}), &test_ctx())
+            .await
+            .unwrap();
         assert_eq!(result["added"], 1);
     }
 
@@ -212,7 +273,13 @@ mod tests {
     async fn test_state_set_delegates() {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateSetTool::new(backend);
-        let result = tool.invoke(json!({"key": "plan", "value": [1,2,3], "session_id": "s1"}), &test_ctx()).await.unwrap();
+        let result = tool
+            .invoke(
+                json!({"key": "plan", "value": [1,2,3], "session_id": "s1"}),
+                &test_ctx(),
+            )
+            .await
+            .unwrap();
         assert_eq!(result["key"], "plan");
     }
 
@@ -220,7 +287,9 @@ mod tests {
     async fn test_state_set_rejects_missing_key() {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateSetTool::new(backend);
-        let result = tool.invoke(json!({"value": 1, "session_id": "s1"}), &test_ctx()).await;
+        let result = tool
+            .invoke(json!({"value": 1, "session_id": "s1"}), &test_ctx())
+            .await;
         assert!(result.is_err());
     }
 
@@ -228,7 +297,10 @@ mod tests {
     async fn test_state_get_delegates() {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateGetTool::new(backend);
-        let result = tool.invoke(json!({"key": "plan", "session_id": "s1"}), &test_ctx()).await.unwrap();
+        let result = tool
+            .invoke(json!({"key": "plan", "session_id": "s1"}), &test_ctx())
+            .await
+            .unwrap();
         assert_eq!(result["key"], "plan");
     }
 
@@ -236,7 +308,10 @@ mod tests {
     async fn test_state_delete_delegates() {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateDeleteTool::new(backend);
-        let result = tool.invoke(json!({"key": "plan", "session_id": "s1"}), &test_ctx()).await.unwrap();
+        let result = tool
+            .invoke(json!({"key": "plan", "session_id": "s1"}), &test_ctx())
+            .await
+            .unwrap();
         assert_eq!(result["deleted"], "plan");
     }
 
@@ -244,7 +319,10 @@ mod tests {
     async fn test_state_list_delegates() {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateListTool::new(backend);
-        let result = tool.invoke(json!({"session_id": "s1"}), &test_ctx()).await.unwrap();
+        let result = tool
+            .invoke(json!({"session_id": "s1"}), &test_ctx())
+            .await
+            .unwrap();
         assert!(result["keys"].is_array());
     }
 
@@ -252,7 +330,10 @@ mod tests {
     async fn test_state_clear_delegates() {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateClearTool::new(backend);
-        let result = tool.invoke(json!({"session_id": "s1"}), &test_ctx()).await.unwrap();
+        let result = tool
+            .invoke(json!({"session_id": "s1"}), &test_ctx())
+            .await
+            .unwrap();
         assert_eq!(result["cleared"], 0);
     }
 

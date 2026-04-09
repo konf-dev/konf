@@ -1,19 +1,20 @@
 //! Expression Evaluator Tests
 
+use konflux::expr::{ExprError, ExprEvaluator, ExprValue};
 use std::collections::HashMap;
-use konflux::expr::{ExprEvaluator, ExprValue, ExprError};
 
 fn ctx(pairs: &[(&str, ExprValue)]) -> HashMap<String, ExprValue> {
-    pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect()
 }
 
 #[test]
 fn test_simple_comparison() {
-    let context = ctx(&[
-        ("confidence", ExprValue::Float(0.9)),
-    ]);
+    let context = ctx(&[("confidence", ExprValue::Float(0.9))]);
     let eval = ExprEvaluator::new(&context);
-    
+
     assert!(eval.evaluate_as_bool("confidence > 0.8").unwrap());
     assert!(!eval.evaluate_as_bool("confidence > 0.95").unwrap());
     assert!(eval.evaluate_as_bool("confidence >= 0.9").unwrap());
@@ -22,11 +23,9 @@ fn test_simple_comparison() {
 
 #[test]
 fn test_string_equality() {
-    let context = ctx(&[
-        ("category", ExprValue::String("billing".into())),
-    ]);
+    let context = ctx(&[("category", ExprValue::String("billing".into()))]);
     let eval = ExprEvaluator::new(&context);
-    
+
     assert!(eval.evaluate_as_bool("category == 'billing'").unwrap());
     assert!(!eval.evaluate_as_bool("category == 'support'").unwrap());
     assert!(eval.evaluate_as_bool("category != 'support'").unwrap());
@@ -39,7 +38,7 @@ fn test_boolean_values() {
         ("is_complete", ExprValue::Bool(false)),
     ]);
     let eval = ExprEvaluator::new(&context);
-    
+
     assert!(eval.evaluate_as_bool("needs_review == true").unwrap());
     assert!(eval.evaluate_as_bool("is_complete == false").unwrap());
     assert!(!eval.evaluate_as_bool("needs_review == false").unwrap());
@@ -53,19 +52,16 @@ fn test_logical_and() {
         ("c", ExprValue::Bool(false)),
     ]);
     let eval = ExprEvaluator::new(&context);
-    
+
     assert!(eval.evaluate_as_bool("a == true && b == true").unwrap());
     assert!(!eval.evaluate_as_bool("a == true && c == true").unwrap());
 }
 
 #[test]
 fn test_logical_or() {
-    let context = ctx(&[
-        ("a", ExprValue::Bool(true)),
-        ("b", ExprValue::Bool(false)),
-    ]);
+    let context = ctx(&[("a", ExprValue::Bool(true)), ("b", ExprValue::Bool(false))]);
     let eval = ExprEvaluator::new(&context);
-    
+
     assert!(eval.evaluate_as_bool("a == true || b == true").unwrap());
     assert!(eval.evaluate_as_bool("b == true || a == true").unwrap());
     assert!(!eval.evaluate_as_bool("b == true || b == true").unwrap());
@@ -73,11 +69,9 @@ fn test_logical_or() {
 
 #[test]
 fn test_integer_comparison() {
-    let context = ctx(&[
-        ("count", ExprValue::Int(5)),
-    ]);
+    let context = ctx(&[("count", ExprValue::Int(5))]);
     let eval = ExprEvaluator::new(&context);
-    
+
     assert!(eval.evaluate_as_bool("count >= 5").unwrap());
     assert!(eval.evaluate_as_bool("count <= 10").unwrap());
     assert!(eval.evaluate_as_bool("count == 5").unwrap());
@@ -102,11 +96,12 @@ fn test_unknown_reference_error() {
 #[test]
 fn test_nested_reference_with_json() {
     let mut map = serde_json::Map::new();
-    map.insert("confidence".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(0.85).unwrap()));
-    let context = ctx(&[
-        ("step1", ExprValue::Json(serde_json::Value::Object(map))),
-    ]);
+    map.insert(
+        "confidence".to_string(),
+        serde_json::Value::Number(serde_json::Number::from_f64(0.85).unwrap()),
+    );
+    let context = ctx(&[("step1", ExprValue::Json(serde_json::Value::Object(map)))]);
     let eval = ExprEvaluator::new(&context);
-    
+
     assert!(eval.evaluate_as_bool("step1.confidence > 0.8").unwrap());
 }

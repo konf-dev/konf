@@ -1,14 +1,14 @@
 //! Tests for ProcessTable — concurrent data structure for tracking workflow runs.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
+use std::sync::Mutex;
 
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use konf_runtime::process::{ProcessTable, WorkflowRun, RunStatus, ActiveNode, NodeStatus};
+use konf_runtime::process::{ActiveNode, NodeStatus, ProcessTable, RunStatus, WorkflowRun};
 use konf_runtime::scope::{Actor, ActorRole};
 
 fn make_run(namespace: &str, status: RunStatus, parent_id: Option<Uuid>) -> WorkflowRun {
@@ -17,7 +17,10 @@ fn make_run(namespace: &str, status: RunStatus, parent_id: Option<Uuid>) -> Work
         parent_id,
         workflow_id: "test_workflow".into(),
         namespace: namespace.into(),
-        actor: Actor { id: "test".into(), role: ActorRole::User },
+        actor: Actor {
+            id: "test".into(),
+            role: ActorRole::User,
+        },
         capabilities: vec!["*".into()],
         metadata: HashMap::new(),
         started_at: Utc::now(),
@@ -56,12 +59,21 @@ fn test_update() {
     table.insert(run);
 
     let updated = table.update(&run_id, |r| {
-        *r.status.lock().unwrap() = RunStatus::Completed { duration_ms: 100, output: serde_json::Value::Null };
+        *r.status.lock().unwrap() = RunStatus::Completed {
+            duration_ms: 100,
+            output: serde_json::Value::Null,
+        };
     });
     assert!(updated);
 
     let status = table.get(&run_id, |r| r.status.lock().unwrap().clone());
-    assert!(matches!(status, Some(RunStatus::Completed { duration_ms: 100, output: serde_json::Value::Null })));
+    assert!(matches!(
+        status,
+        Some(RunStatus::Completed {
+            duration_ms: 100,
+            output: serde_json::Value::Null
+        })
+    ));
 }
 
 #[test]
@@ -135,7 +147,14 @@ fn test_active_count() {
     let table = ProcessTable::new();
     table.insert(make_run("konf:test", RunStatus::Running, None));
     table.insert(make_run("konf:test", RunStatus::Running, None));
-    table.insert(make_run("konf:test", RunStatus::Completed { duration_ms: 100, output: serde_json::Value::Null }, None));
+    table.insert(make_run(
+        "konf:test",
+        RunStatus::Completed {
+            duration_ms: 100,
+            output: serde_json::Value::Null,
+        },
+        None,
+    ));
 
     assert_eq!(table.active_count(), 2);
 }
@@ -160,21 +179,41 @@ fn test_gc_removes_old_completed() {
     table.insert(make_run("konf:test", RunStatus::Running, None));
 
     // Completed with old timestamp — should be gc'd
-    let old_run = make_run("konf:test", RunStatus::Completed { duration_ms: 100, output: serde_json::Value::Null }, None);
+    let old_run = make_run(
+        "konf:test",
+        RunStatus::Completed {
+            duration_ms: 100,
+            output: serde_json::Value::Null,
+        },
+        None,
+    );
     let old_id = old_run.id;
     *old_run.completed_at.lock().unwrap() = Some(Utc::now() - chrono::Duration::hours(2));
     table.insert(old_run);
 
     // Completed with recent timestamp — should survive
-    let recent_run = make_run("konf:test", RunStatus::Completed { duration_ms: 200, output: serde_json::Value::Null }, None);
+    let recent_run = make_run(
+        "konf:test",
+        RunStatus::Completed {
+            duration_ms: 200,
+            output: serde_json::Value::Null,
+        },
+        None,
+    );
     let recent_id = recent_run.id;
     *recent_run.completed_at.lock().unwrap() = Some(Utc::now());
     table.insert(recent_run);
 
     table.gc(std::time::Duration::from_secs(3600)); // 1 hour max age
 
-    assert!(table.get(&old_id, |_| ()).is_none(), "Old completed run should be gc'd");
-    assert!(table.get(&recent_id, |_| ()).is_some(), "Recent completed run should survive");
+    assert!(
+        table.get(&old_id, |_| ()).is_none(),
+        "Old completed run should be gc'd"
+    );
+    assert!(
+        table.get(&recent_id, |_| ()).is_some(),
+        "Recent completed run should survive"
+    );
     assert_eq!(table.active_count(), 1, "Running run should survive");
 }
 
@@ -182,9 +221,21 @@ fn test_gc_removes_old_completed() {
 fn test_run_status_is_terminal() {
     assert!(!RunStatus::Pending.is_terminal());
     assert!(!RunStatus::Running.is_terminal());
-    assert!(RunStatus::Completed { duration_ms: 0, output: serde_json::Value::Null }.is_terminal());
-    assert!(RunStatus::Failed { error: "err".into(), duration_ms: 0 }.is_terminal());
-    assert!(RunStatus::Cancelled { reason: "test".into(), duration_ms: 0 }.is_terminal());
+    assert!(RunStatus::Completed {
+        duration_ms: 0,
+        output: serde_json::Value::Null
+    }
+    .is_terminal());
+    assert!(RunStatus::Failed {
+        error: "err".into(),
+        duration_ms: 0
+    }
+    .is_terminal());
+    assert!(RunStatus::Cancelled {
+        reason: "test".into(),
+        duration_ms: 0
+    }
+    .is_terminal());
 }
 
 #[test]
@@ -200,7 +251,8 @@ fn test_to_summary() {
         started_at: Utc::now(),
         status: NodeStatus::Running,
     });
-    run.steps_executed.store(5, std::sync::atomic::Ordering::Relaxed);
+    run.steps_executed
+        .store(5, std::sync::atomic::Ordering::Relaxed);
 
     table.insert(run);
 

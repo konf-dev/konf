@@ -42,8 +42,14 @@ mod tests {
             let yaml = get_template(name).unwrap();
             let parsed: serde_yaml::Value = serde_yaml::from_str(yaml)
                 .unwrap_or_else(|e| panic!("Template '{name}' is invalid YAML: {e}"));
-            assert!(parsed.get("workflow").is_some(), "Template '{name}' missing 'workflow' key");
-            assert!(parsed.get("nodes").is_some(), "Template '{name}' missing 'nodes' key");
+            assert!(
+                parsed.get("workflow").is_some(),
+                "Template '{name}' missing 'workflow' key"
+            );
+            assert!(
+                parsed.get("nodes").is_some(),
+                "Template '{name}' missing 'nodes' key"
+            );
         }
     }
 

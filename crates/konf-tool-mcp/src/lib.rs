@@ -13,8 +13,8 @@ use tracing::{info, warn};
 use konflux::error::ToolError;
 use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
 
-use rmcp::ServiceExt;
 use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
+use rmcp::ServiceExt;
 
 /// Configuration for an MCP server from tools.yaml.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -41,8 +41,12 @@ pub struct McpServerConfig {
     pub idle_timeout: u64,
 }
 
-fn default_transport() -> String { "stdio".into() }
-fn default_idle_timeout() -> u64 { 600 }
+fn default_transport() -> String {
+    "stdio".into()
+}
+fn default_idle_timeout() -> u64 {
+    600
+}
 
 /// Manages MCP server processes and their tool registrations.
 /// Holds client handles to keep child processes alive for the server's lifetime.
@@ -82,7 +86,11 @@ impl McpManager {
         engine: &konflux::Engine,
     ) -> anyhow::Result<usize> {
         if config.transport != "stdio" {
-            anyhow::bail!("MCP server '{}': only 'stdio' transport is supported, got '{}'", config.name, config.transport);
+            anyhow::bail!(
+                "MCP server '{}': only 'stdio' transport is supported, got '{}'",
+                config.name,
+                config.transport
+            );
         }
 
         // idle_timeout is tracked for future process GC (not enforced in v1)
@@ -119,18 +127,24 @@ impl McpManager {
 
             // Map MCP annotations to Konf ToolAnnotations
             // readOnlyHint -> read_only, destructiveHint -> destructive, etc.
-            let annotations = tool.annotations.as_ref().map(|ann| {
-                ToolAnnotations {
+            let annotations = tool
+                .annotations
+                .as_ref()
+                .map(|ann| ToolAnnotations {
                     read_only: ann.read_only_hint.unwrap_or(false),
                     destructive: ann.destructive_hint.unwrap_or(false),
                     idempotent: ann.idempotent_hint.unwrap_or(false),
                     open_world: ann.open_world_hint.unwrap_or(true),
-                }
-            }).unwrap_or_default();
+                })
+                .unwrap_or_default();
 
             let wrapper = McpToolWrapper {
                 name: full_name.clone(),
-                description: tool.description.as_ref().map(|d| d.to_string()).unwrap_or_default(),
+                description: tool
+                    .description
+                    .as_ref()
+                    .map(|d| d.to_string())
+                    .unwrap_or_default(),
                 input_schema: Value::Object(tool.input_schema.as_ref().clone()),
                 annotations,
                 server_name: config.name.clone(),
@@ -143,7 +157,10 @@ impl McpManager {
         }
 
         // Store client handle so the child process stays alive until McpManager is dropped
-        self.clients.lock().unwrap_or_else(|p| p.into_inner()).push(client);
+        self.clients
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push(client);
 
         Ok(registered)
     }
@@ -224,17 +241,19 @@ impl Tool for McpToolWrapper {
             }
         }
 
-        let result = self.client
-            .call_tool(params)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
-                message: format!("MCP tool '{}' failed: {e}", self.name),
-                retryable: true,
-            })?;
+        let result =
+            self.client
+                .call_tool(params)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: format!("MCP tool '{}' failed: {e}", self.name),
+                    retryable: true,
+                })?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
-        let content: Vec<Value> = result.content
+        let content: Vec<Value> = result
+            .content
             .iter()
             .map(|c| serde_json::to_value(c).unwrap_or(json!({"raw": format!("{c:?}")})))
             .collect();
@@ -280,7 +299,8 @@ mod tests {
             "args": ["-y", "@anthropic/mcp-server-brave"],
             "env": { "BRAVE_API_KEY": "${BRAVE_API_KEY}" },
             "capabilities": ["search:*"]
-        })).unwrap();
+        }))
+        .unwrap();
 
         assert_eq!(config.name, "brave");
         assert_eq!(config.transport, "stdio");

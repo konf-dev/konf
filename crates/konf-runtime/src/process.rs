@@ -38,7 +38,10 @@ pub enum RunStatus {
 
 impl RunStatus {
     pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed { .. } | Self::Failed { .. } | Self::Cancelled { .. })
+        matches!(
+            self,
+            Self::Completed { .. } | Self::Failed { .. } | Self::Cancelled { .. }
+        )
     }
 }
 
@@ -171,7 +174,12 @@ impl ProcessTable {
         let guard = self.runs.pin();
         guard
             .iter()
-            .filter(|(_, run)| matches!(*run.status.lock().unwrap_or_else(|p| p.into_inner()), RunStatus::Running))
+            .filter(|(_, run)| {
+                matches!(
+                    *run.status.lock().unwrap_or_else(|p| p.into_inner()),
+                    RunStatus::Running
+                )
+            })
             .count()
     }
 
@@ -181,24 +189,25 @@ impl ProcessTable {
         guard
             .iter()
             .filter(|(_, run)| {
-                matches!(*run.status.lock().unwrap_or_else(|p| p.into_inner()), RunStatus::Running)
-                    && run.namespace.starts_with(namespace_prefix)
+                matches!(
+                    *run.status.lock().unwrap_or_else(|p| p.into_inner()),
+                    RunStatus::Running
+                ) && run.namespace.starts_with(namespace_prefix)
             })
             .count()
     }
 
     /// Remove completed runs older than max_age.
     pub fn gc(&self, max_age: std::time::Duration) {
-        let cutoff = Utc::now() - chrono::Duration::from_std(max_age)
-            .expect("gc max_age must be a valid duration");
+        let cutoff = Utc::now()
+            - chrono::Duration::from_std(max_age).expect("gc max_age must be a valid duration");
         let guard = self.runs.pin();
         let to_remove: Vec<RunId> = guard
             .iter()
             .filter(|(_, run)| {
                 let status = run.status.lock().unwrap_or_else(|p| p.into_inner());
                 let completed = run.completed_at.lock().unwrap_or_else(|p| p.into_inner());
-                status.is_terminal()
-                    && completed.map(|t| t < cutoff).unwrap_or(false)
+                status.is_terminal() && completed.map(|t| t < cutoff).unwrap_or(false)
             })
             .map(|(id, _)| *id)
             .collect();

@@ -4,25 +4,25 @@
 //! Konflux dispatches tools, enforces capability lattices,
 //! and streams results. It has no opinions about what tools do.
 
-pub mod error;
-pub mod workflow;
-pub mod expr;
-pub mod parser;
-pub mod tool;
-pub mod resource;
-pub mod prompt;
-pub mod executor;
-pub mod stream;
-pub mod engine;
-pub mod capability;
-pub mod template;
 pub mod builtin;
+pub mod capability;
+pub mod engine;
+pub mod error;
+pub mod executor;
+pub mod expr;
 pub mod hooks;
+pub mod parser;
+pub mod prompt;
+pub mod resource;
+pub mod stream;
+pub mod template;
+pub mod tool;
+pub mod workflow;
 
 pub use engine::{Engine, EngineConfig, ToolChangedReceiver};
-pub use workflow::Workflow;
-pub use tool::{Tool, ToolInfo, ToolAnnotations, ToolContext, ToolRegistry};
-pub use resource::{Resource, ResourceInfo, ResourceRegistry, ResourceError, ResourceChanged};
-pub use prompt::{Prompt, PromptInfo, PromptArgument, PromptRegistry, PromptError, Message};
-pub use stream::{StreamEvent, ProgressType, StreamReceiver};
 pub use error::KonfluxError;
+pub use prompt::{Message, Prompt, PromptArgument, PromptError, PromptInfo, PromptRegistry};
+pub use resource::{Resource, ResourceChanged, ResourceError, ResourceInfo, ResourceRegistry};
+pub use stream::{ProgressType, StreamEvent, StreamReceiver};
+pub use tool::{Tool, ToolAnnotations, ToolContext, ToolInfo, ToolRegistry};
+pub use workflow::Workflow;

@@ -1,9 +1,9 @@
 //! Engine — the public API for running workflows.
 
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use tracing::{info_span, Instrument};
 
@@ -13,7 +13,7 @@ use crate::executor::Executor;
 use crate::hooks::{ExecutionHooks, NoopHooks};
 use crate::prompt::{Prompt, PromptRegistry};
 use crate::resource::{Resource, ResourceRegistry};
-use crate::stream::{stream_channel, StreamReceiver, StreamEvent};
+use crate::stream::{stream_channel, StreamEvent, StreamReceiver};
 use crate::tool::{Tool, ToolRegistry};
 use crate::workflow::Workflow;
 
@@ -148,13 +148,19 @@ impl Engine {
     /// Register a tool. Thread-safe — can be called from any thread.
     /// If a tool with the same name already exists, it is replaced.
     pub fn register_tool(&self, tool: Arc<dyn Tool>) {
-        self.tools.write().unwrap_or_else(|p| p.into_inner()).register(tool);
+        self.tools
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .register(tool);
     }
 
     /// Remove a tool by name. Returns true if the tool was present.
     /// Used by config_reload to remove stale workflow tools before re-registering.
     pub fn remove_tool(&self, name: &str) -> bool {
-        self.tools.write().unwrap_or_else(|p| p.into_inner()).remove(name)
+        self.tools
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(name)
     }
 
     /// Snapshot the registry for executor use (cheap Arc clone of inner data).
@@ -166,24 +172,36 @@ impl Engine {
 
     /// Register a resource. Thread-safe.
     pub fn register_resource(&self, resource: Arc<dyn Resource>) {
-        self.resources.write().unwrap_or_else(|p| p.into_inner()).register(resource);
+        self.resources
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .register(resource);
     }
 
     /// Get a snapshot of the resource registry.
     pub fn resources(&self) -> ResourceRegistry {
-        self.resources.read().unwrap_or_else(|p| p.into_inner()).clone()
+        self.resources
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 
     // ---- Prompt registry ----
 
     /// Register a prompt. Thread-safe.
     pub fn register_prompt(&self, prompt: Arc<dyn Prompt>) {
-        self.prompts.write().unwrap_or_else(|p| p.into_inner()).register(prompt);
+        self.prompts
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .register(prompt);
     }
 
     /// Get a snapshot of the prompt registry.
     pub fn prompts(&self) -> PromptRegistry {
-        self.prompts.read().unwrap_or_else(|p| p.into_inner()).clone()
+        self.prompts
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
     }
 
     /// Run a workflow to completion, returning the final output.
@@ -221,28 +239,31 @@ impl Engine {
             let workflow = workflow.clone();
             let wf_id = workflow.id.to_string();
 
-            let exec_handle = tokio::spawn(async move {
-                executor.execute(&workflow, input, tx).await
-            });
+            let exec_handle =
+                tokio::spawn(async move { executor.execute(&workflow, input, tx).await });
 
             let mut final_output = Value::Null;
             let mut error = None;
 
             while let Some(event) = rx.recv().await {
                 match event {
-                    StreamEvent::Done { output } => { final_output = output; }
-                    StreamEvent::Error { message, .. } => { error = Some(message); }
+                    StreamEvent::Done { output } => {
+                        final_output = output;
+                    }
+                    StreamEvent::Error { message, .. } => {
+                        error = Some(message);
+                    }
                     _ => {}
                 }
             }
 
-            let exec_res = exec_handle.await.map_err(|e| KonfluxError::Execution(
-                crate::error::ExecutionError::JoinFailed {
+            let exec_res = exec_handle.await.map_err(|e| {
+                KonfluxError::Execution(crate::error::ExecutionError::JoinFailed {
                     workflow_id: wf_id.clone(),
                     node: "engine".into(),
                     message: e.to_string(),
-                }
-            ))?;
+                })
+            })?;
 
             exec_res?;
 
@@ -252,7 +273,7 @@ impl Engine {
                         workflow_id: wf_id,
                         node: "stream".into(),
                         message: msg,
-                    }
+                    },
                 ));
             }
 
@@ -264,14 +285,16 @@ impl Engine {
             match tokio::time::timeout(
                 Duration::from_millis(self.config.max_workflow_timeout_ms),
                 fut.instrument(span),
-            ).await {
+            )
+            .await
+            {
                 Ok(result) => result,
                 Err(_) => Err(KonfluxError::Execution(
                     crate::error::ExecutionError::Timeout {
                         workflow_id: workflow.id.to_string(),
                         node: "workflow".into(),
                         timeout_ms: self.config.max_workflow_timeout_ms,
-                    }
+                    },
                 )),
             }
         } else {
@@ -312,11 +335,13 @@ impl Engine {
             tokio::spawn(async move {
                 if let Err(e) = executor.execute(&workflow, input, tx.clone()).await {
                     // Error event must be delivered
-                    let _ = tx.send(StreamEvent::Error {
-                        code: "execution_error".into(),
-                        message: e.to_string(),
-                        retryable: false,
-                    }).await;
+                    let _ = tx
+                        .send(StreamEvent::Error {
+                            code: "execution_error".into(),
+                            message: e.to_string(),
+                            retryable: false,
+                        })
+                        .await;
                 }
             });
 
@@ -355,9 +380,9 @@ impl Default for Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prompt::{Message, Prompt, PromptArgument, PromptError, PromptInfo};
+    use crate::resource::{Resource, ResourceError, ResourceInfo};
     use async_trait::async_trait;
-    use crate::resource::{Resource, ResourceInfo, ResourceError};
-    use crate::prompt::{Prompt, PromptInfo, PromptArgument, PromptError, Message};
 
     struct TestResource;
     #[async_trait]

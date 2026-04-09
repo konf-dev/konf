@@ -126,17 +126,16 @@ mod tests {
             PromptInfo {
                 name: "greet".into(),
                 description: "Greet the user".into(),
-                arguments: vec![
-                    PromptArgument {
-                        name: "name".into(),
-                        description: "User's name".into(),
-                        required: true,
-                    },
-                ],
+                arguments: vec![PromptArgument {
+                    name: "name".into(),
+                    description: "User's name".into(),
+                    required: true,
+                }],
             }
         }
         async fn expand(&self, args: Value) -> Result<Vec<Message>, PromptError> {
-            let name = args.get("name")
+            let name = args
+                .get("name")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| PromptError::MissingArgument("name".into()))?;
             Ok(vec![
@@ -175,10 +174,16 @@ mod tests {
     #[tokio::test]
     async fn test_prompt_expand() {
         let prompt = MockPrompt;
-        let messages = prompt.expand(serde_json::json!({"name": "Alice"})).await.unwrap();
+        let messages = prompt
+            .expand(serde_json::json!({"name": "Alice"}))
+            .await
+            .unwrap();
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, "system");
-        assert_eq!(messages[1].content, Value::String("Hello, my name is Alice".into()));
+        assert_eq!(
+            messages[1].content,
+            Value::String("Hello, my name is Alice".into())
+        );
     }
 
     #[tokio::test]

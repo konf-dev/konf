@@ -1,13 +1,13 @@
 //! Additional tests for ExecutionScope — validate_start, capability_patterns, depth.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
+use std::sync::Mutex;
 
 use chrono::Utc;
 use tokio_util::sync::CancellationToken;
 
-use konf_runtime::process::{ProcessTable, WorkflowRun, RunStatus};
+use konf_runtime::process::{ProcessTable, RunStatus, WorkflowRun};
 use konf_runtime::scope::*;
 
 fn make_running_run(namespace: &str) -> WorkflowRun {
@@ -16,7 +16,10 @@ fn make_running_run(namespace: &str) -> WorkflowRun {
         parent_id: None,
         workflow_id: "test".into(),
         namespace: namespace.into(),
-        actor: Actor { id: "test".into(), role: ActorRole::User },
+        actor: Actor {
+            id: "test".into(),
+            role: ActorRole::User,
+        },
         capabilities: vec![],
         metadata: HashMap::new(),
         started_at: Utc::now(),
@@ -33,7 +36,10 @@ fn test_scope(namespace: &str) -> ExecutionScope {
         namespace: namespace.into(),
         capabilities: vec![],
         limits: ResourceLimits::default(),
-        actor: Actor { id: "user_1".into(), role: ActorRole::User },
+        actor: Actor {
+            id: "user_1".into(),
+            role: ActorRole::User,
+        },
         depth: 0,
     }
 }
@@ -44,7 +50,10 @@ fn test_validate_start_within_limit() {
     table.insert(make_running_run("konf:test:user_1"));
 
     let scope = ExecutionScope {
-        limits: ResourceLimits { max_active_runs_per_namespace: 5, ..Default::default() },
+        limits: ResourceLimits {
+            max_active_runs_per_namespace: 5,
+            ..Default::default()
+        },
         ..test_scope("konf:test:user_1")
     };
 
@@ -55,7 +64,10 @@ fn test_validate_start_within_limit() {
 fn test_validate_start_at_limit() {
     let table = ProcessTable::new();
     let scope = ExecutionScope {
-        limits: ResourceLimits { max_active_runs_per_namespace: 2, ..Default::default() },
+        limits: ResourceLimits {
+            max_active_runs_per_namespace: 2,
+            ..Default::default()
+        },
         ..test_scope("konf:test")
     };
 
@@ -75,7 +87,10 @@ fn test_validate_start_different_namespace_not_counted() {
     table.insert(make_running_run("konf:other:user_2"));
 
     let scope = ExecutionScope {
-        limits: ResourceLimits { max_active_runs_per_namespace: 1, ..Default::default() },
+        limits: ResourceLimits {
+            max_active_runs_per_namespace: 1,
+            ..Default::default()
+        },
         ..test_scope("konf:test")
     };
 
@@ -112,14 +127,19 @@ fn test_child_scope_inherits_limits() {
             max_workflow_timeout_ms: 60_000,
             ..Default::default()
         },
-        actor: Actor { id: "admin".into(), role: ActorRole::ProductAdmin },
+        actor: Actor {
+            id: "admin".into(),
+            role: ActorRole::ProductAdmin,
+        },
         ..test_scope("konf:test")
     };
 
-    let child = parent.child_scope(
-        vec![CapabilityGrant::new("memory:search")],
-        Some("konf:test:user_1".into()),
-    ).unwrap();
+    let child = parent
+        .child_scope(
+            vec![CapabilityGrant::new("memory:search")],
+            Some("konf:test:user_1".into()),
+        )
+        .unwrap();
 
     assert_eq!(child.limits.max_steps, 500);
     assert_eq!(child.limits.max_workflow_timeout_ms, 60_000);
@@ -158,7 +178,10 @@ fn test_resource_limits_validation_rejects_zero() {
 fn test_child_depth_limit_enforced() {
     let table = ProcessTable::new();
     let scope = ExecutionScope {
-        limits: ResourceLimits { max_child_depth: 3, ..Default::default() },
+        limits: ResourceLimits {
+            max_child_depth: 3,
+            ..Default::default()
+        },
         depth: 3, // at the limit
         ..test_scope("konf:test")
     };
@@ -172,7 +195,10 @@ fn test_child_depth_limit_enforced() {
 fn test_child_depth_within_limit() {
     let table = ProcessTable::new();
     let scope = ExecutionScope {
-        limits: ResourceLimits { max_child_depth: 5, ..Default::default() },
+        limits: ResourceLimits {
+            max_child_depth: 5,
+            ..Default::default()
+        },
         depth: 2, // within limit
         ..test_scope("konf:test")
     };
@@ -188,9 +214,13 @@ fn test_child_scope_increments_depth() {
         ..test_scope("konf:test")
     };
 
-    let child = parent.child_scope(vec![CapabilityGrant::new("echo")], None).unwrap();
+    let child = parent
+        .child_scope(vec![CapabilityGrant::new("echo")], None)
+        .unwrap();
     assert_eq!(child.depth, 4);
 
-    let grandchild = child.child_scope(vec![CapabilityGrant::new("echo")], None).unwrap();
+    let grandchild = child
+        .child_scope(vec![CapabilityGrant::new("echo")], None)
+        .unwrap();
     assert_eq!(grandchild.depth, 5);
 }

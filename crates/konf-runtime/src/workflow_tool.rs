@@ -16,8 +16,8 @@ use konflux::error::ToolError;
 use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
 use konflux::Workflow;
 
-use crate::Runtime;
 use crate::scope::ExecutionScope;
+use crate::Runtime;
 
 /// A workflow wrapped as a callable tool.
 ///
@@ -35,11 +35,7 @@ impl WorkflowTool {
     /// - `workflow`: the parsed workflow to execute
     /// - `runtime`: the runtime to execute through
     /// - `default_scope`: the scope to attenuate for child execution
-    pub fn new(
-        workflow: Workflow,
-        runtime: Arc<Runtime>,
-        default_scope: ExecutionScope,
-    ) -> Self {
+    pub fn new(workflow: Workflow, runtime: Arc<Runtime>, default_scope: ExecutionScope) -> Self {
         Self {
             workflow,
             runtime,
@@ -54,9 +50,13 @@ impl Tool for WorkflowTool {
         ToolInfo {
             name: format!("workflow:{}", self.workflow.id),
             description: self.workflow.description.clone().unwrap_or_default(),
-            input_schema: self.workflow.input_schema.clone().unwrap_or(serde_json::json!({
-                "type": "object"
-            })),
+            input_schema: self
+                .workflow
+                .input_schema
+                .clone()
+                .unwrap_or(serde_json::json!({
+                    "type": "object"
+                })),
             output_schema: self.workflow.output_schema.clone(),
             capabilities: vec![format!("workflow:{}", self.workflow.id)],
             supports_streaming: true,
@@ -71,16 +71,20 @@ impl Tool for WorkflowTool {
 
     async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
         // Create a child scope with attenuated capabilities
-        let child_scope = self.default_scope.child_scope(
-            self.default_scope.capabilities.clone(),
-            None, // same namespace
-        ).map_err(|e| ToolError::ExecutionFailed {
-            message: format!("Failed to create child scope: {e}"),
-            retryable: false,
-        })?;
+        let child_scope = self
+            .default_scope
+            .child_scope(
+                self.default_scope.capabilities.clone(),
+                None, // same namespace
+            )
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: format!("Failed to create child scope: {e}"),
+                retryable: false,
+            })?;
 
         // Extract session_id from context metadata
-        let session_id = ctx.metadata
+        let session_id = ctx
+            .metadata
             .get("session_id")
             .and_then(|v| v.as_str())
             .unwrap_or("workflow_tool")
@@ -106,7 +110,10 @@ mod tests {
             namespace: "konf:test".into(),
             capabilities: vec![CapabilityGrant::new("*")],
             limits: ResourceLimits::default(),
-            actor: Actor { id: "test".into(), role: ActorRole::System },
+            actor: Actor {
+                id: "test".into(),
+                role: ActorRole::System,
+            },
             depth: 0,
         }
     }
@@ -138,10 +145,7 @@ mod tests {
     #[test]
     fn test_child_scope_creation() {
         let scope = test_scope();
-        let child = scope.child_scope(
-            vec![CapabilityGrant::new("memory_search")],
-            None,
-        );
+        let child = scope.child_scope(vec![CapabilityGrant::new("memory_search")], None);
         assert!(child.is_ok());
         let child = child.unwrap();
         assert_eq!(child.depth, 1);

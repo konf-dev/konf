@@ -12,23 +12,23 @@
 //! sees tools that the workflow node has been granted access to. An optional
 //! `tools` whitelist in the `with:` block further restricts the visible set.
 
-pub mod validate;
 pub mod introspect;
+pub mod validate;
 
-pub use validate::ValidateWorkflowTool;
 pub use introspect::IntrospectTool;
+pub use validate::ValidateWorkflowTool;
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tracing::{info, debug};
+use tracing::{debug, info};
 
-use konflux::Engine;
 use konflux::capability::check_tool_access;
 use konflux::error::ToolError as KonfluxToolError;
-use konflux::stream::{StreamSender, StreamEvent, ProgressType};
+use konflux::stream::{ProgressType, StreamEvent, StreamSender};
 use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
+use konflux::Engine;
 
 // ============================================================
 // LLM Configuration
@@ -52,9 +52,15 @@ pub struct LlmConfig {
     pub max_iterations: usize,
 }
 
-fn default_temperature() -> f64 { 0.7 }
-fn default_max_tokens() -> u64 { 4096 }
-fn default_max_iterations() -> usize { 10 }
+fn default_temperature() -> f64 {
+    0.7
+}
+fn default_max_tokens() -> u64 {
+    4096
+}
+fn default_max_iterations() -> usize {
+    10
+}
 
 impl Default for LlmConfig {
     fn default() -> Self {
@@ -111,17 +117,20 @@ impl rig::tool::ToolDyn for KonfluxToolBridge {
         args: String,
     ) -> rig::wasm_compat::WasmBoxedFuture<'a, Result<String, rig::tool::ToolError>> {
         Box::pin(async move {
-            let input: Value = serde_json::from_str(&args)
-                .map_err(rig::tool::ToolError::JsonError)?;
+            let input: Value =
+                serde_json::from_str(&args).map_err(rig::tool::ToolError::JsonError)?;
 
-            let result = self.inner.invoke(input, &self.parent_ctx)
+            let result = self
+                .inner
+                .invoke(input, &self.parent_ctx)
                 .await
-                .map_err(|e| rig::tool::ToolError::ToolCallError(
-                    Box::new(std::io::Error::other(e.to_string()))
-                ))?;
+                .map_err(|e| {
+                    rig::tool::ToolError::ToolCallError(Box::new(std::io::Error::other(
+                        e.to_string(),
+                    )))
+                })?;
 
-            serde_json::to_string(&result)
-                .map_err(rig::tool::ToolError::JsonError)
+            serde_json::to_string(&result).map_err(rig::tool::ToolError::JsonError)
         })
     }
 }
@@ -246,7 +255,8 @@ impl Tool for AiCompleteTool {
         ToolInfo {
             name: "ai:complete".into(),
             description: "Generate an LLM completion with optional tool calling (ReAct loop). \
-                Tools are filtered by the caller's capabilities and optional `tools` whitelist.".into(),
+                Tools are filtered by the caller's capabilities and optional `tools` whitelist."
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -278,7 +288,10 @@ impl Tool for AiCompleteTool {
             capabilities: vec!["ai:complete".into()],
             supports_streaming: true,
             output_schema: None,
-            annotations: ToolAnnotations { open_world: true, ..Default::default() },
+            annotations: ToolAnnotations {
+                open_world: true,
+                ..Default::default()
+            },
         }
     }
 
@@ -294,16 +307,16 @@ impl Tool for AiCompleteTool {
         ctx: &ToolContext,
         sender: StreamSender,
     ) -> Result<Value, KonfluxToolError> {
-        let prompt = input.get("prompt")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let system = input.get("system")
-            .and_then(|v| v.as_str());
+        let prompt = input.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+        let system = input.get("system").and_then(|v| v.as_str());
 
         // Parse optional tool whitelist from input
-        let tool_whitelist: Option<Vec<String>> = input.get("tools")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+        let tool_whitelist: Option<Vec<String>> =
+            input.get("tools").and_then(|v| v.as_array()).map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            });
 
         // Merge per-node config overrides
         let config = self.merge_config(&input);
@@ -369,7 +382,7 @@ async fn react_loop(
     sender: &StreamSender,
 ) -> Result<ReactResult, KonfluxToolError> {
     use rig::completion::Message;
-    use rig::message::{AssistantContent, UserContent, ToolResultContent};
+    use rig::message::{AssistantContent, ToolResultContent, UserContent};
     use rig::one_or_many::OneOrMany;
 
     let map_err = |e: rig::completion::CompletionError| KonfluxToolError::ExecutionFailed {
@@ -387,7 +400,8 @@ async fn react_loop(
     };
 
     // Build a tool name → bridge index map for dispatch
-    let tool_map: std::collections::HashMap<String, usize> = inner_tools.iter()
+    let tool_map: std::collections::HashMap<String, usize> = inner_tools
+        .iter()
         .enumerate()
         .map(|(i, t)| (t.name(), i))
         .collect();
@@ -395,7 +409,9 @@ async fn react_loop(
     // Chat history starts with the user prompt
     let mut messages: Vec<Message> = Vec::new();
     if let Some(sys) = system {
-        messages.push(Message::System { content: sys.to_string() });
+        messages.push(Message::System {
+            content: sys.to_string(),
+        });
     }
     messages.push(Message::User {
         content: OneOrMany::one(UserContent::text(prompt)),
@@ -412,7 +428,9 @@ async fn react_loop(
         });
 
         // Call LLM
-        let response = call_completion(config, &messages, &tool_defs).await.map_err(map_err)?;
+        let response = call_completion(config, &messages, &tool_defs)
+            .await
+            .map_err(map_err)?;
 
         // Partition response into text and tool calls
         let mut text_parts: Vec<String> = Vec::new();
@@ -472,8 +490,8 @@ async fn react_loop(
             // Dispatch to the bridged tool
             let result = match tool_map.get(tool_name.as_str()) {
                 Some(&idx) => {
-                    let args_str = serde_json::to_string(tool_args)
-                        .unwrap_or_else(|_| "{}".to_string());
+                    let args_str =
+                        serde_json::to_string(tool_args).unwrap_or_else(|_| "{}".to_string());
                     match inner_tools[idx].call(args_str).await {
                         Ok(output) => output,
                         Err(e) => format!("Tool error: {e}"),
@@ -522,9 +540,11 @@ async fn react_loop(
 
         // Add tool results to chat history
         messages.push(Message::User {
-            content: OneOrMany::many(tool_results).map_err(|e| KonfluxToolError::ExecutionFailed {
-                message: format!("Failed to build tool results message: {e}"),
-                retryable: false,
+            content: OneOrMany::many(tool_results).map_err(|e| {
+                KonfluxToolError::ExecutionFailed {
+                    message: format!("Failed to build tool results message: {e}"),
+                    retryable: false,
+                }
             })?,
         });
     }
@@ -554,9 +574,10 @@ async fn call_completion(
     config: &LlmConfig,
     messages: &[rig::completion::Message],
     tool_defs: &[rig::completion::ToolDefinition],
-) -> Result<rig::completion::CompletionResponse<serde_json::Value>, rig::completion::CompletionError> {
-    use rig::completion::CompletionModel;
+) -> Result<rig::completion::CompletionResponse<serde_json::Value>, rig::completion::CompletionError>
+{
     use rig::client::{CompletionClient, ProviderClient};
+    use rig::completion::CompletionModel;
 
     // Build a CompletionRequest with chat history and tools
     macro_rules! call_provider {
@@ -564,14 +585,19 @@ async fn call_completion(
             let model = $client.completion_model(&config.model);
             // Build request: the last message is the prompt, previous are history.
             // rig's completion_request takes a single Message as the prompt.
-            let prompt_msg = messages.last()
+            let prompt_msg = messages
+                .last()
                 .cloned()
                 .unwrap_or(rig::completion::Message::User {
                     content: rig::one_or_many::OneOrMany::one(
-                        rig::completion::message::UserContent::text("")
+                        rig::completion::message::UserContent::text(""),
                     ),
                 });
-            let history = if messages.len() > 1 { &messages[..messages.len() - 1] } else { &[] };
+            let history = if messages.len() > 1 {
+                &messages[..messages.len() - 1]
+            } else {
+                &[]
+            };
 
             let mut builder = model.completion_request(prompt_msg);
             for msg in history {
@@ -590,8 +616,7 @@ async fn call_completion(
             Ok(rig::completion::CompletionResponse {
                 choice: response.choice,
                 usage: response.usage,
-                raw_response: serde_json::to_value(&response.raw_response)
-                    .unwrap_or(Value::Null),
+                raw_response: serde_json::to_value(&response.raw_response).unwrap_or(Value::Null),
                 message_id: response.message_id,
             })
         }};
@@ -610,9 +635,9 @@ async fn call_completion(
             let client = rig::providers::gemini::Client::from_env();
             call_provider!(client)
         }
-        other => Err(rig::completion::CompletionError::ProviderError(
-            format!("Unknown LLM provider: '{other}'. Supported: openai, anthropic, gemini")
-        )),
+        other => Err(rig::completion::CompletionError::ProviderError(format!(
+            "Unknown LLM provider: '{other}'. Supported: openai, anthropic, gemini"
+        ))),
     }
 }
 
@@ -623,13 +648,19 @@ async fn call_completion(
 /// LLM always sees the current tool set, filtered by the caller's capabilities.
 pub async fn register(engine: &konflux::Engine, config: &serde_json::Value) -> anyhow::Result<()> {
     let llm_config: LlmConfig = serde_json::from_value(config.clone())?;
-    engine.register_tool(Arc::new(AiCompleteTool::new(llm_config, Arc::new(engine.clone()))));
+    engine.register_tool(Arc::new(AiCompleteTool::new(
+        llm_config,
+        Arc::new(engine.clone()),
+    )));
     Ok(())
 }
 
 /// Register the ai_complete tool with the given engine reference.
 pub fn register_llm_tools(engine: &konflux::Engine, config: &LlmConfig) {
-    engine.register_tool(Arc::new(AiCompleteTool::new(config.clone(), Arc::new(engine.clone()))));
+    engine.register_tool(Arc::new(AiCompleteTool::new(
+        config.clone(),
+        Arc::new(engine.clone()),
+    )));
 }
 
 #[cfg(test)]
@@ -669,7 +700,11 @@ mod tests {
                 annotations: ToolAnnotations::default(),
             }
         }
-        async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, KonfluxToolError> {
+        async fn invoke(
+            &self,
+            input: Value,
+            _ctx: &ToolContext,
+        ) -> Result<Value, KonfluxToolError> {
             Ok(input)
         }
     }
@@ -697,7 +732,8 @@ mod tests {
             "provider": "anthropic",
             "model": "claude-sonnet-4-20250514",
             "temperature": 0.3
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(config.provider, "anthropic");
         assert_eq!(config.model, "claude-sonnet-4-20250514");
         assert_eq!(config.temperature, 0.3);

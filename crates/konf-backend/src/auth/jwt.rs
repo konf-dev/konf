@@ -74,15 +74,16 @@ impl JwtVerifier {
 
     /// Verify a JWT token and return the claims.
     pub async fn verify(&self, token: &str) -> Result<Claims, AuthError> {
-        let header = decode_header(token)
-            .map_err(|e| AuthError::VerificationFailed(e.to_string()))?;
+        let header =
+            decode_header(token).map_err(|e| AuthError::VerificationFailed(e.to_string()))?;
 
-        let kid = header.kid
-            .ok_or(AuthError::MissingKid)?;
+        let kid = header.kid.ok_or(AuthError::MissingKid)?;
 
         let jwks = self.get_or_refresh_jwks().await?;
 
-        let jwk = jwks.keys.iter()
+        let jwk = jwks
+            .keys
+            .iter()
             .find(|k| k.common.key_id.as_deref() == Some(&kid))
             .ok_or_else(|| AuthError::KeyNotFound(kid.clone()))?;
 
@@ -92,7 +93,11 @@ impl JwtVerifier {
         let algorithm = match header.alg {
             Algorithm::RS256 => Algorithm::RS256,
             Algorithm::ES256 => Algorithm::ES256,
-            alg => return Err(AuthError::VerificationFailed(format!("unsupported algorithm: {alg:?}"))),
+            alg => {
+                return Err(AuthError::VerificationFailed(format!(
+                    "unsupported algorithm: {alg:?}"
+                )))
+            }
         };
 
         let mut validation = Validation::new(algorithm);
@@ -100,14 +105,13 @@ impl JwtVerifier {
             validation.set_audience(&[&self.audience]);
         }
 
-        let token_data = decode::<Claims>(token, &decoding_key, &validation)
-            .map_err(|e| {
-                if e.kind() == &jsonwebtoken::errors::ErrorKind::ExpiredSignature {
-                    AuthError::Expired
-                } else {
-                    AuthError::VerificationFailed(e.to_string())
-                }
-            })?;
+        let token_data = decode::<Claims>(token, &decoding_key, &validation).map_err(|e| {
+            if e.kind() == &jsonwebtoken::errors::ErrorKind::ExpiredSignature {
+                AuthError::Expired
+            } else {
+                AuthError::VerificationFailed(e.to_string())
+            }
+        })?;
 
         debug!(sub = %token_data.claims.sub, "JWT verified");
         Ok(token_data.claims)
@@ -126,7 +130,8 @@ impl JwtVerifier {
 
         // Fetch fresh JWKS
         debug!(url = %self.jwks_url, "fetching JWKS");
-        let response = self.http_client
+        let response = self
+            .http_client
             .get(&self.jwks_url)
             .timeout(Duration::from_secs(10))
             .send()
@@ -182,6 +187,9 @@ mod tests {
             jwt_audience: "authenticated".into(),
         };
         let verifier = JwtVerifier::new(&config);
-        assert_eq!(verifier.jwks_url, "http://localhost:9999/auth/v1/.well-known/jwks.json");
+        assert_eq!(
+            verifier.jwks_url,
+            "http://localhost:9999/auth/v1/.well-known/jwks.json"
+        );
     }
 }
