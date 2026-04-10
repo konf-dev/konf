@@ -1,32 +1,23 @@
-# genesis.kell (Generation 0)
+# Genesis Cell (Reference Implementation)
 
-**Genesis — The Cellular Origin of the Konf OS Ecosystem**
+**This is a read-only snapshot of the Genesis Cell.**
 
-This repository contains the configuration, workflows, and operational state of the **Genesis Kell** (Generation 0). Genesis is the Founder's Second-in-Command and Sandbox Orchestrator, designed to provide a single, powerful point of contact for executing and evolving the Konf ecosystem.
+The "living" version of Genesis—The Operator—has been moved to its own standalone repository to separate operational history from the kernel logic.
 
-Genesis is not a codebase; it is a **Kell** — a named computational boundary from the Kell calculus. It is executed by the [Konf Kernel](https://github.com/konf-dev/konf).
+**Living Repository:** [https://github.com/konf-dev/konf-genesis.kell](https://github.com/konf-dev/konf-genesis.kell)
 
-## Role
+## Why a Standalone Repo?
 
-1.  **Orchestrate:** Manage the bootstrapping and growth of the Konf ecosystem.
-2.  **Execute:** Provide a secure sandbox for command execution and code intelligence (via OpenCode).
-3.  **Bridge:** Act as a single point of contact with MCP access for remote control.
-4.  **Evolve:** Assist in spawning specialized child kells with explicit personas.
+Genesis acts as the "Operator" for a production cell. It generates logs, modifies its own workflows, and commits its "thoughts" daily. Keeping this operational history in a separate repository ensures:
 
-## Repository Structure
+1.  **Kernel Purity:** The core Rust kernel repository stays clean of agent-specific operational noise.
+2.  **Security Boundaries:** Genesis has push access to its own configuration Cell, but not to the core platform code.
+3.  **Cell Architecture:** The standalone repo demonstrates how to organize multiple minimal, composable agents (Kells) within a single deployment unit.
 
--   `/config`: The "DNA" of Genesis — tool definitions, capability grants, and resource limits.
--   `/workflows`: The operational policies — logic for spawning kells and reporting status.
--   `/prompts`: The persona and reasoning instructions for the Genesis Second-in-Command.
--   `/docs`: Philosophical mandates, architectural specs, and operational logs.
+## Architecture
 
-## Philosophy
+This snapshot reflects the "Cell" structure:
+- `kells/operator`: The primary root agent.
+- `docker-compose.yml`: The Podman manifest for production deployment.
 
-Genesis inherits the core doctrine of the Konf project:
-- **Curiosity, Freedom, Quality:** The only three operating constraints.
-- **Rust = Mechanisms, YAML = Policies:** Separation of kernel and userspace.
-- **Specs Before Code:** Every evolutionary step is documented before implementation.
-
----
-
-*Executed by Konf OS. Built by AI Agents. Driven by Curiosity.*
+For the most up-to-date DNA and behavior, refer to the [konf-genesis.kell](https://github.com/konf-dev/konf-genesis.kell) repository.

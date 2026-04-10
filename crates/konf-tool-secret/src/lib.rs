@@ -1,7 +1,7 @@
 //! Standard library tools for managing secrets via environment variables.
 
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
 use konflux::Engine;
 
 /// Configuration for the secret tool.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SecretConfig {
     /// List of environment variable names that are allowed to be read.
     pub allowed_keys: Vec<String>,

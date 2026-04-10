@@ -10,7 +10,7 @@ use figment::{
     providers::{Env, Format, Toml},
     Figment,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Top-level platform configuration.
@@ -141,7 +141,7 @@ impl Default for ServerConfig {
 }
 
 /// Product configuration — tools, workflows, prompts, guards. Hot-reloadable.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ProductConfig {
     pub tools: ToolsConfig,
@@ -149,6 +149,29 @@ pub struct ProductConfig {
     pub prompts: Vec<String>,   // paths to prompt template files
     pub tool_guards: std::collections::HashMap<String, ToolGuardConfig>,
     pub roles: std::collections::HashMap<String, RoleConfig>,
+}
+
+/// Product identity and entry points from project.yaml.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProjectConfig {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default = "default_version")]
+    pub version: String,
+    #[serde(default)]
+    pub triggers: std::collections::HashMap<String, TriggerConfig>,
+}
+
+fn default_version() -> String {
+    "0.1.0".into()
+}
+
+/// A trigger maps an entry point to a workflow and capabilities.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TriggerConfig {
+    pub workflow: String,
+    pub capabilities: Vec<String>,
 }
 
 /// Guard configuration for a single tool. Evaluated at registry construction time.
@@ -171,7 +194,7 @@ pub struct ProductConfig {
 ///   dangerous_tool:
 ///     alias: workflow_safe_dangerous_tool
 /// ```
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ToolGuardConfig {
     /// Ordered deny/allow rules. First match wins.
@@ -198,7 +221,7 @@ pub struct ToolGuardConfig {
 ///     capabilities: ["echo", "template"]
 ///     namespace_suffix: "guest"
 /// ```
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RoleConfig {
     /// Capability patterns granted to this role.
     pub capabilities: Vec<String>,
@@ -211,22 +234,29 @@ pub struct RoleConfig {
 }
 
 /// Tools configuration from tools.yaml.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ToolsConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub llm: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub http: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub embed: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mcp_servers: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub shell: Option<ShellConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub secret: Option<SecretConfig>,
 }
 
 pub use konf_tool_secret::SecretConfig;
 
 /// Shell sandbox configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ShellConfig {
     /// Docker container name for shell_exec.
     pub container: String,
@@ -240,7 +270,7 @@ fn default_shell_timeout_ms() -> u64 {
 }
 
 /// Memory backend configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub backend: String,
     #[serde(default)]

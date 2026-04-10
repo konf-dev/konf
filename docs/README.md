@@ -21,6 +21,7 @@
 ### Architecture (Infrastructure Contributors)
 - [Overview](architecture/overview.md) — The OS analogy, crate map, design philosophy
 - [Design Principles](architecture/design-principles.md) — 10 core principles
+- [Cells and Kells](architecture/cells-and-kells.md) — Reference Kells vs Living Cells (The Matrix metaphor)
 - [Engine](architecture/engine.md) — Workflow execution, registries, capability validation
 - [Runtime](architecture/runtime.md) — Process management, scoping, streaming
 - [Backend](architecture/backend.md) — HTTP server, REST API, auth
