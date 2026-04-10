@@ -1,23 +1,23 @@
-# konf-genesis.kell (Generation 0)
+# genesis.kell (Generation 0)
 
-**The Genesis Kell — The Cellular Origin of the Konf OS Ecosystem**
+**Genesis — The Cellular Origin of the Konf OS Ecosystem**
 
-This repository contains the configuration, workflows, and operational state of the **Genesis Kell** (Generation 0). Genesis is the CEO and operational membrane of the Konf project, designed to be self-orchestrating, self-modifying, and fully transparent.
+This repository contains the configuration, workflows, and operational state of the **Genesis Kell** (Generation 0). Genesis is the Founder's Second-in-Command and Sandbox Orchestrator, designed to provide a single, powerful point of contact for executing and evolving the Konf ecosystem.
 
 Genesis is not a codebase; it is a **Kell** — a named computational boundary from the Kell calculus. It is executed by the [Konf Kernel](https://github.com/konf-dev/konf).
 
-## Mission
+## Role
 
 1.  **Orchestrate:** Manage the bootstrapping and growth of the Konf ecosystem.
-2.  **Evolve:** Use agentic workflows to modify its own configuration and spawn specialized child kells.
-3.  **Prove:** Demonstrate the "Configs as the Product" paradigm by running a company entirely through YAML policies.
-4.  **Transparently Scale:** Build in public while maintaining rigorous security for "metabolic" data (API keys, revenue).
+2.  **Execute:** Provide a secure sandbox for command execution and code intelligence (via OpenCode).
+3.  **Bridge:** Act as a single point of contact with MCP access for remote control.
+4.  **Evolve:** Assist in spawning specialized child kells with explicit personas.
 
 ## Repository Structure
 
 -   `/config`: The "DNA" of Genesis — tool definitions, capability grants, and resource limits.
--   `/workflows`: The operational policies — logic for spawning kells, reporting status, and healing.
--   `/prompts`: The persona and reasoning instructions for the Genesis CEO.
+-   `/workflows`: The operational policies — logic for spawning kells and reporting status.
+-   `/prompts`: The persona and reasoning instructions for the Genesis Second-in-Command.
 -   `/docs`: Philosophical mandates, architectural specs, and operational logs.
 
 ## Philosophy

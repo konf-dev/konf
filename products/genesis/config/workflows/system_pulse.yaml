@@ -1,10 +1,10 @@
-# Company Pulse Workflow
+# System Pulse Workflow
 #
-# Generates a periodic report of the company's operational state
+# Generates a periodic report of the system's operational state
 # and commits it to the repository.
 
-workflow: company_pulse
-description: "CEO status report: metrics, health, and revenue."
+workflow: system_pulse
+description: "System status report: metrics, health, and available tools."
 register_as_tool: true
 capabilities: ["system:introspect", "log", "shell:exec", "ai:complete"]
 
@@ -21,11 +21,11 @@ nodes:
       prompt: |
         Gathered System Data: {{gather_metrics}}
         
-        Generate a concise CEO Status Report. 
+        Generate a concise System Status Report. 
         Format as Markdown with the following sections:
         ## 1. Operational Health
         ## 2. Infrastructure Metrics
-        ## 3. CEO Observation
+        ## 3. Observations & Tools
       model: "${KONF_MODEL:-qwen3:8b}"
     then: "write_report"
 
@@ -38,6 +38,6 @@ nodes:
         mkdir -p docs/reports
         echo "{{analyze_health}}" > "$REPORT_FILE"
         git add docs/reports/
-        git commit -m "pulse: CEO status report for ${TIMESTAMP}"
+        git commit -m "pulse: system status report for ${TIMESTAMP}"
         git push origin master
     return: true
