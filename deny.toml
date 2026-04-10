@@ -1,5 +1,9 @@
 [advisories]
 version = 2
+ignore = [
+    "RUSTSEC-2024-0384", # instant: unmaintained
+    "RUSTSEC-2024-0436", # paste: unmaintained
+]
 
 [licenses]
 version = 2
@@ -17,6 +21,9 @@ allow = [
     "BSL-1.0",
     "BUSL-1.1",
     "MPL-2.0",
+    "NCSA",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
 ]
 
 [[licenses.clarify]]

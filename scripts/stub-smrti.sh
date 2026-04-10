@@ -16,6 +16,7 @@ cat <<INNEREOF > "$STUB_DIR/Cargo.toml"
 name = "konf-tool-memory-smrti"
 version = "0.1.0"
 edition = "2021"
+license = "BUSL-1.1"
 INNEREOF
 
 mkdir -p .cargo
