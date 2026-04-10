@@ -12,3 +12,4 @@
 .fastembed_cache/
 .cargo/
 sandbox/workspace/
+vendor/

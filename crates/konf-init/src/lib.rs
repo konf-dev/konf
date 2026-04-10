@@ -282,6 +282,7 @@ async fn register_tools(engine: &Engine, tools: &ToolsConfig) -> anyhow::Result<
                 info!("Memory backend: smrti (Postgres + pgvector)");
             }
             other => {
+                #[allow(unused_mut)]
                 let mut available: Vec<&str> = Vec::new();
                 #[cfg(feature = "memory-smrti")]
                 available.push("smrti");
