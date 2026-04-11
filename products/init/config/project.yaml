@@ -1,7 +1,8 @@
-# The Init Product (Phase 0 Boot)
+# The init product — reference example
 #
-# This is the "PID 1" of Konf OS. It bootstraps external dependencies
-# like Infisical and Postgres before other products load.
+# Provisions external infrastructure (Postgres, Infisical, etc.) via
+# `shell:exec` calls before other products run. Not a special type —
+# just a convention documented in konf/docs/MENTAL_MODEL.md.
 
 name: init
 description: "Konf OS Infrastructure Bootstrap"
