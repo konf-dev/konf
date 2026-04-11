@@ -335,6 +335,38 @@ nodes:
     assert_eq!(result["status"], "recovered");
 }
 
+// Covers finding 011: the `catch: <bare node name>` form (CatchBlock::Simple)
+// at konflux-core/src/parser/schema.rs:136-149. The existing
+// `test_error_handling_catch` above covers only the Branches form.
+#[tokio::test]
+async fn test_error_handling_catch_simple_form() {
+    let engine = setup_engine();
+    let yaml = r#"
+workflow: error_handling_simple
+nodes:
+  fail_step:
+    do: fail
+    catch: recovery
+  recovery:
+    do: echo
+    with: { status: "recovered_via_simple" }
+    return: true
+"#;
+    let workflow = engine.parse_yaml(yaml).unwrap();
+    let result = engine
+        .run(
+            &workflow,
+            json!({}),
+            &["*".to_string()],
+            HashMap::new(),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(result["status"], "recovered_via_simple");
+}
+
 #[tokio::test]
 async fn test_retry_mechanism() {
     let engine = setup_engine();
