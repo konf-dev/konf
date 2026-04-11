@@ -21,7 +21,7 @@ registries, namespaces, and a capability lattice. Each role is a Rust crate.
 | `konf-init` | Bootstrap. Reads platform config (`konf.toml`) and product config (`tools.yaml`, `workflows/`, `prompts/`), interpolates env vars in YAML, registers built-in and configured tools, connects to Postgres if configured, creates the runtime, registers workflows as tools, applies tool guards. See `docs/architecture/init.md` for the full boot sequence. | `boot(config_dir)` in `crates/konf-init/src/lib.rs` |
 | `konf-backend` | HTTP transport. `POST /v1/chat` with SSE streaming. Optional scheduler backed by Postgres. | `crates/konf-backend/src/main.rs` |
 | `konf-mcp` | MCP transport. Exposes workflows as MCP tools over stdio or SSE. Translates tool names at the wire: kernel `foo:bar` → MCP `foo_bar` (required by MCP spec SEP-986). | `crates/konf-mcp/src/main.rs` |
-| `konf-tool-*` | Plugin crates registering built-in tools: `http`, `llm`, `embed`, `memory`, `mcp` (client), `shell`, `secret`. | `crates/konf-tool-*/src/lib.rs` |
+| `konf-tool-*` | Plugin crates registering built-in tools: `http`, `llm`, `embed`, `memory`, `mcp` (client), `shell`, `secret`, `runner`. | `crates/konf-tool-*/src/lib.rs` |
 | `konf-init-kell` | CLI that scaffolds a new product directory. Binary name is vestigial; the term it refers to ("kell") is deprecated. | `crates/konf-init-kell/src/main.rs` |
 
 Memory is pluggable via the `MemoryBackend` trait in `konf-tool-memory`
@@ -94,6 +94,7 @@ detail not exposed to users, or jargon that belongs in the kill list below.
 | **Tool guard** | A deny/allow rule on a tool's input, evaluated before namespace injection. Configured in `tools.yaml`. Distinct from capabilities: capabilities control *which tools* a scope may call; guards control *what inputs* are allowed to those tools. | `konf-runtime/src/runtime.rs` |
 | **Trigger** | An entry point: maps an input source (HTTP chat, MCP call, scheduled job) to a workflow + a capability grant. Defined in `project.yaml`. | `konf-init/src/config.rs` |
 | **Init product** | A product whose workflows provision external infrastructure (Postgres, secrets). Boots first in deployments that need it. Not a special type — just a convention. | `products/init/` |
+| **Run** | An asynchronous workflow invocation started via `runner:spawn`. Tracked in `RunRegistry` by a `RunId`; queried via `runner:status`/`runner:wait`; aborted via `runner:cancel`. Ships with an `InlineRunner` backend today; `SystemdRunner` and `DockerRunner` are planned. | `konf-tool-runner/src/registry.rs` |
 
 ---
 

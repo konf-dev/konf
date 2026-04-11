@@ -1,0 +1,30 @@
+[package]
+name = "konf-tool-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Runner tool family for konf — spawn konf workflows as runs, with status/wait/cancel. Inline backend ships in v1; systemd and docker backends planned."
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+papaya = { workspace = true }
+konflux-core = { path = "../konflux-core" }
+konf-runtime = { path = "../konf-runtime" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

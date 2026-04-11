@@ -179,6 +179,16 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
         .engine()
         .register_tool(Arc::new(schedule::CancelScheduleTool));
 
+    // 9d. Register runner tools (runner:spawn/status/wait/cancel). The inline
+    // backend runs workflows as tokio tasks against the same runtime; future
+    // systemd/docker backends will plug in here without changing this call.
+    // Finding 014 principle: a new tool family, not a kernel change.
+    let runner_registry = konf_tool_runner::RunRegistry::new();
+    let inline_runner: std::sync::Arc<dyn konf_tool_runner::Runner> = std::sync::Arc::new(
+        konf_tool_runner::InlineRunner::new(runtime.clone(), runner_registry),
+    );
+    konf_tool_runner::register(runtime.engine(), inline_runner)?;
+
     // 10. Register workflows as tools (needs runtime for WorkflowTool)
     // IMPORTANT: Register into the runtime's engine, not the original clone.
     // The runtime owns its own Engine instance (cloned at step 9). WorkflowTool

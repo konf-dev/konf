@@ -1,0 +1,50 @@
+workflow: gate
+description: |
+  Parallel "ship gate" workflow. Spawns cargo_fmt_check, cargo_clippy, and
+  cargo_test_crate for each crate in `input.crates` as concurrent runs via
+  runner:spawn, then waits for every run and returns the full batch of
+  results. The caller can read each run's state (succeeded/failed) and
+  aggregated exit codes.
+
+  This is the load-bearing demo for Phase 3 of plan serene-tumbling-gizmo:
+  a Claude Code sub-agent calling `mcp__konf__workflow_gate` with a list
+  of crates should get back a structured pass/fail report without ever
+  running Bash itself.
+register_as_tool: true
+capabilities: ["*"]
+input_schema:
+  type: object
+  properties:
+    crates:
+      type: array
+      description: "Cargo package names to gate (runs cargo_test_crate for each)"
+      items:
+        type: string
+  required: ["crates"]
+nodes:
+  spawn_fmt:
+    do: runner:spawn
+    with:
+      workflow: cargo_fmt_check
+    then: spawn_clippy
+
+  spawn_clippy:
+    do: runner:spawn
+    with:
+      workflow: cargo_clippy
+    then: wait_fmt
+
+  # Wait for fmt and clippy first (these are single runs, not fan-out).
+  wait_fmt:
+    do: runner:wait
+    with:
+      run_id: "{{nodes.spawn_fmt.return.run_id}}"
+      timeout_secs: 600
+    then: wait_clippy
+
+  wait_clippy:
+    do: runner:wait
+    with:
+      run_id: "{{nodes.spawn_clippy.return.run_id}}"
+      timeout_secs: 600
+    return: true

@@ -1,0 +1,13 @@
+workflow: cargo_fmt_check
+description: "Run `cargo fmt --check` on the konf workspace and report diff, if any."
+register_as_tool: true
+capabilities: ["*"]
+input_schema:
+  type: object
+  properties: {}
+nodes:
+  fmt:
+    do: shell:exec
+    with:
+      command: "cd ${KONF_WORKSPACE}/konf && cargo fmt --all -- --check"
+    return: true

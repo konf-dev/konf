@@ -1,0 +1,46 @@
+//! The `Runner` trait that every backend implements.
+//!
+//! Kept intentionally tiny. Each backend owns the mapping between
+//! `WorkflowSpec` and its own execution substrate (tokio task, systemd unit,
+//! Docker container, …) and reports state through the shared `RunRegistry`.
+
+use async_trait::async_trait;
+use serde_json::Value;
+
+use crate::error::RunnerError;
+use crate::registry::{RunId, RunRegistry};
+
+/// What a caller is asking the runner to run.
+#[derive(Debug, Clone)]
+pub struct WorkflowSpec {
+    /// Registered workflow name. Resolved to `workflow:<name>` in the engine
+    /// registry at spawn time.
+    pub workflow: String,
+    /// Input payload forwarded as the workflow tool's JSON argument.
+    pub input: Value,
+}
+
+/// A runner backend. Backends are constructed with a registry handle and
+/// whatever they need to resolve workflows (usually an `Arc<Runtime>`).
+#[async_trait]
+pub trait Runner: Send + Sync {
+    /// Short identifier for this backend. Appears in [`crate::registry::RunRecord::backend`].
+    fn name(&self) -> &'static str;
+
+    /// Shared registry this backend reports state to. All backends hold a
+    /// clone of the same registry so `runner:status`, `runner:wait`, and
+    /// `runner:cancel` see a single consistent view regardless of which
+    /// backend started the run.
+    fn registry(&self) -> &RunRegistry;
+
+    /// Spawn a new run. Returns as soon as the run is registered and the
+    /// backend has kicked off the work. The returned [`RunId`] can be fed
+    /// to the other trait methods or exposed via `runner:spawn`.
+    async fn spawn(&self, spec: WorkflowSpec) -> Result<RunId, RunnerError>;
+
+    /// Cancel a run by id. Returns true if a cancel hook was invoked.
+    /// Default implementation delegates to the registry's cancel hook.
+    async fn cancel(&self, id: &RunId) -> Result<bool, RunnerError> {
+        Ok(self.registry().cancel(id).await)
+    }
+}
