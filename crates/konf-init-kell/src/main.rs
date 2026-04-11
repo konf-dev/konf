@@ -32,20 +32,31 @@ fn main() -> anyhow::Result<()> {
     let workflows_dir = config_dir.join("workflows");
     let prompts_dir = kell_dir.join("prompts");
 
-    println!("Scaffolding new kell '{}' in {}...", args.name, kell_dir.display());
+    println!(
+        "Scaffolding new kell '{}' in {}...",
+        args.name,
+        kell_dir.display()
+    );
 
     // 1. Create directories
     fs::create_dir_all(&workflows_dir)?;
     fs::create_dir_all(&prompts_dir)?;
 
     // 2. Create project.yaml
-    let caps: Vec<String> = args.capabilities.split(',').map(|s| s.trim().to_string()).collect();
-    
+    let caps: Vec<String> = args
+        .capabilities
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .collect();
+
     let mut triggers = HashMap::new();
-    triggers.insert("chat".to_string(), TriggerConfig {
-        workflow: "chat".to_string(),
-        capabilities: caps,
-    });
+    triggers.insert(
+        "chat".to_string(),
+        TriggerConfig {
+            workflow: "chat".to_string(),
+            capabilities: caps,
+        },
+    );
 
     let project = ProjectConfig {
         name: args.name.clone(),
@@ -82,7 +93,8 @@ nodes:
     fs::write(workflows_dir.join("chat.yaml"), chat_workflow)?;
 
     // 5. Create basic README
-    let readme = format!(r#"# {name}
+    let readme = format!(
+        r#"# {name}
 
 This is a Konf Kell (AI Agent).
 
@@ -93,10 +105,11 @@ This is a Konf Kell (AI Agent).
 ```bash
 KONF_CONFIG_DIR=./config cargo run --bin konf-backend
 ```
-"#, 
-    name = args.name,
-    description = project.description.as_deref().unwrap_or("A Konf agent."));
-    
+"#,
+        name = args.name,
+        description = project.description.as_deref().unwrap_or("A Konf agent.")
+    );
+
     fs::write(kell_dir.join("README.md"), readme)?;
 
     println!("Success! New kell '{}' ready.", args.name);
