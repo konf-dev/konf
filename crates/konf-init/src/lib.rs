@@ -270,11 +270,21 @@ fn interpolate_env_vars(input: &str) -> String {
 /// Register tools based on product config.
 async fn register_tools(engine: &Engine, tools: &ToolsConfig) -> anyhow::Result<()> {
     // Memory backend
-    // NOTE: Memory backend implementations (smrti, SurrealDB, SQLite) are external
-    // dependencies, not part of this monorepo. To add a backend, depend on its crate
-    // (e.g., konf-tool-memory-smrti from konf-dev/smrti) and add a match arm here.
+    //
+    // Backends live in their own crates and are wired in here behind feature
+    // flags. Default build includes `memory-surreal` (SurrealDB, embedded or
+    // remote) — it has no external SSH dependencies and is the recommended
+    // choice for new products. `memory-smrti` (Postgres + pgvector via the
+    // private smrti repo) is opt-in for existing Postgres deployments. To add
+    // a new backend, depend on its crate and add a match arm below.
     if let Some(ref mem_config) = tools.memory {
         match mem_config.backend.as_str() {
+            #[cfg(feature = "memory-surreal")]
+            "surreal" => {
+                let backend = konf_tool_memory_surreal::connect(&mem_config.config).await?;
+                konf_tool_memory::register(engine, backend).await?;
+                info!("Memory backend: surreal");
+            }
             #[cfg(feature = "memory-smrti")]
             "smrti" => {
                 let backend = konf_tool_memory_smrti::connect(&mem_config.config).await?;
@@ -284,13 +294,15 @@ async fn register_tools(engine: &Engine, tools: &ToolsConfig) -> anyhow::Result<
             other => {
                 #[allow(unused_mut)]
                 let mut available: Vec<&str> = Vec::new();
+                #[cfg(feature = "memory-surreal")]
+                available.push("surreal");
                 #[cfg(feature = "memory-smrti")]
                 available.push("smrti");
                 if available.is_empty() {
                     anyhow::bail!(
                         "Unknown memory backend: '{other}'. \
                          No memory backends are compiled in. \
-                         Add a backend crate (e.g., konf-tool-memory-smrti) as a dependency."
+                         Build with `--features memory-surreal` or add a backend crate."
                     );
                 } else {
                     anyhow::bail!(
