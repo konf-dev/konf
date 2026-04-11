@@ -2,15 +2,14 @@
 
 # Konf
 
-**The Agent OS — an operating system for AI agents**
+**An operating system for AI agents**
 
 [![CI](https://github.com/konf-dev/konf/actions/workflows/ci.yml/badge.svg)](https://github.com/konf-dev/konf/actions/workflows/ci.yml)
 [![License: BSL-1.1](https://img.shields.io/badge/License-BSL--1.1-blue.svg)](LICENSE)
 
-Self-hostable, local-first AI agent platform.
-Products are configurations, not code.
+Self-hostable, local-first. Products are configurations (YAML + markdown), not code.
 
-[Quickstart](docs/getting-started/quickstart.md) · [Product Guide](docs/product-guide/creating-a-product.md) · [Architecture](docs/architecture/overview.md) · [Contributing](CONTRIBUTING.md)
+[Mental Model](docs/MENTAL_MODEL.md) · [Quickstart](docs/getting-started/quickstart.md) · [Product Guide](docs/product-guide/creating-a-product.md) · [Architecture](docs/architecture/overview.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -18,85 +17,79 @@ Products are configurations, not code.
 
 ## What is Konf?
 
-Konf is an operating system for AI agents. It provides workflow execution, tool management, memory storage, and security — all configurable through YAML. A product (formally, a *kell* — a named computational boundary from the Kell calculus) is a directory of YAML and text files that defines a complete agent. No application code needed.
+Konf is an operating system for AI agents. It provides workflow execution, tool management, capability enforcement, process management, and memory — all configurable through YAML. A product is a directory of YAML + markdown that defines a complete agent. No application code needed.
 
-The same engine runs on a phone, a laptop, a homelab server, or a cloud cluster. An agent's behavior, tools, memory, and security are defined entirely through configuration. Switching LLM providers, memory backends, or adding new tools is a config change, not a code change.
+The same Rust binary runs every product. Switching LLM providers, memory backends, or adding tools is a config change, not a code change.
 
-## Who Is This For?
-
-| You are a... | You want to... | Start here |
-|--------------|---------------|------------|
-| **Product builder** | Build an AI product using YAML config | [Product Guide](docs/product-guide/creating-a-product.md) · [Products](products/) |
-| **Operator** | Deploy and manage a Konf instance | [Admin Guide](docs/admin-guide/deployment.md) |
-| **Infrastructure contributor** | Contribute to the Rust codebase | [Architecture](docs/architecture/overview.md) · [Contributing](CONTRIBUTING.md) |
-| **Curious** | Understand how Konf works | [Core Concepts](docs/getting-started/concepts.md) |
+**For the full architecture, vocabulary, and doctrine — read [`docs/MENTAL_MODEL.md`](docs/MENTAL_MODEL.md) first.** That file is the single source of truth.
 
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────┐
-│ konf-backend │     │ konf-mcp │      Transport shells (HTTP / MCP)
-│ (HTTP/REST)  │     │ (server) │
+┌──────────────┐     ┌──────────┐
+│ konf-backend │     │ konf-mcp │      Transport shells (HTTP / stdio-MCP)
 └──────┬───────┘     └────┬─────┘
        └────────┬─────────┘
                 │
      ┌──────────▼───────────┐
-     │      konf-init        │      Init system (config → engine)
+     │      konf-init       │         Bootstrap (config → engine)
      └──────────┬───────────┘
                 │
      ┌──────────▼───────────┐
-     │    konf-runtime       │      Process management, capabilities
+     │    konf-runtime      │         Process table, capabilities, namespaces
      └──────────┬───────────┘
                 │
      ┌──────────▼───────────┐
-     │   konflux engine      │      Workflow execution, registries
+     │   konflux-core       │         Engine: tools, resources, prompts
      └──────────┬───────────┘
                 │
-     ┌──────────┼──────────┐
-     │          │          │
-   tools      tools      tools     Pluggable tool crates
-   memory     llm        http
+     ┌──────────┴──────────┐
+     │   konf-tool-*       │         Plugin crates (http, llm, embed,
+     │                     │          memory, mcp-client, shell, secret)
+     └─────────────────────┘
 ```
 
 ## Crates
 
-| Crate | Description |
-|-------|-------------|
-| `konflux-core` | Workflow execution engine with tool/resource/prompt registries |
-| `konf-runtime` | Process lifecycle, capability-based security, namespace injection |
+13 crates in this workspace:
+
+| Crate | Role |
+|-------|------|
+| `konflux-core` | Workflow execution engine with tool/resource/prompt registries. Zero I/O. |
+| `konf-runtime` | Process lifecycle, `ExecutionScope`, capability-based security, namespace injection |
 | `konf-init` | Config-driven bootstrap — reads YAML, registers tools, wires runtime |
-| `konf-mcp` | MCP server — expose tools/resources to Claude Desktop, Cursor, etc. |
+| `konf-init-kell` | CLI scaffolder for new product directories |
+| `konf-mcp` | MCP server — exposes products to MCP clients (Claude Desktop, Cursor, etc.) |
 | `konf-backend` | HTTP server — REST API with SSE streaming |
 | `konf-tool-http` | HTTP GET/POST tools with SSRF protection |
 | `konf-tool-llm` | LLM completion via rig-core (OpenAI, Anthropic, Google) |
 | `konf-tool-embed` | Local text embeddings via fastembed (ONNX) |
+| `konf-tool-memory` | `MemoryBackend` trait for pluggable storage |
 | `konf-tool-mcp` | MCP client — consume external MCP servers |
-| `konf-tool-memory` | MemoryBackend trait for pluggable storage |
+| `konf-tool-shell` | Sandboxed shell execution |
+| `konf-tool-secret` | Secret retrieval with allowlist |
 
 Memory backends are external:
 - [konf-dev/smrti](https://github.com/konf-dev/smrti) — Postgres + pgvector graph memory
 
 ## Products
 
-A **product** is a complete AI agent defined entirely through config files — no code. See [products/](products/) for reference products and a starter template.
+A **product** is a complete AI agent defined through config files. See [`products/`](products/) for reference products — `_template/` for a minimal starter, `devkit/` for the experiment-003-validated reference with VCS workflows, `init/` for an example infrastructure-provisioning product.
 
 ```
-products/assistant/
+products/_template/
 ├── config/
-│   ├── tools.yaml          # Which tools to use
-│   ├── models.yaml         # LLM provider and model
-│   ├── project.yaml        # Product metadata
+│   ├── tools.yaml           # Which tools to use
 │   └── workflows/
-│       └── chat.yaml       # Workflow: search memory → respond
-└── prompts/
-    └── system.md           # Assistant personality
+│       └── hello.yaml       # Workflow DAG
+└── README.md
 ```
 
 ## Extensibility
 
 Tools are added, not coded. Every tool implements the same `Tool` trait — the engine dispatches all tools identically regardless of how they're implemented.
 
-Konf ships several **adapters** that wrap different execution environments behind this interface:
+Konf ships several adapters that wrap different execution environments behind this interface:
 
 | Adapter | How it works | Who can add tools | Status |
 |---------|-------------|-------------------|--------|
@@ -105,17 +98,14 @@ Konf ships several **adapters** that wrap different execution environments behin
 | HTTP | Network call | Admin | Available |
 | WASM | Sandboxed runtime | Admin | Planned |
 
-The architecture is open — anyone can write a new adapter. See [sdk/](sdk/) for details.
+See [`sdk/`](sdk/) for details.
 
 ## Quick Start
 
 ```bash
-# Clone and build
 git clone https://github.com/konf-dev/konf.git
 cd konf
 cargo build --workspace
-
-# Run tests
 cargo test --workspace
 
 # Start with Docker (includes Postgres)
@@ -123,7 +113,7 @@ docker compose up -d
 curl http://localhost:8000/v1/health
 ```
 
-See [docs/getting-started/quickstart.md](docs/getting-started/quickstart.md) for detailed setup.
+See [`docs/getting-started/quickstart.md`](docs/getting-started/quickstart.md) for detailed setup.
 
 ## License
 
