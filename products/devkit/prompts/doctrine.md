@@ -13,10 +13,9 @@ This product follows the three rules in `konf/docs/MENTAL_MODEL.md`
 ## What devkit is
 
 devkit is the canonical reference product for konf development workflows.
-Its workflows are the validated output of experiment 003: VCS agent identity
-(`konf-agents[bot]`), agentic tool-calling, nested workflow composition, and
-AI-generated workflows that pass `yaml:validate_workflow` before committing.
-Results at `konf-experiments/experiments/003-dev-environment/README.md`.
+Its workflows validate VCS agent identity (`konf-agents[bot]`), agentic
+tool-calling, nested workflow composition, and AI-generated workflows that
+pass `yaml:validate_workflow` before committing.
 
 ## Rules for adding or editing workflows in this product
 
@@ -29,10 +28,6 @@ Results at `konf-experiments/experiments/003-dev-environment/README.md`.
 - **Every workflow must boot end-to-end before being committed.** Validate
   with `yaml:validate_workflow` and then actually run it through the engine.
   Never ship YAML that hasn't been executed.
-
-  Reference: `konf-experiments/experiments/007-genesis-kell/vibe-coded-v1/friction-log.md`
-  documents ten drifts that killed the previous attempt; nine of them were
-  "YAML written without being booted."
 
 ## Product authoring reference
 

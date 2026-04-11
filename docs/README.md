@@ -1,39 +1,26 @@
 # Konf Documentation
 
-## By Audience
+**Start here:** [MENTAL_MODEL.md](MENTAL_MODEL.md) — single source of truth for
+architecture, vocabulary, and doctrine.
 
-### Getting Started (Everyone)
-- [Quickstart](getting-started/quickstart.md) — Run Konf in 5 minutes
-- [Core Concepts](getting-started/concepts.md) — Products, workflows, tools, namespaces
+## Getting started
+- [Quickstart](getting-started/quickstart.md) — Run Konf locally
 
-### Product Guide (Product Builders)
-- [Creating a Product](product-guide/creating-a-product.md) — Build an AI product with YAML
-- [Workflow Reference](product-guide/workflow-reference.md) — YAML schema for workflows
-- [Tools Reference](product-guide/tools-reference.md) — Available tools and configuration
-- [Product Configuration](product-guide/configuration.md) — tools.yaml, models.yaml, project.yaml
+## Product guide
+- [Creating a Product](product-guide/creating-a-product.md) — Author an AI product in YAML
+- [Workflow Reference](product-guide/workflow-reference.md) — Workflow YAML schema
 
-### Admin Guide (Operators)
+## Admin guide
 - [Deployment](admin-guide/deployment.md) — systemd, Docker, cloud
-- [Platform Configuration](admin-guide/platform-config.md) — konf.toml reference
-- [Security](admin-guide/security.md) — Namespaces, capabilities, audit logging
-- [Integration](admin-guide/integration.md) — Crate dependencies, boot sequence, request flows
+- [Platform Configuration](admin-guide/platform-config.md) — `konf.toml` reference
 
-### Architecture (Infrastructure Contributors)
-- [Overview](architecture/overview.md) — The OS analogy, crate map, design philosophy
-- [Design Principles](architecture/design-principles.md) — 10 core principles
-- [Cells and Kells](architecture/cells-and-kells.md) — Reference Kells vs Living Cells (The Matrix metaphor)
-- [Engine](architecture/engine.md) — Workflow execution, registries, capability validation
-- [Runtime](architecture/runtime.md) — Process management, scoping, streaming
-- [Backend](architecture/backend.md) — HTTP server, REST API, auth
+## Architecture
+- [Overview](architecture/overview.md) — Crate map, composition, entry points
+- [Engine](architecture/engine.md) — Workflow execution, three registries, capability validation
+- [Runtime](architecture/runtime.md) — Process management, scope, namespace injection, capability lattice
 - [Init](architecture/init.md) — Config loading, boot sequence
-- [MCP](architecture/mcp.md) — MCP server and client
-- [Tools](architecture/tools.md) — Tool protocol, plugin crate structure
-- [Tool Extensibility](architecture/tool-extensibility.md) — One interface, many adapters
-- [Memory Backends](architecture/memory-backends.md) — MemoryBackend trait, implementations
-- [Multi-Tenancy](architecture/multi-tenancy.md) — Namespace hierarchy, capability lattice
-- [Configuration Strategy](architecture/configuration-strategy.md) — Platform vs product config
-- [Session State](architecture/session-state.md) — Ephemeral KV store
-- [Service Model](architecture/service-model.md) — How Konf runs as a service
-
-### Internal
-- [Plans](plans/) — Implementation roadmaps
+- [Backend](architecture/backend.md) — HTTP server, REST API, auth
+- [MCP](architecture/mcp.md) — MCP server and client, name translation at the wire
+- [Tools](architecture/tools.md) — Tool protocol, plugin crate structure, adapters
+- [Memory Backends](architecture/memory-backends.md) — `MemoryBackend` trait, smrti integration
+- [Why Konf](architecture/why-konf.md) — Structural properties that differentiate konf
