@@ -176,4 +176,4 @@ let result = instance.runtime.run(&workflow, input, scope, session_id).await?;
 - [tools](tools.md) — tool crate `register()` functions
 - [runtime](runtime.md) — Runtime creation, optional journal
 - [memory-backends](memory-backends.md) — MemoryBackend trait, backend connect() functions
-- [configuration-strategy](configuration-strategy.md) — config file formats, validation, hot-reload
+- [MENTAL_MODEL](../MENTAL_MODEL.md) — vocabulary and doctrine

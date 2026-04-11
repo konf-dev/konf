@@ -17,10 +17,9 @@ Konf runs the same engine on a phone, a laptop, a homelab server, or a cloud clu
 
 | Term | Definition |
 |---|---|
-| **Product** | The informal name for a directory of YAML configuration that defines an agent. This is the term used throughout most of the documentation. |
-| **Kell** | The formal name for a product. From the Kell calculus (Schmitt & Stefani, 2003) — a named computational boundary. A kell is composable, versionable, forkable, and self-modifying within its capability grants. |
-| **Kernel** | The `konflux` engine. It manages registries, executes workflows, and validates capabilities. It has no I/O. |
-| **Runtime** | The `konf-runtime` crate. Manages process lifecycle, scoping, and security boundaries. |
+| **Product** | A directory of YAML + markdown that defines an agent. The Rust type is `ProductConfig`. See [MENTAL_MODEL.md](../MENTAL_MODEL.md) for the full glossary. |
+| **Kernel** | The `konflux` engine. Manages three registries (tools, resources, prompts), executes workflows, validates capabilities. Zero I/O. |
+| **Runtime** | The `konf-runtime` crate. Manages process lifecycle, `ExecutionScope`, namespace injection, capability lattice. |
 
 ---
 
@@ -80,7 +79,7 @@ Konf follows the same design patterns as Linux, Plan 9, and Fuchsia — not by m
 |-----------|-----------------|-------|
 | Kernel | Engine — all dispatch routes through it | konflux |
 | Init system (systemd) | konf-init — reads config, boots engine, registers tools | konf-init |
-| Init Product (PID 1) | `init` kell — orchestrates external services (Docker, DBs, Secrets) | products/init |
+| Init product | `init` product — orchestrates external services (Docker, DBs, secrets) | products/init |
 | Device drivers | Tools — standard interface, pluggable, hot-loadable | crates/konf-tool-* |
 | VFS (filesystem abstraction) | MemoryBackend trait — pluggable storage | crates/konf-tool-memory |
 | `/proc`, `/sys` | Resources — engine state readable by agents | konflux |
@@ -298,8 +297,6 @@ nodes:
 | [init](init.md) | Init system: config loading, boot sequence, KonfInstance |
 | [backend](backend.md) | HTTP server shell: REST API, auth, scheduling |
 | [memory-backends](memory-backends.md) | MemoryBackend trait, implementations (smrti, SurrealDB, SQLite) |
-| [runtime](runtime.md) | Process management, ExecutionScope, capabilities, streaming |
-| [multi-tenancy](multi-tenancy.md) | Namespace hierarchy, capability lattice, actor roles |
-| [configuration-strategy](configuration-strategy.md) | Platform vs product config, hot-reload, validation |
+| [runtime](runtime.md) | Process management, ExecutionScope, namespace injection, capability lattice, streaming |
 | [workflow-reference](../product-guide/workflow-reference.md) | YAML format for defining workflows (nodes, edges, conditions, retries) |
-| [session-state](session-state.md) | Ephemeral KV store for agent working memory |
+| [MENTAL_MODEL](../MENTAL_MODEL.md) | Single source of truth for architecture, vocabulary, and doctrine |

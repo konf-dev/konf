@@ -11,11 +11,17 @@ Thank you for your interest in contributing to Konf!
 | **Documentation** | `docs/` | [Docs index](docs/README.md) |
 | **Plugins** (WASM, future) | `sdk/` | [SDK README](sdk/README.md) |
 
-## Terminology Guide
+## Terminology
 
-- **`kell`**: The user-facing concept of a Konf application – a directory of YAML configuration.
-- **`ProductConfig`**: The Rust struct representing the loaded configuration of a kell.
-- **`product`**: An informal term, often used interchangeably with `kell` in conversation.
+See [`docs/MENTAL_MODEL.md`](docs/MENTAL_MODEL.md) for the full vocabulary and
+banned-words kill list. The core term is:
+
+- **`product`** — a directory of YAML + markdown defining one konf agent. The
+  Rust type is `ProductConfig` (in `crates/konf-init/src/config.rs`).
+
+Any new analogy, metaphor, or vocabulary term introduced to the docs must
+cash out to code or an experimentally verified finding. If it doesn't, it goes
+on the kill list.
 
 ## Reporting Bugs
 

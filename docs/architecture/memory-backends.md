@@ -292,6 +292,5 @@ This is a future extension point. The core 7 tools cover the most common agent w
 - [tools](tools.md) — tool protocol, plugin crate structure
 - [engine](engine.md) — Tool trait, ToolInfo
 - [overview](overview.md) — VFS analogy, pluggable storage vision
-- [session-state](session-state.md) — session state API details, TTL behavior
-- [multi-tenancy](multi-tenancy.md) — namespace hierarchy, VirtualizedTool injection
-- [configuration-strategy](configuration-strategy.md) — tools.yaml format
+- [runtime](runtime.md) — ExecutionScope, namespace injection, capability lattice
+- [../product-guide/creating-a-product.md](../product-guide/creating-a-product.md) — tools.yaml format and product layout

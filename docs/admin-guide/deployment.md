@@ -14,7 +14,7 @@ export POSTGRES_PASSWORD=change-me-in-production
 docker compose up -d
 ```
 
-The default compose file mounts `products/assistant/config` as the product config. To use a different product, edit the volume mount:
+The default compose file mounts `products/devkit/config` as the product config. To use a different product, edit the volume mount:
 
 ```yaml
 volumes:
@@ -30,7 +30,7 @@ Health check: `curl http://localhost:8000/v1/health`
 cargo build --release --bin konf-backend
 
 # Run with a product config directory
-KONF_CONFIG_DIR=products/assistant/config \
+KONF_CONFIG_DIR=products/devkit/config \
 KONF__DATABASE__URL=postgresql://postgres:konf@localhost/konf \
   ./target/release/konf-backend
 ```

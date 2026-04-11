@@ -46,7 +46,7 @@ Drop a `.wasm` file into a plugins directory. Konf loads it at runtime in a sand
 - **Hot-loadable:** Load/unload without restarting Konf
 - **Portable:** Same plugin runs on any hardware Konf runs on
 
-Status: Architecture designed, implementation pending. See [docs/architecture/tool-extensibility.md](../docs/architecture/tool-extensibility.md).
+Status: Architecture designed, implementation pending. See [docs/architecture/tools.md](../docs/architecture/tools.md) for the current tool protocol and adapter model.
 
 ## The Agent Can't Tell
 

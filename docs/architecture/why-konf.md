@@ -39,13 +39,13 @@ The `MemoryBackend` trait (in `konf-tool-memory/src/lib.rs`) abstracts storage b
 
 ---
 
-## Why Self-Modification is Safe on Konf
+## Why agent-generated workflows are safe on Konf
 
-The architect agent (or any agent) can write and modify YAML workflows at runtime. This is safe because of four structural guarantees:
+An agent can write and register new YAML workflows at runtime. This is safe because of four structural guarantees:
 
 1. **The agent writes YAML, not executable code.** Workflows are configuration. They declare which tools to call and in what order. They cannot execute arbitrary code.
 
-2. **The kernel validates every workflow before accepting it.** Malformed YAML, unknown tools, and invalid node references are rejected at parse time, before any execution occurs.
+2. **The kernel validates every workflow before accepting it.** Malformed YAML, unknown tools, and invalid node references are rejected at parse time by `yaml:validate_workflow`, before any execution occurs.
 
 3. **The capability lattice prevents privilege escalation.** A workflow cannot require capabilities that the writing agent does not already possess. An agent with `memory:search` cannot create a workflow that uses `memory:delete`.
 
@@ -62,7 +62,7 @@ The architect agent (or any agent) can write and modify YAML workflows at runtim
 | Agent behavior | Application code (Python/JS) | Configuration (YAML) — hot-reloadable |
 | Storage | Hardcoded to specific DBs | Backend-agnostic trait |
 | Failure containment | Application-level try/catch | Kernel-level ResourceLimits |
-| Self-modification | Dangerous (agent writes executable code) | Safe (agent writes validated YAML within capability bounds) |
+| Agent-generated workflows | Dangerous (agent writes executable code) | Safe (agent writes validated YAML within capability bounds) |
 | Deployment | Python environment + dependencies | Single Rust binary |
 | Multi-tenancy | Application-level isolation | Kernel-level namespace enforcement |
 

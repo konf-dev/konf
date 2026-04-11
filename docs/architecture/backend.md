@@ -218,5 +218,6 @@ Note: konf-backend does NOT depend on any konf-tool-* crates or smrti. All tool 
 - [init](init.md) — boot sequence, KonfInstance
 - [mcp](mcp.md) — MCP server mounted at `/mcp`
 - [runtime](runtime.md) — Runtime API, streaming
-- [multi-tenancy](multi-tenancy.md) — auth → ExecutionScope mapping
-- [configuration-strategy](configuration-strategy.md) — konf.toml, tools.yaml
+- [runtime](runtime.md) — auth → ExecutionScope mapping, capability lattice
+- [../admin-guide/platform-config.md](../admin-guide/platform-config.md) — konf.toml reference
+- [../product-guide/creating-a-product.md](../product-guide/creating-a-product.md) — tools.yaml format

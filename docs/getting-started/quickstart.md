@@ -4,33 +4,14 @@ Get the Konf platform running locally in 5 minutes.
 
 ---
 
-## The Konf Boot Lifecycle
+## Running Konf
 
-Konf OS is self-bootstrapping. It uses a specialized "Init Kell" to provision its own infrastructure (Databases, Secrets, Compute) before any other product loads.
+To run Konf against a product, point `KONF_CONFIG_DIR` at a product's `config/` directory and start one of the two transport shells:
 
-### Phase 0: Provision Infrastructure
+- **`konf-backend`** — HTTP server. `POST /v1/chat` with SSE streaming.
+- **`konf-mcp`** — stdio MCP server. Used by Claude Desktop, Cursor, Claude Code, and any other MCP client.
 
-```bash
-# Clone the repo
-git clone https://github.com/konf-dev/konf-dev-stack.git
-cd konf-dev-stack
-
-# Boot the Init product (PID 1)
-# This uses docker-compose to start Infisical and Postgres
-cargo run --release --bin konf-mcp -- --product init
-```
-
-### Phase 1: Start your Product
-
-Once the infrastructure is healthy, you can start your agents. We recommend using the **Infisical CLI** to inject secrets directly from the Phase 0 vault.
-
-```bash
-# Set up a test secret in the vault
-infisical secrets set TEST_SECRET="hello_world" --env=dev
-
-# Start your product with secret injection
-infisical run --env=dev -- cargo run --release --bin konf-backend -- --product devkit
-```
+Products that need external infrastructure (Postgres for memory, secret store, etc.) can bring their own via a workflow that calls `shell:exec` to run `docker compose`. The [`products/init/`](../../products/init/) product is a reference example.
 
 ---
 
@@ -157,23 +138,28 @@ DATABASE_URL=postgresql://localhost/konf_test cargo test --workspace -- --ignore
 ## Project Structure
 
 ```
-konf/                             ← Cargo workspace (monorepo)
-├── crates/
-│   ├── konflux-core/             ← Engine (kernel): workflow execution
-│   ├── konf-runtime/             ← Process management: lifecycle, capabilities
-│   ├── konf-init/                ← Init system: config loading, tool registration
-│   ├── konf-tool-http/           ← HTTP request tools (reqwest)
-│   ├── konf-tool-llm/            ← LLM completion tools (rig-core)
-│   ├── konf-tool-embed/          ← Embedding tools (fastembed)
-│   ├── konf-tool-memory/         ← Memory tools + MemoryBackend trait
-│   ├── konf-tool-mcp/            ← MCP client (consume external MCP servers)
-│   ├── konf-mcp/                 ← MCP server (Claude Desktop, CLI)
-│   └── konf-backend/             ← HTTP server (REST API)
-├── config/                       ← Your product configuration
-│   ├── konf.toml                 ← Platform config (server, auth, database)
-│   ├── tools.yaml                ← Tool and backend config
-│   └── workflows/                ← Workflow YAML files
-└── docs/                         ← Architecture and specs
+konf/                             ← Cargo workspace
+├── crates/                       ← 13 Rust crates
+│   ├── konflux-core/             ← Engine: workflow execution, 3 registries
+│   ├── konf-runtime/             ← Process management, ExecutionScope, capability lattice
+│   ├── konf-init/                ← Bootstrap: config loading, tool registration
+│   ├── konf-init-kell/           ← CLI scaffolder for new products
+│   ├── konf-backend/             ← HTTP server (REST API + SSE)
+│   ├── konf-mcp/                 ← MCP server (stdio + SSE)
+│   ├── konf-tool-http/           ← HTTP GET/POST tools
+│   ├── konf-tool-llm/            ← LLM completion (rig-core)
+│   ├── konf-tool-embed/          ← Local embeddings (fastembed)
+│   ├── konf-tool-memory/         ← MemoryBackend trait
+│   ├── konf-tool-mcp/            ← MCP client (consume external servers)
+│   ├── konf-tool-shell/          ← Sandboxed shell execution
+│   └── konf-tool-secret/         ← Secret retrieval with allowlist
+├── products/                     ← Reference products (YAML + markdown)
+│   ├── _template/                ← Minimal starter
+│   ├── devkit/                   ← Canonical reference (VCS workflows)
+│   └── init/                     ← Init product example
+├── docs/                         ← Architecture, product guide, MENTAL_MODEL.md
+├── sandbox/                      ← E2E testing infrastructure
+└── sdk/                          ← Plugin SDK (WASM planned)
 ```
 
 ## What is smrti?
@@ -190,6 +176,6 @@ The `konf-tool-memory-smrti` bridge crate (also in the smrti repo) implements th
 
 ## Next Steps
 
+- Read [MENTAL_MODEL.md](../MENTAL_MODEL.md) for the single source of truth on architecture, vocabulary, and doctrine
 - Read [overview.md](../architecture/overview.md) for the full platform design
-- Read [integration.md](../admin-guide/integration.md) for how crates connect
-- Check [master-plan.md](../plans/master-plan.md) for the implementation roadmap
+- Read [creating-a-product.md](../product-guide/creating-a-product.md) to author your own product

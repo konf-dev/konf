@@ -246,4 +246,4 @@ The agent sees a flat list. It doesn't know which tools are Rust, which are MCP,
 - [memory-backends](memory-backends.md) — MemoryBackend trait, backend implementations
 - [mcp](mcp.md) — MCP client (konf-tool-mcp) details
 - [init](init.md) — boot sequence, tool registration
-- [configuration-strategy](configuration-strategy.md) — tools.yaml format
+- [../product-guide/creating-a-product.md](../product-guide/creating-a-product.md) — tools.yaml format and product layout
