@@ -1,0 +1,13 @@
+workflow: cargo_clippy
+description: "Run clippy across the whole konf workspace with warnings as errors."
+register_as_tool: true
+capabilities: ["*"]
+input_schema:
+  type: object
+  properties: {}
+nodes:
+  clippy:
+    do: shell:exec
+    with:
+      command: "cd ${KONF_WORKSPACE}/konf && cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tail -30"
+    return: true

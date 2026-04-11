@@ -1,0 +1,17 @@
+workflow: cargo_test_crate
+description: "Run `cargo test -p <crate>` and return the exit code + tail of output."
+register_as_tool: true
+capabilities: ["*"]
+input_schema:
+  type: object
+  properties:
+    crate:
+      type: string
+      description: "Cargo package name to test (e.g. konflux-core)"
+  required: ["crate"]
+nodes:
+  test:
+    do: shell:exec
+    with:
+      command: "cd ${KONF_WORKSPACE}/konf && cargo test -p {{input.crate}} 2>&1 | tail -30"
+    return: true

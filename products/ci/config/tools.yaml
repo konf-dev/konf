@@ -1,0 +1,13 @@
+# konf products/ci/ — continuous-integration product.
+#
+# The runner tool family (crates/konf-tool-runner/) registers itself
+# unconditionally during konf-init, so every product gets `runner:spawn`,
+# `runner:status`, `runner:wait`, and `runner:cancel` for free. This
+# product's workflows use them to fan out cargo commands.
+tools:
+  shell:
+    # Host mode: cargo runs directly on the machine konf-mcp is running
+    # against. For multi-tenant isolation, future runner backends
+    # (systemd, docker) will attenuate this; today we trust the host.
+    container: "host"
+    timeout_ms: 600000
