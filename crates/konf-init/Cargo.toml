@@ -17,6 +17,7 @@ konf-tool-llm = { path = "../konf-tool-llm" }
 konf-tool-embed = { path = "../konf-tool-embed" }
 konf-tool-mcp = { path = "../konf-tool-mcp" }
 konf-tool-memory = { path = "../konf-tool-memory" }
+konf-tool-runner = { path = "../konf-tool-runner" }
 konf-tool-shell = { path = "../konf-tool-shell" }
 konf-tool-secret = { path = "../konf-tool-secret" }
 
