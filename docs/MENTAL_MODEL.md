@@ -121,7 +121,7 @@ or an experimentally verified finding.
 - **"Hovercraft", "Construct", "Zion", "Operator", "Operatives"** — Matrix metaphor; replace with the actual term (product, runtime, namespace, etc.)
 - **"cell"** — concept dropped; use "product"
 - **"kell"** — deprecated term; use "product" (may be reintroduced later if it earns its keep)
-- **"Second-in-Command"** — marketing framing, already removed during vibe-coded-v1 reset
+- **"Second-in-Command"** — marketing framing with no operational definition
 - **"self-modification"**, **"self-healing bureaucracy"** — no code implements this
 - **"operational honesty"** (as emotional LLM error messages) — no code; the real principle is "errors propagate loudly; runtime events are journaled in `runtime_events`"
 - **"smart bubble"** — metaphor without purpose
