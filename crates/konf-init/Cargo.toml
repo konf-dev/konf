@@ -22,6 +22,7 @@ konf-tool-secret = { path = "../konf-tool-secret" }
 
 # Memory backends (external, feature-gated)
 konf-tool-memory-smrti = { git = "ssh://git@github.com/konf-dev/smrti.git", optional = true }
+konf-tool-memory-surreal = { path = "../konf-tool-memory-surreal", optional = true }
 
 # Config
 figment = { workspace = true }
@@ -42,6 +43,10 @@ anyhow = { workspace = true }
 tempfile = { workspace = true }
 
 [features]
-default = ["postgres", "memory-smrti"]
+# memory-surreal is the default: embedded (RocksDB) or remote, zero external
+# SSH keys required. memory-smrti is opt-in for Postgres+pgvector deployments
+# that already have smrti SSH access.
+default = ["postgres", "memory-surreal"]
 postgres = ["sqlx"]
 memory-smrti = ["dep:konf-tool-memory-smrti"]
+memory-surreal = ["dep:konf-tool-memory-surreal"]

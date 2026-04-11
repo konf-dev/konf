@@ -2,3 +2,19 @@ tools:
   llm:
     provider: openai
     model: "${KONF_MODEL:-qwen3:8b}"
+
+  # SurrealDB is the default memory backend. Embedded mode runs entirely
+  # in-process against a single RocksDB file — no daemon, no Postgres, no SSH.
+  #
+  # Switch to remote mode by setting `mode: remote` and `endpoint: ws://...`;
+  # the SurrealQL semantics are identical. Switch to `backend: smrti` (and add
+  # the Postgres DSN) if you already have smrti infrastructure and built konf
+  # with `--features memory-smrti`.
+  memory:
+    backend: surreal
+    config:
+      mode: embedded
+      path: ./memory.db
+      namespace: konf
+      database: default
+      vector_dimension: 768

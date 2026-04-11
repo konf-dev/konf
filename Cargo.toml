@@ -41,6 +41,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "json", "chrono", "uuid"] }
+surrealdb = { version = "3", default-features = false, features = ["kv-rocksdb", "kv-mem", "protocol-ws"] }
 
 # HTTP
 reqwest = { version = "0.13", features = ["json"] }
