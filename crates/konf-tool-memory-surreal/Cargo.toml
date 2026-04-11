@@ -1,0 +1,33 @@
+[package]
+name = "konf-tool-memory-surreal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "SurrealDB-backed memory backend for konf — embedded (RocksDB) or remote (WebSocket) with identical SurrealQL semantics in both modes."
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+konf-tool-memory = { path = "../konf-tool-memory" }
+surrealdb = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[[example]]
+name = "experiment"
+path = "examples/experiment.rs"
+
+[lints]
+workspace = true
