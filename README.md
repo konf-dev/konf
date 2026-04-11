@@ -69,8 +69,9 @@ The same Rust binary runs every product. Switching LLM providers, memory backend
 | `konf-tool-shell` | Sandboxed shell execution |
 | `konf-tool-secret` | Secret retrieval with allowlist |
 
-Memory backends are external:
-- [konf-dev/smrti](https://github.com/konf-dev/smrti) — Postgres + pgvector graph memory
+Memory backends:
+- `konf-tool-memory-surreal` — SurrealDB-backed graph memory. Embedded (single-file RocksDB) or remote (WebSocket to a Surreal server). Same SurrealQL in both modes. **Default** since v0.1.0.
+- [konf-dev/smrti](https://github.com/konf-dev/smrti) — Postgres + pgvector graph memory. Opt-in via `--features memory-smrti`. Requires SSH access to the private smrti repo at build time.
 
 ## Products
 

@@ -24,11 +24,26 @@ registries, namespaces, and a capability lattice. Each role is a Rust crate.
 | `konf-tool-*` | Plugin crates registering built-in tools: `http`, `llm`, `embed`, `memory`, `mcp` (client), `shell`, `secret`. | `crates/konf-tool-*/src/lib.rs` |
 | `konf-init-kell` | CLI that scaffolds a new product directory. Binary name is vestigial; the term it refers to ("kell") is deprecated. | `crates/konf-init-kell/src/main.rs` |
 
-Memory is pluggable via the `MemoryBackend` trait in `konf-tool-memory`. The
-canonical backend is [smrti](https://github.com/konf-dev/smrti) — a separate
-Rust crate that stores nodes, edges, and embeddings in Postgres + pgvector.
-smrti is a dumb storage layer: it does not call LLMs or generate embeddings.
-Products pass pre-computed embeddings when they need semantic search.
+Memory is pluggable via the `MemoryBackend` trait in `konf-tool-memory`
+(`crates/konf-tool-memory/src/lib.rs:71-125`). Two backends ship today:
+
+- **`konf-tool-memory-surreal`** is the default. Backed by
+  [SurrealDB](https://surrealdb.com), it runs in embedded mode (single-file
+  RocksDB, no daemon) or remote mode (WebSocket to a Surreal server) with
+  identical SurrealQL in both. It stores typed nodes and relation edges,
+  exposes HNSW vector search, BM25 full-text search, and Reciprocal Rank
+  Fusion hybrid search. Implementation at
+  `crates/konf-tool-memory-surreal/src/lib.rs`; schema at
+  `crates/konf-tool-memory-surreal/src/schema.rs`.
+- **`konf-tool-memory-smrti`** is opt-in behind the `memory-smrti` feature.
+  Backed by [smrti](https://github.com/konf-dev/smrti), a separate Rust crate
+  storing nodes, edges, and embeddings in Postgres + pgvector. Requires SSH
+  access to the private smrti repository at build time.
+
+Both backends are dumb storage layers: they do not call LLMs or generate
+embeddings. Products pass pre-computed embeddings when they need semantic
+search — for SurrealDB via the `metadata_filter.query_vector` escape hatch
+inside `SearchParams`.
 
 ---
 
