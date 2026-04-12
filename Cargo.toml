@@ -39,8 +39,11 @@ anyhow = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-# Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "json", "chrono", "uuid"] }
+# Storage
+# redb: embedded pure-Rust KV store backing the journal, scheduler, and runner intents.
+redb = "4"
+# postcard: compact binary serialization used for redb values (smaller + faster than JSON at rest).
+postcard = { version = "1", features = ["alloc", "use-std"] }
 surrealdb = { version = "3", default-features = false, features = ["kv-rocksdb", "kv-mem", "protocol-ws"] }
 
 # HTTP

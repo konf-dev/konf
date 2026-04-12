@@ -69,8 +69,29 @@ KONF_CONFIG_DIR=path/to/my-product/config konf-backend
 konf-mcp --config path/to/my-product/config
 ```
 
-Postgres with pgvector is required for memory-backed products. Everything else
-(scheduler, journal) is optional and degrades gracefully.
+Konf v2 is **local-first**: the journal, scheduler, and runner-intent
+store all live in a single embedded **redb** file managed by
+`konf_runtime::KonfStorage`. No external database is required for a
+working single-node deployment. Configure the file path in
+`konf.toml`:
+
+```toml
+[database]
+url = "redb:///var/lib/konf/konf.redb"
+retention_days = 7
+```
+
+Memory backends are independent: the default `konf-tool-memory-surreal`
+uses an embedded SurrealDB (RocksDB) or a remote Surreal server. The
+older `konf-tool-memory-smrti` (Postgres + pgvector) is still available
+behind the `memory-smrti` feature for existing Postgres deployments,
+but it has no relationship to the runtime's redb storage.
+
+Edge deployments can omit the `[database]` section entirely: workflows
+still run, but nothing survives a restart. See
+[`architecture/storage.md`](architecture/storage.md) for the full
+picture and [`architecture/durability.md`](architecture/durability.md)
+for the doctrine.
 
 ---
 
@@ -93,8 +114,12 @@ detail not exposed to users, or jargon that belongs in the kill list below.
 | **Capability** | A tool-name pattern a scope is allowed to call. E.g. `memory:*`, `ai:complete`, `*`. Checked at dispatch. | `konf-runtime/src/scope.rs` |
 | **Tool guard** | A deny/allow rule on a tool's input, evaluated before namespace injection. Configured in `tools.yaml`. Distinct from capabilities: capabilities control *which tools* a scope may call; guards control *what inputs* are allowed to those tools. | `konf-runtime/src/runtime.rs` |
 | **Trigger** | An entry point: maps an input source (HTTP chat, MCP call, scheduled job) to a workflow + a capability grant. Defined in `project.yaml`. | `konf-init/src/config.rs` |
-| **Init product** | A product whose workflows provision external infrastructure (Postgres, secrets). Boots first in deployments that need it. Not a special type — just a convention. | `products/init/` |
-| **Run** | An asynchronous workflow invocation started via `runner:spawn`. Tracked in `RunRegistry` by a `RunId`; queried via `runner:status`/`runner:wait`; aborted via `runner:cancel`. Ships with an `InlineRunner` backend today; `SystemdRunner` and `DockerRunner` are planned. | `konf-tool-runner/src/registry.rs` |
+| **Init product** | A product whose workflows provision external infrastructure (secrets, shared services). Boots first in deployments that need it. Not a special type — just a convention. | `products/init/` |
+| **Run** | An asynchronous workflow invocation started via `runner:spawn`. Tracked in-memory by `RunRegistry` and persisted durably via `RunnerIntentStore`. Replayed from the top on restart with the same `RunId`. | `konf-tool-runner/src/registry.rs`, `konf-runtime/src/runner_intents.rs` |
+| **KonfStorage** | Single redb-backed handle that owns the journal, scheduler timers, and runner intent store. One file, three logical stores. | `konf-runtime/src/storage.rs` |
+| **Scheduler** | Durable timer store backed by redb. Supports `Once`, `Fixed { delay_ms }`, and `Cron { expr }` modes. Replaces the v1 tokio-timer `schedule:create` and the dead Postgres scheduling module. | `konf-runtime/src/scheduler.rs` |
+| **Runner intent** | Persisted record of a `runner:spawn` call: input, scope, session id. Written before the tokio task starts, marked terminal on completion. Replayed on boot if `terminal: None`. | `konf-runtime/src/runner_intents.rs` |
+| **Event bus** | `tokio::sync::broadcast` channel owned by `Runtime`. Emits `RunEvent`s for every workflow lifecycle transition, tool invocation, schedule fire, and journal append. Consumed by `/v1/monitor/stream`. | `konf-runtime/src/event_bus.rs` |
 
 ---
 

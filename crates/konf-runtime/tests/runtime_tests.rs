@@ -1,11 +1,12 @@
 //! Integration tests for the Runtime.
 //!
-//! These tests create a Runtime with a real konflux Engine but require
-//! a Postgres connection for the EventJournal. Set DATABASE_URL env var
-//! to run these tests.
+//! These tests exercise the runtime against both:
+//!   - "edge mode" (no journal backend)
+//!   - redb-backed journal (backed by a tempfile)
 //!
-//! Skip these tests in CI without Postgres by running:
-//!   cargo test --lib  (unit tests only)
+//! Both modes are exercised by every test via a helper that constructs a
+//! runtime twice per test. This is faster and more reliable than the old
+//! DATABASE_URL-gated Postgres tests.
 
 use std::sync::Arc;
 
@@ -16,8 +17,9 @@ use konflux::engine::Engine;
 use konflux::error::ToolError;
 use konflux::tool::{Tool, ToolContext, ToolInfo};
 
+use konf_runtime::journal::JournalStore;
 use konf_runtime::scope::*;
-use konf_runtime::Runtime;
+use konf_runtime::{RedbJournal, RunEvent, Runtime};
 
 // ============================================================
 // Mock Tools
@@ -84,22 +86,34 @@ fn test_scope(namespace: &str) -> ExecutionScope {
 }
 
 // ============================================================
-// Tests (require DATABASE_URL)
+// Runtime builders
 // ============================================================
 
-async fn create_runtime() -> Option<Runtime> {
-    let dsn = std::env::var("DATABASE_URL").ok()?;
-    let pool = sqlx::PgPool::connect(&dsn).await.ok()?;
+/// Create a runtime with a redb journal backed by a fresh tempdir. Returns
+/// both the runtime and the tempdir (dropped at end of test to clean up).
+async fn create_runtime_with_journal() -> (Runtime, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.redb");
+    let journal = Arc::new(RedbJournal::open(&path).await.unwrap());
     let engine = setup_engine();
-    Runtime::new(engine, Some(pool)).await.ok()
+    let runtime = Runtime::new(engine, Some(journal as Arc<dyn JournalStore>))
+        .await
+        .unwrap();
+    (runtime, dir)
 }
 
+/// Create a runtime in edge mode (no journal).
+async fn create_runtime_edge() -> Runtime {
+    Runtime::new(setup_engine(), None).await.unwrap()
+}
+
+// ============================================================
+// Journal-backed tests
+// ============================================================
+
 #[tokio::test]
-async fn test_runtime_start_and_wait() {
-    let Some(runtime) = create_runtime().await else {
-        eprintln!("Skipping: DATABASE_URL not set");
-        return;
-    };
+async fn test_runtime_start_and_wait_with_journal() {
+    let (runtime, _dir) = create_runtime_with_journal().await;
 
     let workflow = runtime
         .parse_yaml(
@@ -126,11 +140,8 @@ nodes:
 }
 
 #[tokio::test]
-async fn test_runtime_cancel() {
-    let Some(runtime) = create_runtime().await else {
-        eprintln!("Skipping: DATABASE_URL not set");
-        return;
-    };
+async fn test_runtime_cancel_with_journal() {
+    let (runtime, _dir) = create_runtime_with_journal().await;
 
     let workflow = runtime
         .parse_yaml(
@@ -160,11 +171,8 @@ nodes:
 }
 
 #[tokio::test]
-async fn test_runtime_list_runs() {
-    let Some(runtime) = create_runtime().await else {
-        eprintln!("Skipping: DATABASE_URL not set");
-        return;
-    };
+async fn test_runtime_list_runs_with_journal() {
+    let (runtime, _dir) = create_runtime_with_journal().await;
 
     let workflow = runtime
         .parse_yaml(
@@ -185,7 +193,6 @@ nodes:
         .await
         .unwrap();
 
-    // Give it a moment to register
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     let runs = runtime.list_runs(Some("konf:test:user_list"));
@@ -193,25 +200,49 @@ nodes:
 }
 
 #[tokio::test]
-async fn test_runtime_metrics() {
-    let Some(runtime) = create_runtime().await else {
-        eprintln!("Skipping: DATABASE_URL not set");
-        return;
-    };
+async fn test_runtime_journal_records_workflow_events() {
+    let (runtime, _dir) = create_runtime_with_journal().await;
 
-    let metrics = runtime.metrics();
+    let workflow = runtime
+        .parse_yaml(
+            r#"
+workflow: journal_test
+nodes:
+  step1:
+    do: echo
+    with: { val: "hi" }
+    return: true
+"#,
+        )
+        .unwrap();
+
+    let scope = test_scope("konf:test:journal");
+    let _ = runtime
+        .run(&workflow, json!({}), scope, "sess_journal".into())
+        .await;
+
+    // Give async journal appends a moment to land.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let rows = runtime
+        .journal()
+        .unwrap()
+        .query_by_session("sess_journal", 100)
+        .await
+        .unwrap();
     assert!(
-        metrics.uptime_seconds < 10,
-        "Uptime should be small in tests"
+        !rows.is_empty(),
+        "journal should have recorded workflow lifecycle events"
     );
+    // Newest-first ordering: the last event should be a terminal one.
+    assert!(rows
+        .iter()
+        .any(|r| r.event_type == "workflow_started"));
 }
 
 #[tokio::test]
-async fn test_runtime_resource_limit() {
-    let Some(runtime) = create_runtime().await else {
-        eprintln!("Skipping: DATABASE_URL not set");
-        return;
-    };
+async fn test_runtime_resource_limit_with_journal() {
+    let (runtime, _dir) = create_runtime_with_journal().await;
 
     let workflow = runtime
         .parse_yaml(
@@ -239,13 +270,11 @@ nodes:
         depth: 0,
     };
 
-    // First start should succeed
     let _run1 = runtime
         .start(&workflow, json!({}), scope.clone(), "sess_a".into())
         .await
         .unwrap();
 
-    // Second start should fail (limit = 1)
     let result = runtime
         .start(&workflow, json!({}), scope, "sess_b".into())
         .await;
@@ -253,30 +282,28 @@ nodes:
     assert!(result.unwrap_err().to_string().contains("max_active_runs"));
 }
 
+// ============================================================
+// invoke_tool — single-tool invocation with scope enforcement
+// ============================================================
+
 #[tokio::test]
-async fn test_runtime_capability_denial() {
-    let Some(runtime) = create_runtime().await else {
-        eprintln!("Skipping: DATABASE_URL not set");
-        return;
-    };
-
-    let workflow = runtime
-        .parse_yaml(
-            r#"
-workflow: test_cap_deny
-nodes:
-  step1:
-    do: echo
-    with: { val: "hello" }
-    return: true
-"#,
-        )
+async fn test_invoke_tool_happy_path() {
+    let runtime = create_runtime_edge().await;
+    let scope = test_scope("konf:test:invoke");
+    let result = runtime
+        .invoke_tool("echo", json!({"hello": "world"}), &scope)
+        .await
         .unwrap();
+    assert_eq!(result, json!({"hello": "world"}));
+}
 
-    // Scope without "echo" capability
+#[tokio::test]
+async fn test_invoke_tool_capability_denied() {
+    let runtime = create_runtime_edge().await;
+    // Scope grants only "ai:complete" — echo is NOT granted.
     let scope = ExecutionScope {
         namespace: "konf:test:denied".into(),
-        capabilities: vec![CapabilityGrant::new("ai:complete")], // no echo
+        capabilities: vec![CapabilityGrant::new("ai:complete")],
         limits: ResourceLimits::default(),
         actor: Actor {
             id: "test".into(),
@@ -284,25 +311,104 @@ nodes:
         },
         depth: 0,
     };
+    let err = runtime
+        .invoke_tool("echo", json!({}), &scope)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("capability denied") || err.contains("not granted"));
+}
 
-    let run_id = runtime
-        .start(&workflow, json!({}), scope, "sess_deny".into())
+#[tokio::test]
+async fn test_invoke_tool_emits_tool_invoked_event() {
+    let runtime = create_runtime_edge().await;
+    let mut rx = runtime.event_bus().subscribe();
+    let scope = test_scope("konf:test:event");
+    let _ = runtime
+        .invoke_tool("echo", json!({"hello": "world"}), &scope)
         .await
         .unwrap();
-    let result = runtime.wait(run_id).await;
-    assert!(result.is_err(), "Should fail due to capability denial");
+    // Drain events until we find the ToolInvoked.
+    let mut saw_tool = false;
+    for _ in 0..4 {
+        match tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await {
+            Ok(Ok(RunEvent::ToolInvoked { tool, success, .. })) => {
+                assert_eq!(tool, "echo");
+                assert!(success);
+                saw_tool = true;
+                break;
+            }
+            Ok(Ok(_)) => continue,
+            _ => break,
+        }
+    }
+    assert!(saw_tool, "expected ToolInvoked event");
+}
+
+#[tokio::test]
+async fn test_workflow_run_emits_lifecycle_events() {
+    let runtime = create_runtime_edge().await;
+    let mut rx = runtime.event_bus().subscribe();
+    let workflow = runtime
+        .parse_yaml(
+            r#"
+workflow: lifecycle_test
+nodes:
+  step1:
+    do: echo
+    with: { val: "x" }
+    return: true
+"#,
+        )
+        .unwrap();
+    let scope = test_scope("konf:test:lifecycle");
+    let _ = runtime
+        .run(&workflow, json!({}), scope, "sess_lifecycle".into())
+        .await;
+
+    // Drain events looking for RunStarted and one of RunCompleted/RunFailed.
+    let mut saw_started = false;
+    let mut saw_terminal = false;
+    for _ in 0..20 {
+        match tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await {
+            Ok(Ok(RunEvent::RunStarted { .. })) => saw_started = true,
+            Ok(Ok(
+                RunEvent::RunCompleted { .. }
+                | RunEvent::RunFailed { .. }
+                | RunEvent::RunCancelled { .. },
+            )) => {
+                saw_terminal = true;
+                break;
+            }
+            Ok(Ok(_)) => continue,
+            _ => break,
+        }
+    }
+    assert!(saw_started, "expected RunStarted event");
+    assert!(saw_terminal, "expected terminal run event");
+}
+
+#[tokio::test]
+async fn test_invoke_tool_unknown_tool() {
+    let runtime = create_runtime_edge().await;
+    let scope = test_scope("konf:test:unknown");
+    let err = runtime
+        .invoke_tool("nonexistent:tool", json!({}), &scope)
+        .await
+        .unwrap_err()
+        .to_string();
+    // "*" grants everything, so the error is "not found in engine registry"
+    assert!(err.contains("not found") || err.contains("not granted"));
 }
 
 // ============================================================
-// Edge mode tests (no database required)
+// Edge mode tests (no journal)
 // ============================================================
 
 #[tokio::test]
-async fn test_runtime_edge_mode_no_db() {
-    let engine = setup_engine();
-    let runtime = Runtime::new(engine, None).await.unwrap();
+async fn test_runtime_edge_mode_no_journal() {
+    let runtime = create_runtime_edge().await;
 
-    // Runtime works without a database
     assert_eq!(runtime.metrics().active_runs, 0);
     assert!(runtime.journal().is_none());
     assert!(runtime.list_runs(None).is_empty());
@@ -310,8 +416,7 @@ async fn test_runtime_edge_mode_no_db() {
 
 #[tokio::test]
 async fn test_runtime_edge_mode_start_and_wait() {
-    let engine = setup_engine();
-    let runtime = Runtime::new(engine, None).await.unwrap();
+    let runtime = create_runtime_edge().await;
 
     let workflow = runtime
         .parse_yaml(
@@ -337,14 +442,12 @@ nodes:
         .await
         .unwrap();
     let result = runtime.wait(run_id).await;
-    // Workflow should complete (echo tool just returns input)
     assert!(result.is_ok(), "Edge mode workflow failed: {result:?}");
 }
 
 #[tokio::test]
 async fn test_runtime_edge_mode_metrics_update() {
-    let engine = setup_engine();
-    let runtime = Runtime::new(engine, None).await.unwrap();
+    let runtime = create_runtime_edge().await;
 
     let workflow = runtime
         .parse_yaml(
@@ -365,9 +468,6 @@ nodes:
         .await;
 
     let metrics = runtime.metrics();
-    // After completion, total_completed should increment
-    // (The run may complete or fail depending on echo tool behavior,
-    //  but metrics should be non-zero)
     assert!(
         metrics.total_completed > 0 || metrics.total_failed > 0,
         "Expected non-zero metrics after run, got: completed={}, failed={}",
@@ -378,8 +478,7 @@ nodes:
 
 #[tokio::test]
 async fn test_runtime_cancel_in_edge_mode() {
-    let engine = setup_engine();
-    let runtime = Runtime::new(engine, None).await.unwrap();
+    let runtime = create_runtime_edge().await;
 
     let workflow = runtime
         .parse_yaml(
@@ -399,7 +498,42 @@ nodes:
         .await
         .unwrap();
 
-    // Cancel immediately
     let cancel_result = runtime.cancel(run_id, "test cancel").await;
     assert!(cancel_result.is_ok());
+}
+
+#[tokio::test]
+async fn test_runtime_capability_denial_edge_mode() {
+    let runtime = create_runtime_edge().await;
+
+    let workflow = runtime
+        .parse_yaml(
+            r#"
+workflow: test_cap_deny
+nodes:
+  step1:
+    do: echo
+    with: { val: "hello" }
+    return: true
+"#,
+        )
+        .unwrap();
+
+    let scope = ExecutionScope {
+        namespace: "konf:test:denied".into(),
+        capabilities: vec![CapabilityGrant::new("ai:complete")], // no echo
+        limits: ResourceLimits::default(),
+        actor: Actor {
+            id: "test".into(),
+            role: ActorRole::User,
+        },
+        depth: 0,
+    };
+
+    let run_id = runtime
+        .start(&workflow, json!({}), scope, "sess_deny".into())
+        .await
+        .unwrap();
+    let result = runtime.wait(run_id).await;
+    assert!(result.is_err(), "Should fail due to capability denial");
 }

@@ -5,12 +5,11 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use chrono::Utc;
 use serde_json::Value;
-use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -19,11 +18,13 @@ use konflux::Workflow;
 
 use crate::context::VirtualizedTool;
 use crate::error::{RunId, RuntimeError};
+use crate::event_bus::{RunEvent, RunEventBus};
 use crate::guard::{DefaultAction, GuardedTool, Rule};
 use crate::hooks::RuntimeHooks;
-use crate::journal::{EventJournal, JournalEntry};
+use crate::journal::{JournalEntry, JournalStore};
 use crate::monitor::{ProcessTree, RunDetail, RunSummary, RuntimeMetrics};
 use crate::process::{ProcessTable, RunStatus, WorkflowRun};
+use crate::scheduler::RedbScheduler;
 use crate::scope::{ExecutionScope, ResourceLimits};
 
 /// Per-tool guard configuration. Stored in the runtime and applied during
@@ -42,7 +43,14 @@ pub struct ToolGuardEntry {
 pub struct Runtime {
     engine: Engine,
     table: Arc<ProcessTable>,
-    journal: Option<Arc<EventJournal>>,
+    journal: Option<Arc<dyn JournalStore>>,
+    /// Installed once at boot via [`Runtime::install_scheduler`]. Set only
+    /// when a persistent storage backend is configured.
+    scheduler: OnceLock<Arc<RedbScheduler>>,
+    /// Broadcast channel for real-time monitoring events. Subscribers
+    /// (the HTTP `/v1/monitor/stream` endpoint, TUIs) consume
+    /// [`RunEvent`]s emitted from every mutating path.
+    event_bus: Arc<RunEventBus>,
     _default_limits: ResourceLimits,
     started_at: Instant,
     /// Tool guards from product config, applied during registry construction.
@@ -54,41 +62,43 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Create a new runtime with optional database pool.
-    /// If pool is provided, creates EventJournal and reconciles zombie workflows.
-    /// If pool is None (edge/phone deployment), journal is disabled.
-    pub async fn new(engine: Engine, pool: Option<PgPool>) -> Result<Self, RuntimeError> {
-        Self::with_limits(engine, pool, ResourceLimits::default()).await
+    /// Create a new runtime with an optional journal backend.
+    ///
+    /// If a journal is provided, [`JournalStore::reconcile_zombies`] is
+    /// invoked once to surface workflows that were interrupted by a prior
+    /// crash. If `journal` is `None` (edge deployment, dev mode with no
+    /// persistent state), no events are recorded.
+    pub async fn new(
+        engine: Engine,
+        journal: Option<Arc<dyn JournalStore>>,
+    ) -> Result<Self, RuntimeError> {
+        Self::with_limits(engine, journal, ResourceLimits::default()).await
     }
 
     /// Create with custom default resource limits.
     pub async fn with_limits(
         engine: Engine,
-        pool: Option<PgPool>,
+        journal: Option<Arc<dyn JournalStore>>,
         default_limits: ResourceLimits,
     ) -> Result<Self, RuntimeError> {
-        let journal = match pool {
-            Some(pool) => {
-                let journal = Arc::new(EventJournal::new(pool).await?);
-                let reconciled = journal.reconcile_zombies().await?;
-                if reconciled > 0 {
-                    info!(
-                        count = reconciled,
-                        "Reconciled zombie workflows from previous run"
-                    );
-                }
-                Some(journal)
+        if let Some(ref j) = journal {
+            let reconciled = j.reconcile_zombies().await?;
+            if reconciled > 0 {
+                info!(
+                    count = reconciled,
+                    "Reconciled zombie workflows from previous run"
+                );
             }
-            None => {
-                debug!("No database pool — event journal disabled");
-                None
-            }
-        };
+        } else {
+            debug!("No journal backend — event journal disabled");
+        }
 
         Ok(Self {
             engine,
             table: Arc::new(ProcessTable::new()),
             journal,
+            scheduler: OnceLock::new(),
+            event_bus: Arc::new(RunEventBus::default()),
             _default_limits: default_limits,
             started_at: Instant::now(),
             tool_guards: std::sync::RwLock::new(HashMap::new()),
@@ -96,6 +106,30 @@ impl Runtime {
             total_failed: Arc::new(0.into()),
             total_cancelled: Arc::new(0.into()),
         })
+    }
+
+    /// Access the real-time event bus. Subscribers call `.subscribe()`
+    /// to receive a [`tokio::sync::broadcast::Receiver`] over
+    /// [`RunEvent`] values emitted by the runtime.
+    pub fn event_bus(&self) -> Arc<RunEventBus> {
+        self.event_bus.clone()
+    }
+
+    /// Install the durable scheduler backed by [`crate::storage::KonfStorage`].
+    ///
+    /// Must be called before workflows or `schedule:create` tools attempt to
+    /// use the scheduler. Subsequent calls are ignored — the scheduler can
+    /// only be installed once per runtime instance.
+    pub fn install_scheduler(&self, scheduler: Arc<RedbScheduler>) {
+        if self.scheduler.set(scheduler).is_err() {
+            debug!("scheduler already installed, ignoring duplicate install_scheduler call");
+        }
+    }
+
+    /// Access the installed scheduler. Returns `None` on edge deployments
+    /// that don't configure a storage backend.
+    pub fn scheduler(&self) -> Option<&Arc<RedbScheduler>> {
+        self.scheduler.get()
     }
 
     /// Access the engine for tool registration.
@@ -204,6 +238,114 @@ impl Runtime {
         self.engine.parse_yaml(yaml).map_err(RuntimeError::Engine)
     }
 
+    /// Invoke a single tool under a scope, applying the same wrapping
+    /// (namespace binding injection via [`VirtualizedTool`], deny/allow
+    /// rules via [`GuardedTool`]) that workflow execution would apply —
+    /// without creating a workflow-run lifecycle entry in the process
+    /// table.
+    ///
+    /// Intended for transport layers (MCP, HTTP) that need to call a
+    /// single tool outside of a workflow but still want scope enforcement
+    /// and guard rules to apply. This is how the HTTP `/mcp` endpoint
+    /// exposes tools safely: instead of calling `engine.registry().get(..)`
+    /// and invoking the raw tool directly, it routes the call through
+    /// here so dev-mode sessions still pick up tool guards and any
+    /// configured namespace bindings.
+    ///
+    /// Does NOT emit `RunStarted` / `RunCompleted` events (single-tool
+    /// calls are tracked via the event bus in phase 5 instead).
+    pub async fn invoke_tool(
+        &self,
+        tool_name: &str,
+        input: Value,
+        scope: &ExecutionScope,
+    ) -> Result<Value, RuntimeError> {
+        // 1. Capability check — returns the bindings (for namespace
+        //    injection) if the scope grants this tool.
+        let bindings = scope.check_tool(tool_name)?;
+
+        // 2. Resolve the raw tool from the engine registry.
+        let raw_tool = self
+            .engine
+            .registry()
+            .get(tool_name)
+            .ok_or_else(|| {
+                RuntimeError::CapabilityDenied(format!(
+                    "tool '{tool_name}' not found in engine registry"
+                ))
+            })?;
+
+        // 3. Layer 1: VirtualizedTool wraps the raw tool to inject the
+        //    scope's parameter bindings (e.g. namespace) before the tool
+        //    sees the input. Skipped when there are no bindings to save
+        //    an Arc allocation.
+        let wrapped: Arc<dyn konflux::tool::Tool> = if bindings.is_empty() {
+            raw_tool
+        } else {
+            Arc::new(VirtualizedTool::new(raw_tool, bindings))
+        };
+
+        // 4. Layer 2: GuardedTool applies deny/allow rules from
+        //    tools.yaml::tool_guards. If no guard is configured for this
+        //    tool, we skip the wrapper entirely.
+        let wrapped = {
+            let guards = self
+                .tool_guards
+                .read()
+                .expect("tool_guards lock poisoned");
+            if let Some(guard_entry) = guards.get(tool_name) {
+                if guard_entry.rules.is_empty() {
+                    wrapped
+                } else {
+                    debug!(
+                        tool = %tool_name,
+                        rule_count = guard_entry.rules.len(),
+                        "invoke_tool: applying guards"
+                    );
+                    Arc::new(GuardedTool::new(
+                        wrapped,
+                        guard_entry.rules.clone(),
+                        guard_entry.default_action,
+                    ))
+                }
+            } else {
+                wrapped
+            }
+        };
+
+        // 5. Build the tool context and invoke. The context carries the
+        //    scope's capability patterns so any nested capability checks
+        //    inside the tool (if it happens to call into the engine)
+        //    behave consistently with the rest of the runtime.
+        let ctx = konflux::tool::ToolContext {
+            capabilities: scope.capability_patterns(),
+            workflow_id: "runtime_invoke".into(),
+            node_id: format!("invoke_{tool_name}"),
+            metadata: HashMap::from_iter([
+                (
+                    "namespace".into(),
+                    Value::String(scope.namespace.clone()),
+                ),
+                (
+                    "actor_id".into(),
+                    Value::String(scope.actor.id.clone()),
+                ),
+            ]),
+        };
+
+        let result = wrapped.invoke(input, &ctx).await;
+        self.event_bus.emit(RunEvent::ToolInvoked {
+            tool: tool_name.to_string(),
+            namespace: scope.namespace.clone(),
+            at: Utc::now(),
+            success: result.is_ok(),
+        });
+        result.map_err(|e| RuntimeError::Tool {
+            tool: tool_name.to_string(),
+            message: e.to_string(),
+        })
+    }
+
     // ---- Execution ----
 
     /// Start a workflow execution. Returns RunId immediately.
@@ -247,6 +389,16 @@ impl Runtime {
 
         self.table.insert(run);
 
+        // Emit run_started to the live event bus so subscribers (TUI via
+        // /v1/monitor/stream) see the new run immediately.
+        self.event_bus.emit(RunEvent::RunStarted {
+            run_id,
+            workflow_id: workflow.id.to_string(),
+            namespace: scope.namespace.clone(),
+            parent_id: None,
+            started_at: Utc::now(),
+        });
+
         // Journal: workflow started (if journal is available)
         if let Some(ref journal) = self.journal {
             if let Err(e) = journal
@@ -289,6 +441,7 @@ impl Runtime {
         let total_completed = self.total_completed.clone();
         let total_failed = self.total_failed.clone();
         let total_cancelled = self.total_cancelled.clone();
+        let event_bus = self.event_bus.clone();
 
         tokio::spawn(async move {
             let result = engine
@@ -314,9 +467,16 @@ impl Runtime {
                 ),
             };
 
+            // Compute duration once and reuse it for status + metrics + events.
+            let duration_ms = {
+                let started_at = table
+                    .get(&run_id, |run| run.started_at)
+                    .unwrap_or(now);
+                (now - started_at).num_milliseconds().max(0) as u64
+            };
+
             table.update(&run_id, |run| {
                 *run.completed_at.lock().unwrap_or_else(|p| p.into_inner()) = Some(now);
-                let duration_ms = (now - run.started_at).num_milliseconds().max(0) as u64;
                 let new_status = match &result {
                     Ok(output) => RunStatus::Completed {
                         duration_ms,
@@ -334,16 +494,29 @@ impl Runtime {
                 *run.status.lock().unwrap_or_else(|p| p.into_inner()) = new_status;
             });
 
-            // Increment metrics counters
+            // Increment metrics counters and emit lifecycle events.
             match (&result, is_cancellation) {
                 (Ok(_), _) => {
                     total_completed.fetch_add(1, Ordering::Relaxed);
+                    event_bus.emit(RunEvent::RunCompleted {
+                        run_id,
+                        duration_ms,
+                    });
                 }
-                (Err(_), true) => {
+                (Err(e), true) => {
                     total_cancelled.fetch_add(1, Ordering::Relaxed);
+                    event_bus.emit(RunEvent::RunCancelled {
+                        run_id,
+                        reason: e.to_string(),
+                    });
                 }
-                (Err(_), false) => {
+                (Err(e), false) => {
                     total_failed.fetch_add(1, Ordering::Relaxed);
+                    event_bus.emit(RunEvent::RunFailed {
+                        run_id,
+                        duration_ms,
+                        error: e.to_string(),
+                    });
                 }
             }
 
@@ -475,6 +648,15 @@ impl Runtime {
         };
         self.table.insert(run);
 
+        // Emit run_started to the event bus.
+        self.event_bus.emit(RunEvent::RunStarted {
+            run_id,
+            workflow_id: workflow.id.to_string(),
+            namespace: scope.namespace.clone(),
+            parent_id: None,
+            started_at: Utc::now(),
+        });
+
         // Journal: workflow started
         if let Some(ref journal) = self.journal {
             if let Err(e) = journal
@@ -532,6 +714,7 @@ impl Runtime {
         let total_completed = self.total_completed.clone();
         let total_failed = self.total_failed.clone();
         let total_cancelled = self.total_cancelled.clone();
+        let event_bus = self.event_bus.clone();
 
         // Forwarding task: reads from engine, forwards to caller, updates process table on terminal events
         tokio::spawn(async move {
@@ -579,9 +762,12 @@ impl Runtime {
 
             // Update process table
             let now = Utc::now();
+            let duration_ms = {
+                let started_at = table.get(&run_id, |run| run.started_at).unwrap_or(now);
+                (now - started_at).num_milliseconds().max(0) as u64
+            };
             table.update(&run_id, |run| {
                 *run.completed_at.lock().unwrap_or_else(|p| p.into_inner()) = Some(now);
-                let duration_ms = (now - run.started_at).num_milliseconds().max(0) as u64;
                 let new_status = match &final_status {
                     Some((_, _, true)) => RunStatus::Completed {
                         duration_ms,
@@ -607,16 +793,44 @@ impl Runtime {
                 *run.status.lock().unwrap_or_else(|p| p.into_inner()) = new_status;
             });
 
-            // Increment metrics
+            // Increment metrics and emit lifecycle events.
             match &final_status {
                 Some((_, _, true)) => {
                     total_completed.fetch_add(1, Ordering::Relaxed);
+                    event_bus.emit(RunEvent::RunCompleted {
+                        run_id,
+                        duration_ms,
+                    });
                 }
-                Some(("workflow_cancelled", _, _)) => {
+                Some(("workflow_cancelled", payload, _)) => {
                     total_cancelled.fetch_add(1, Ordering::Relaxed);
+                    let reason = payload
+                        .get("reason")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("cancelled")
+                        .to_string();
+                    event_bus.emit(RunEvent::RunCancelled { run_id, reason });
                 }
-                _ => {
+                Some((_, payload, _)) => {
                     total_failed.fetch_add(1, Ordering::Relaxed);
+                    let error = payload
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    event_bus.emit(RunEvent::RunFailed {
+                        run_id,
+                        duration_ms,
+                        error,
+                    });
+                }
+                None => {
+                    total_failed.fetch_add(1, Ordering::Relaxed);
+                    event_bus.emit(RunEvent::RunFailed {
+                        run_id,
+                        duration_ms,
+                        error: "stream ended without terminal event".into(),
+                    });
                 }
             }
 
@@ -745,7 +959,7 @@ impl Runtime {
     }
 
     /// Access the event journal (for admin queries). None on edge deployments.
-    pub fn journal(&self) -> Option<&EventJournal> {
+    pub fn journal(&self) -> Option<&dyn JournalStore> {
         self.journal.as_deref()
     }
 }

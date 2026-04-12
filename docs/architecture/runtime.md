@@ -24,14 +24,45 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// Create a new runtime with a konflux engine and optional Postgres pool.
-    /// If pool is provided, creates EventJournal and reconciles zombie workflows.
-    /// If pool is None (edge/phone deployment), journal is disabled — events exist
-    /// only in the in-memory process table.
-    pub async fn new(engine: Engine, pool: Option<sqlx::PgPool>) -> Result<Self, RuntimeError>;
+    /// Create a new runtime with a konflux engine and an optional journal
+    /// backend. If a journal is provided, `reconcile_zombies` is invoked
+    /// once to surface workflows interrupted by a prior crash. If `None`
+    /// (edge/phone deployment), events exist only in the in-memory
+    /// process table and are lost on restart.
+    pub async fn new(
+        engine: Engine,
+        journal: Option<Arc<dyn JournalStore>>,
+    ) -> Result<Self, RuntimeError>;
 
     /// Create with custom default resource limits.
-    pub async fn with_limits(engine: Engine, pool: Option<sqlx::PgPool>, limits: ResourceLimits) -> Result<Self, RuntimeError>;
+    pub async fn with_limits(
+        engine: Engine,
+        journal: Option<Arc<dyn JournalStore>>,
+        limits: ResourceLimits,
+    ) -> Result<Self, RuntimeError>;
+
+    /// Install the durable scheduler (`RedbScheduler`). Called once by
+    /// `konf-init::boot` after storage and runtime are both constructed;
+    /// the scheduler itself holds a `Weak<Runtime>` to break the cycle.
+    pub fn install_scheduler(&self, scheduler: Arc<RedbScheduler>);
+
+    /// Access the installed scheduler (`None` if no storage is configured).
+    pub fn scheduler(&self) -> Option<&Arc<RedbScheduler>>;
+
+    /// Invoke a single tool under a scope, applying `VirtualizedTool`
+    /// namespace injection and `GuardedTool` deny/allow rules, without
+    /// creating a workflow-run lifecycle entry. Used by the HTTP MCP
+    /// transport so direct tool calls still pick up guards in dev mode.
+    pub async fn invoke_tool(
+        &self,
+        tool_name: &str,
+        input: Value,
+        scope: &ExecutionScope,
+    ) -> Result<Value, RuntimeError>;
+
+    /// Access the real-time event bus (`RunEventBus`) for subscribers
+    /// like the TUI's `/v1/monitor/stream` SSE endpoint.
+    pub fn event_bus(&self) -> Arc<RunEventBus>;
 
     // --- Execution ---
 
@@ -237,46 +268,59 @@ pub struct JournalEntry {
 }
 ```
 
-**Ownership:** konf-runtime owns writes to both tables. The backend reads from them for admin APIs.
+**Ownership:** konf-runtime owns writes to all persistent stores. The
+backend reads from them for admin APIs. See
+[`storage.md`](storage.md) for the full layout of the single redb
+file that backs the journal, scheduler, and runner intents.
 
 ### Process table persistence
 
-The ProcessTable is **ephemeral** (in-memory `papaya::HashMap`). On server restart:
-- All running workflows are lost (their CancellationTokens are dropped, tokio tasks are aborted)
-- Clients must handle reconnection (SSE stream closes, client retries)
-- Completed run history survives in `runtime_events` table (persistent)
-- Agent context survives in the memory backend (memory graph + session state)
+The ProcessTable is **ephemeral** (in-memory `papaya::HashMap`). On
+server restart:
 
-Recovery after restart: the backend does NOT reconstruct the process table from the journal. It starts fresh. Active sessions reconnect and start new workflow runs. This is acceptable because workflows are short-lived (seconds to minutes) and context is in the memory backend (graph + session state).
+- All running workflows are lost (their `CancellationToken`s are
+  dropped, tokio tasks are aborted).
+- Clients must handle reconnection — the SSE stream closes and the
+  client retries.
+- The in-memory table starts fresh.
 
-**Why not checkpointing?** Durable execution (Temporal-style) was explicitly rejected (rationale archived at tag `v0.1.0` in `docs/research/`). AI agent workflows are non-deterministic — replaying from a checkpoint produces different results because LLM responses aren't reproducible. Instead, Konf follows the Kubernetes model: processes are ephemeral, state is external. Side effects from completed steps (memory writes, API calls) already happened. The client reconnects and starts fresh, reading context from the memory backend.
+But the runtime **is** durable at the intent layer:
 
-**For long-running tasks** (hours/days), the pattern is workflow-as-tool composition: an outer workflow chains short-lived sub-workflows, each storing intermediate results in session state. If the server restarts, the outer workflow resumes from the last completed sub-workflow by reading state. No checkpointing machinery needed — composability solves it.
+- **Journal** (`runtime_events` in redb) records every lifecycle event
+  for audit and for zombie reconciliation on boot. `Runtime::new`
+  calls `journal.reconcile_zombies()` which finds runs that started
+  but never reached a terminal event and inserts a synthetic
+  `workflow_failed { reconciled: true }` so the admin dashboard never
+  shows eternally "running" zombies from a previous process lifetime.
+- **Scheduler** (`scheduler_timers` in redb) keeps durable timers for
+  cron and fixed-delay workflows. On restart the polling loop picks
+  up where it left off — overdue timers fire immediately (catch-up).
+- **Runner intents** (`runner_intents` in redb) persist the input and
+  scope of every `runner:spawn` call. On restart, unterminated
+  intents are replayed from the top with the same run id,
+  preserving external references (TUI bookmarks, journal entries).
 
-### Zombie workflow reconciliation
+### Why not mid-workflow checkpointing?
 
-On startup, `Runtime::new()` runs a reconciliation query:
+Durable mid-workflow execution (Temporal-style, saving
+`(step_name, step_output)` pairs) was explicitly rejected. AI agent
+workflows are non-deterministic — replaying from a mid-workflow
+checkpoint produces different results because LLM responses aren't
+reproducible. We do not pretend otherwise.
 
-```sql
--- Find runs that started but never completed (zombies from previous crash)
-INSERT INTO runtime_events (run_id, session_id, namespace, event_type, payload, created_at)
-SELECT 
-    e.run_id,
-    e.session_id,
-    e.namespace,
-    'workflow_failed',
-    jsonb_build_object('error', 'System restart — workflow was interrupted', 'reconciled', true),
-    NOW()
-FROM runtime_events e
-WHERE e.event_type = 'workflow_started'
-  AND NOT EXISTS (
-    SELECT 1 FROM runtime_events t 
-    WHERE t.run_id = e.run_id 
-      AND t.event_type IN ('workflow_completed', 'workflow_failed', 'workflow_cancelled')
-  );
-```
+Konf's durability model is: **persist the intent, retry the whole
+workflow from the top, let the author make it idempotent.** The
+idiomatic tools are memory-backed cursors and dedup keys. See
+[`durability.md`](durability.md) for the doctrine and worked examples.
 
-This ensures the admin dashboard and metrics never show eternally "running" workflows from a previous process lifetime.
+### Long-running tasks
+
+For hours-or-days tasks, the pattern is **workflow-as-tool
+composition**: an outer orchestrator workflow chains short-lived
+sub-workflows, each storing intermediate results in memory. On
+restart, the orchestrator replays from the top and reads memory to
+see which sub-workflows already produced their output. No
+checkpointing machinery required.
 
 ### Errors
 

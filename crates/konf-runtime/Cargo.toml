@@ -11,11 +11,13 @@ konflux-core = { path = "../konflux-core" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 papaya = { workspace = true }
-sqlx = { workspace = true }
+redb = { workspace = true }
+postcard = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+cron = { workspace = true }
 tracing = { version = "0.1", features = ["attributes"] }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
@@ -23,3 +25,4 @@ async-trait = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
+tempfile = { workspace = true }

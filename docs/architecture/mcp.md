@@ -10,10 +10,15 @@
 
 Konf speaks MCP (Model Context Protocol) in both directions:
 
-1. **konf-mcp** (server) — exposes Konf's tools, resources, and prompts to MCP clients (Claude Desktop, Cursor, other Konf instances)
-2. **konf-tool-mcp** (client) — connects to external MCP servers (Brave, GitHub, Slack, etc.), discovers their tools, wraps them as Konf tools
+1. **konf-mcp** (server) — exposes Konf's tools, resources, and prompts to MCP clients (Claude Desktop, Cursor, other Konf instances). Available as a standalone stdio binary (`konf-mcp`) and as an optional HTTP endpoint mounted inside `konf-backend` at `/mcp`.
+2. **konf-tool-mcp** (client) — connects to external MCP servers (Brave, GitHub, Slack, etc.), discovers their tools, wraps them as Konf tools.
 
 These are separate crates with separate concerns. konf-mcp is a transport shell (like konf-backend). konf-tool-mcp is a tool source (like konf-tool-http).
+
+**Transport selection**:
+
+- **stdio** (`konf-mcp` binary) — the default. Each client spawns its own `konf-mcp` subprocess and gets its own runtime. Use for Claude Desktop and any client that manages the server lifecycle itself.
+- **HTTP Streamable** (`konf-backend`'s `/mcp` endpoint) — optional, enabled by `KONF_MCP_HTTP=1`. Shares the same `Arc<Runtime>` as the REST API, which means MCP clients and TUIs observe the same running workflows. Dev-only in v1: every session gets `capabilities = ["*"]`. See [`mcp-http.md`](mcp-http.md) for the full security model and the split-brain fix rationale.
 
 ---
 

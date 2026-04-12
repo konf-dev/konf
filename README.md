@@ -69,7 +69,10 @@ The same Rust binary runs every product. Switching LLM providers, memory backend
 | `konf-tool-shell` | Sandboxed shell execution |
 | `konf-tool-secret` | Secret retrieval with allowlist |
 
-Memory backends:
+Storage:
+- **Runtime state** (journal, scheduler timers, runner intents) lives in a single embedded **redb** file managed by `konf_runtime::KonfStorage`. No external database required for a single-node deployment. See [`docs/architecture/storage.md`](docs/architecture/storage.md).
+
+Memory backends (independent of runtime storage):
 - `konf-tool-memory-surreal` — SurrealDB-backed graph memory. Embedded (single-file RocksDB) or remote (WebSocket to a Surreal server). Same SurrealQL in both modes. **Default** since v0.1.0.
 - [konf-dev/smrti](https://github.com/konf-dev/smrti) — Postgres + pgvector graph memory. Opt-in via `--features memory-smrti`. Requires SSH access to the private smrti repo at build time.
 
@@ -106,15 +109,27 @@ See [`sdk/`](sdk/) for details.
 ```bash
 git clone https://github.com/konf-dev/konf.git
 cd konf
-cargo build --workspace
+cargo build --release --workspace
 cargo test --workspace
 
-# Start with Docker (includes Postgres)
-docker compose up -d
+# Run with a single embedded redb file — no Postgres, no Docker
+mkdir -p config
+cat > config/konf.toml <<'EOF'
+[database]
+url = "redb:///tmp/konf.redb"
+retention_days = 7
+EOF
+cat > config/tools.yaml <<'EOF'
+tools:
+  http:
+    enabled: true
+EOF
+
+KONF_CONFIG_DIR=./config ./target/release/konf-backend &
 curl http://localhost:8000/v1/health
 ```
 
-See [`docs/getting-started/quickstart.md`](docs/getting-started/quickstart.md) for detailed setup.
+See [`docs/getting-started/quickstart.md`](docs/getting-started/quickstart.md) for detailed setup, including `KONF_MCP_HTTP=1` for sharing state between your TUI and an MCP client.
 
 ## License
 

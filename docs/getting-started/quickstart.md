@@ -1,73 +1,38 @@
 # Konf Quickstart Guide
 
-Get the Konf platform running locally in 5 minutes.
-
----
-
-## Running Konf
-
-To run Konf against a product, point `KONF_CONFIG_DIR` at a product's `config/` directory and start one of the two transport shells:
-
-- **`konf-backend`** — HTTP server. `POST /v1/chat` with SSE streaming.
-- **`konf-mcp`** — stdio MCP server. Used by Claude Desktop, Cursor, Claude Code, and any other MCP client.
-
-Products that need external infrastructure (Postgres for memory, secret store, etc.) can bring their own via a workflow that calls `shell:exec` to run `docker compose`. The [`products/init/`](../../products/init/) product is a reference example.
+Get the Konf platform running locally in under a minute. No Postgres,
+no docker-compose, no external services — konf v2 is **local-first**
+and ships with an embedded redb storage backend.
 
 ---
 
 ## Prerequisites
 
 - **Rust** 1.75+ (`rustup` recommended)
-- **Docker** (to run the `init` product's containers)
-- **Infisical CLI** (recommended for secret management)
+- Optional: **Docker** only if your product uses `shell:exec` with
+  container sandboxing.
+
+That's it. No database, no broker, no external dependencies.
 
 ---
 
-## Option A: Standalone Docker (The "Old Way")
+## Option A: HTTP backend with a redb file
 
 ```bash
-# Clone the repo
-git clone https://github.com/konf-dev/konf-dev-stack.git
-cd konf-dev-stack
+# Clone and build
+git clone https://github.com/konf-dev/konf.git
+cd konf
+cargo build --release --workspace
 
 # Create a minimal config
 mkdir -p config
-cat > config/tools.yaml <<'EOF'
-tools:
-  memory:
-    backend: smrti
-    config:
-      dsn: "postgresql://postgres:pass@localhost:5432/konf"
-  http:
-    enabled: true
-EOF
-
-# Start Postgres + backend
-docker compose up -d
-
-# Check health
-curl http://localhost:8000/v1/health
-# → {"status":"ok","version":"0.1.0"}
-```
-
-## Option B: From Source
-
-```bash
-# Clone all repos
-git clone https://github.com/konf-dev/konf-dev-stack.git
-cd konf-dev-stack
-
-# Ensure Postgres is running with pgvector
-# createdb konf
-
-# Create config
-mkdir -p config
 cat > config/konf.toml <<'EOF'
 [database]
-url = "postgresql://localhost/konf"
+url = "redb:///tmp/konf.redb"
+retention_days = 7
 
 [server]
-host = "0.0.0.0"
+host = "127.0.0.1"
 port = 8000
 EOF
 
@@ -77,17 +42,29 @@ tools:
     enabled: true
 EOF
 
-# Build and run
-cargo run --release --bin konf-backend
+# Run
+KONF_CONFIG_DIR=./config ./target/release/konf-backend
+
+# Health check
+curl http://localhost:8000/v1/health
+# → {"status":"ok","version":"0.1.0"}
 ```
 
-## Option C: MCP Server (Claude Desktop)
+The first run creates `/tmp/konf.redb` and initializes the journal,
+scheduler, and runner-intent tables. Subsequent runs re-open the same
+file — your schedules and unterminated intents survive restarts.
+
+---
+
+## Option B: stdio MCP server (Claude Desktop, Cursor)
 
 ```bash
-# Build the MCP server
 cargo build --release --bin konf-mcp
+```
 
-# Add to Claude Desktop config (~/.config/claude/claude_desktop_config.json):
+Add to `~/.config/claude/claude_desktop_config.json`:
+
+```json
 {
   "mcpServers": {
     "konf": {
@@ -98,7 +75,56 @@ cargo build --release --bin konf-mcp
 }
 ```
 
-Claude Desktop will connect to Konf and see all registered tools.
+Claude Desktop will spawn `konf-mcp` as a subprocess and see all
+registered tools and workflows.
+
+---
+
+## Option C: HTTP MCP + REST sharing state (dev only)
+
+When you want your TUI (talking to `konf-backend`'s REST API) and
+your MCP client to observe the **same** running workflows and share
+the **same** memory, enable the HTTP MCP endpoint:
+
+```bash
+KONF_CONFIG_DIR=./config \
+KONF_MCP_HTTP=1 \
+./target/release/konf-backend
+```
+
+`/mcp` is now mounted on the same axum router as `/v1/*`, and both
+transports share the same `Arc<Runtime>`. Point Claude Code at
+`http://localhost:8000/mcp`, open your TUI against
+`/v1/monitor/stream`, and watch a single workflow run appear in both
+places simultaneously.
+
+**Dev-only caveats**:
+- Every MCP session gets `capabilities = ["*"]`.
+- No per-user auth, no per-session scoping.
+- Guarded only by your `tool_guards` rules in `tools.yaml` and by
+  namespace injection via `VirtualizedTool` (which scopes MCP
+  memory ops to the `konf:mcp:http` namespace).
+- Never enable `KONF_MCP_HTTP=1` on a network-exposed deployment.
+  See [`architecture/mcp-http.md`](../architecture/mcp-http.md) for
+  the full security model.
+
+---
+
+## Edge mode (no persistence)
+
+For throwaway tests or ephemeral compute, omit the `[database]`
+section entirely:
+
+```toml
+# config/konf.toml — edge mode
+[server]
+host = "127.0.0.1"
+port = 8000
+```
+
+The runtime boots without a journal, scheduler, or runner-intent
+store. Workflows still run. Nothing survives a restart. Good for
+CI, bad for anything you care about.
 
 ---
 
@@ -119,63 +145,78 @@ nodes:
     return: true
 ```
 
-This workflow is automatically registered as `workflow_hello` and can be called via the chat API or MCP.
+This workflow auto-registers as `workflow:hello` and is callable via
+`/v1/chat`, MCP (stdio or HTTP), or another workflow via
+`do: workflow:hello`.
+
+## Your First Schedule
+
+Create `config/schedules.yaml`:
+
+```yaml
+- name: hourly_hello
+  workflow: hello
+  cron: "0 0 * * * * *"          # every hour on the hour
+  namespace: "konf:quickstart:local"
+  capabilities: []
+  input: {}
+```
+
+On boot, `konf-init` registers this cron with the durable scheduler.
+The timer survives restarts. On fire, the scheduler looks up
+`workflow:hello` in the live engine registry and invokes it.
+
+Cron syntax is 7 fields: `sec min hour day month weekday year`.
+
+---
+
+## Watching runs live (the TUI path)
+
+```bash
+# In another terminal
+curl -N http://localhost:8000/v1/monitor/stream
+```
+
+You'll see Server-Sent Events stream as workflows start, progress,
+and complete:
+
+```
+event: hello
+data: {"status":"connected"}
+
+event: run_started
+data: {"type":"run_started","run_id":"...","workflow_id":"hello",...}
+
+event: run_completed
+data: {"type":"run_completed","run_id":"...","duration_ms":12}
+```
+
+Filter by namespace prefix via the `?namespace=` query parameter.
 
 ---
 
 ## Running Tests
 
 ```bash
-# Unit tests (no external services needed)
+# Full workspace, no external services
 cargo test --workspace
 
-# Integration tests (requires Postgres with DATABASE_URL set)
-DATABASE_URL=postgresql://localhost/konf_test cargo test --workspace -- --ignored
+# Clippy clean
+cargo clippy --workspace --all-targets -- -D warnings
 ```
-
----
-
-## Project Structure
-
-```
-konf/                             ← Cargo workspace
-├── crates/                       ← 13 Rust crates
-│   ├── konflux-core/             ← Engine: workflow execution, 3 registries
-│   ├── konf-runtime/             ← Process management, ExecutionScope, capability lattice
-│   ├── konf-init/                ← Bootstrap: config loading, tool registration
-│   ├── konf-init-kell/           ← CLI scaffolder for new products
-│   ├── konf-backend/             ← HTTP server (REST API + SSE)
-│   ├── konf-mcp/                 ← MCP server (stdio + SSE)
-│   ├── konf-tool-http/           ← HTTP GET/POST tools
-│   ├── konf-tool-llm/            ← LLM completion (rig-core)
-│   ├── konf-tool-embed/          ← Local embeddings (fastembed)
-│   ├── konf-tool-memory/         ← MemoryBackend trait
-│   ├── konf-tool-mcp/            ← MCP client (consume external servers)
-│   ├── konf-tool-shell/          ← Sandboxed shell execution
-│   └── konf-tool-secret/         ← Secret retrieval with allowlist
-├── products/                     ← Reference products (YAML + markdown)
-│   ├── _template/                ← Minimal starter
-│   ├── devkit/                   ← Canonical reference (VCS workflows)
-│   └── init/                     ← Init product example
-├── docs/                         ← Architecture, product guide, MENTAL_MODEL.md
-├── sandbox/                      ← E2E testing infrastructure
-└── sdk/                          ← Plugin SDK (WASM planned)
-```
-
-## What is smrti?
-
-smrti (Sanskrit: "that which is remembered") is the graph memory engine. It is an **external dependency** maintained in the [konf-dev/smrti](https://github.com/konf-dev/smrti) repo — it is not part of this monorepo. It provides:
-- Knowledge graph storage (nodes, edges, metadata)
-- Hybrid search (vector + full-text)
-- Session state (ephemeral key-value scratchpad)
-- Event sourcing (append-only log for audit)
-
-The `konf-tool-memory-smrti` bridge crate (also in the smrti repo) implements the `MemoryBackend` trait for smrti. See [memory-backends.md](../architecture/memory-backends.md).
 
 ---
 
 ## Next Steps
 
-- Read [MENTAL_MODEL.md](../MENTAL_MODEL.md) for the single source of truth on architecture, vocabulary, and doctrine
-- Read [overview.md](../architecture/overview.md) for the full platform design
-- Read [creating-a-product.md](../product-guide/creating-a-product.md) to author your own product
+- Read [`MENTAL_MODEL.md`](../MENTAL_MODEL.md) for the single source of
+  truth on architecture, vocabulary, and doctrine.
+- Read [`architecture/durability.md`](../architecture/durability.md)
+  to understand the durability model (intent + idempotent retry, not
+  checkpoint-and-replay).
+- Read [`architecture/storage.md`](../architecture/storage.md) for
+  how the redb file is laid out.
+- Read [`architecture/mcp-http.md`](../architecture/mcp-http.md) for
+  the `/mcp` endpoint's security model.
+- Read [`product-guide/creating-a-product.md`](../product-guide/creating-a-product.md)
+  to author your own product.

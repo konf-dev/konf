@@ -18,6 +18,16 @@ use rmcp::model::{
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::ServiceExt;
 
+/// Re-exports of the rmcp items used by `konf-backend` to mount the
+/// Streamable HTTP endpoint. Keeping them here means downstream crates
+/// don't need a direct rmcp dependency.
+pub mod http {
+    pub use rmcp::transport::streamable_http_server::{
+        session::local::LocalSessionManager, StreamableHttpService,
+    };
+}
+
+use konf_runtime::scope::{Actor, ActorRole, CapabilityGrant, ExecutionScope, ResourceLimits};
 use konf_runtime::Runtime;
 use konflux::tool::ToolInfo;
 use konflux::Engine;
@@ -97,6 +107,41 @@ impl KonfMcpServer {
     pub fn runtime(&self) -> &Runtime {
         &self.runtime
     }
+
+    /// Build the execution scope used when routing tool calls through
+    /// [`Runtime::invoke_tool`]. The scope's capability grants mirror the
+    /// session's capability patterns; in dev mode that's `["*"]`, in a
+    /// future multi-tenant deployment a custom `SessionManager` will
+    /// build narrower scopes per authenticated user.
+    ///
+    /// The namespace is a stable `konf:mcp:http` prefix which means any
+    /// tool that honors `VirtualizedTool`'s namespace binding (currently
+    /// just the memory tools) will automatically scope its reads and
+    /// writes to that namespace. This is enough to keep MCP-originated
+    /// memory operations from leaking into other tenants' namespaces
+    /// even in the loose dev-mode configuration.
+    fn mcp_session_scope(&self) -> ExecutionScope {
+        let mut bindings = std::collections::HashMap::new();
+        bindings.insert(
+            "namespace".to_string(),
+            serde_json::Value::String("konf:mcp:http".to_string()),
+        );
+        let capabilities = self
+            .session_capabilities
+            .iter()
+            .map(|pattern| CapabilityGrant::with_bindings(pattern.clone(), bindings.clone()))
+            .collect();
+        ExecutionScope {
+            namespace: "konf:mcp:http".into(),
+            capabilities,
+            limits: ResourceLimits::default(),
+            actor: Actor {
+                id: "mcp-http".into(),
+                role: ActorRole::System,
+            },
+            depth: 0,
+        }
+    }
 }
 
 /// Convert a kernel tool name to MCP-safe name.
@@ -118,16 +163,6 @@ fn tool_info_to_mcp(info: &ToolInfo) -> McpTool {
     // Claude Code silently drops ALL tools when annotations are present
     // in the tools/list response (anthropics/claude-code#25081).
     McpTool::new(mcp_name, info.description.clone(), Arc::new(schema_obj))
-}
-
-/// Build a ToolContext for an MCP tool call using session capabilities.
-fn mcp_tool_context(capabilities: &[String]) -> konflux::tool::ToolContext {
-    konflux::tool::ToolContext {
-        capabilities: capabilities.to_vec(),
-        workflow_id: "mcp".into(),
-        node_id: "mcp_call".into(),
-        metadata: std::collections::HashMap::new(),
-    }
 }
 
 /// Check if a tool name matches session capability patterns.
@@ -192,16 +227,14 @@ impl ServerHandler for KonfMcpServer {
             .map(|info| info.name.clone())
             .unwrap_or_else(|| mcp_name.to_string()); // fallback to exact match
 
-        let tool = registry.get(&kernel_name).ok_or_else(|| {
-            ErrorData::invalid_params(format!("Tool not found: {mcp_name}"), None)
-        })?;
-
         let input: serde_json::Value = match request.arguments {
             Some(args) => serde_json::Value::Object(args),
             None => serde_json::Value::Object(serde_json::Map::new()),
         };
 
-        // Check session capabilities using the kernel name
+        // Session-level visibility filter: hide tools the session isn't
+        // allowed to see. This is a cheap early reject; the runtime will
+        // enforce the same check again inside `invoke_tool`.
         if !tool_allowed_by_session(&kernel_name, &self.session_capabilities) {
             return Err(ErrorData::invalid_params(
                 format!("Tool not permitted in this session: {mcp_name}"),
@@ -209,9 +242,17 @@ impl ServerHandler for KonfMcpServer {
             ));
         }
 
-        let ctx = mcp_tool_context(&self.session_capabilities);
-
-        match tool.invoke(input, &ctx).await {
+        // Route through the runtime so the call picks up:
+        //   - capability checks against the session's scope
+        //   - VirtualizedTool namespace binding injection
+        //   - GuardedTool deny/allow rules from tools.yaml::tool_guards
+        //
+        // In dev mode the session caps are ["*"] so the capability check
+        // is a no-op, but the guard enforcement and namespace bindings
+        // still apply. A future multi-tenant auth layer will swap the
+        // scope for a per-session narrower one via SessionManager.
+        let scope = self.mcp_session_scope();
+        match self.runtime.invoke_tool(&kernel_name, input, &scope).await {
             Ok(output) => {
                 let text =
                     serde_json::to_string_pretty(&output).unwrap_or_else(|_| output.to_string());

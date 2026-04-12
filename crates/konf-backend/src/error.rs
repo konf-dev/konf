@@ -20,8 +20,8 @@ pub enum AppError {
     #[error("internal error: {0}")]
     Internal(String),
 
-    #[error("database error: {0}")]
-    Database(#[from] sqlx::Error),
+    #[error("storage error: {0}")]
+    Storage(String),
 
     #[error("config error: {0}")]
     Config(String),
@@ -37,9 +37,9 @@ impl IntoResponse for AppError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal server error".into(),
             ),
-            AppError::Database(e) => {
-                tracing::error!(error = %e, "Database error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Database error".into())
+            AppError::Storage(e) => {
+                tracing::error!(error = %e, "Storage error");
+                (StatusCode::INTERNAL_SERVER_ERROR, "Storage error".into())
             }
             AppError::Config(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,

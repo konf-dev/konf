@@ -15,9 +15,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use tracing::info;
+use tracing::{debug, info};
 
-use konf_runtime::Runtime;
+use konf_runtime::{KonfStorage, RedbScheduler, Retention, Runtime};
 use konflux::engine::Engine;
 
 pub use config::{
@@ -38,10 +38,9 @@ pub struct KonfInstance {
     /// Product config (tools.yaml, workflows, prompts) — hot-reloadable via ArcSwap
     pub product_config: Arc<ArcSwap<ProductConfig>>,
 
-    /// Database pool (if configured). Shared with runtime journal and available
-    /// for scheduler or other server-only components. None on edge deployments.
-    #[cfg(feature = "postgres")]
-    pub pool: Option<sqlx::PgPool>,
+    /// Persistent-storage handle (journal + future scheduler + runner
+    /// intents). `None` on edge deployments that opt out of persistence.
+    pub storage: Option<Arc<KonfStorage>>,
 }
 
 /// Boot the Konf platform from a config directory.
@@ -129,37 +128,44 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     // 7. Register config files as resources
     register_resources(&engine, config_dir);
 
-    // 8. Connect to database (if configured)
-    #[cfg(feature = "postgres")]
-    let pool = match &config.database {
+    // 8. Open persistent storage (redb) if configured
+    let storage: Option<Arc<KonfStorage>> = match &config.database {
         Some(db) => {
-            let pool = sqlx::PgPool::connect(&db.url)
+            let path = parse_db_url(&db.url)?;
+            let retention = Retention {
+                days: db.retention_days,
+            };
+            let storage = KonfStorage::open(&path, retention)
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to connect to database: {e}"))?;
-            info!("Connected to database");
-            Some(pool)
+                .map_err(|e| anyhow::anyhow!("Failed to open storage at {}: {e}", path.display()))?;
+            info!(path = %path.display(), "Storage opened (redb)");
+            Some(Arc::new(storage))
         }
-        _ => None,
+        None => {
+            info!("No database configured — journal disabled, scheduling unavailable");
+            None
+        }
     };
-    #[cfg(not(feature = "postgres"))]
-    let pool: Option<()> = None;
-
-    if pool.is_none() {
-        info!("No database configured — journal disabled, scheduling unavailable");
-    }
 
     // 9. Create runtime
-    #[cfg(feature = "postgres")]
-    let runtime_pool = pool.clone();
-    #[cfg(not(feature = "postgres"))]
-    let runtime_pool = None;
-
+    let journal = storage.as_ref().map(|s| s.journal_arc());
     let runtime = Arc::new(
-        Runtime::new(engine.clone(), runtime_pool)
+        Runtime::new(engine.clone(), journal)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to initialize runtime: {e}"))?,
     );
     info!("Runtime initialized");
+
+    // 9a. Install durable scheduler (if storage is configured).
+    if let Some(ref storage) = storage {
+        let scheduler = Arc::new(
+            RedbScheduler::new(storage.database(), Arc::downgrade(&runtime))
+                .map_err(|e| anyhow::anyhow!("Failed to initialize scheduler: {e}"))?,
+        );
+        runtime.install_scheduler(scheduler.clone());
+        scheduler.start_polling();
+        info!("Durable scheduler installed and polling");
+    }
 
     // 9b. Register config_reload tool into the runtime's engine.
     // ConfigReloadTool must operate on the same engine the runtime uses
@@ -177,16 +183,24 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
         .register_tool(Arc::new(schedule::ScheduleTool::new(runtime.clone())));
     runtime
         .engine()
-        .register_tool(Arc::new(schedule::CancelScheduleTool));
+        .register_tool(Arc::new(schedule::CancelScheduleTool::new(runtime.clone())));
 
     // 9d. Register runner tools (runner:spawn/status/wait/cancel). The inline
-    // backend runs workflows as tokio tasks against the same runtime; future
-    // systemd/docker backends will plug in here without changing this call.
-    // Finding 014 principle: a new tool family, not a kernel change.
+    // backend runs workflows as tokio tasks against the same runtime. When
+    // a KonfStorage is available, spawn intents are persisted to redb so
+    // they survive restarts (at-least-once semantics — see
+    // docs/architecture/durability.md).
     let runner_registry = konf_tool_runner::RunRegistry::new();
-    let inline_runner: std::sync::Arc<dyn konf_tool_runner::Runner> = std::sync::Arc::new(
-        konf_tool_runner::InlineRunner::new(runtime.clone(), runner_registry),
-    );
+    let inline_concrete = match storage.as_ref() {
+        Some(s) => konf_tool_runner::InlineRunner::with_intents(
+            runtime.clone(),
+            runner_registry,
+            s.runner_intents_arc(),
+        ),
+        None => konf_tool_runner::InlineRunner::new(runtime.clone(), runner_registry),
+    };
+    let inline_runner: std::sync::Arc<dyn konf_tool_runner::Runner> =
+        std::sync::Arc::new(inline_concrete.clone());
     konf_tool_runner::register(runtime.engine(), inline_runner)?;
 
     // 10. Register workflows as tools (needs runtime for WorkflowTool)
@@ -201,6 +215,52 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
 
     // 10b. Apply tool guards from product config
     apply_tool_guards(&runtime, &product_config);
+
+    // 10b2. Replay unterminated runner intents from the previous run.
+    // We call after workflows are registered so workflow:<id> lookups succeed.
+    // Same run_id reused so external references (TUI, journal) still resolve.
+    if let Some(ref s) = storage {
+        let intents = s.runner_intents();
+        match intents.list_unterminated().await {
+            Ok(unterminated) if !unterminated.is_empty() => {
+                info!(count = unterminated.len(), "replaying unterminated runner intents");
+                for intent in unterminated {
+                    let run_id = intent.run_id.clone();
+                    let workflow = intent.workflow.clone();
+                    let replay_count = intent.replay_count + 1;
+                    match inline_concrete.replay(intent).await {
+                        Ok(_) => {
+                            info!(run_id = %run_id, "replayed intent");
+                            runtime.event_bus().emit(konf_runtime::RunEvent::IntentReplayed {
+                                run_id: run_id.clone(),
+                                workflow,
+                                replay_count,
+                            });
+                        }
+                        Err(e) => tracing::warn!(run_id = %run_id, error = %e, "replay failed"),
+                    }
+                }
+            }
+            Ok(_) => debug!("no unterminated runner intents to replay"),
+            Err(e) => tracing::warn!(error = %e, "failed to list unterminated intents"),
+        }
+    }
+
+    // 10c. Register schedules.yaml entries (durable cron jobs)
+    let schedules_path = config_dir.join("schedules.yaml");
+    if schedules_path.exists() {
+        match runtime.scheduler() {
+            Some(scheduler) => {
+                register_schedules(scheduler, &schedules_path, runtime.engine()).await?;
+            }
+            None => {
+                tracing::warn!(
+                    path = %schedules_path.display(),
+                    "schedules.yaml present but no storage backend configured — schedules will not be loaded"
+                );
+            }
+        }
+    }
 
     let final_tool_count = runtime.engine().registry().len();
     info!(
@@ -223,9 +283,144 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
         runtime,
         config,
         product_config,
-        #[cfg(feature = "postgres")]
-        pool,
+        storage,
     })
+}
+
+/// One entry in a `schedules.yaml` file.
+///
+/// ```yaml
+/// - name: morning_brief
+///   workflow: morning_brief
+///   cron: "0 0 8 * * * *"
+///   namespace: "konf:assistant:bert"
+///   capabilities: ["memory:*", "ai:complete"]
+///   input: { user: bert }
+/// ```
+#[derive(Debug, Clone, serde::Deserialize)]
+struct CronEntry {
+    /// Human-readable identifier (unused by the runtime; for config clarity).
+    #[allow(dead_code)]
+    name: String,
+    /// Workflow id to fire. Resolved as `workflow:<workflow>` in the engine
+    /// registry at each fire.
+    workflow: String,
+    /// 7-field cron expression (sec min hour day month weekday year).
+    cron: String,
+    /// Namespace the fire runs under.
+    namespace: String,
+    /// Capability patterns granted to each fire.
+    #[serde(default)]
+    capabilities: Vec<String>,
+    /// Input payload, snapshotted at schedule time.
+    #[serde(default = "default_input")]
+    input: serde_json::Value,
+}
+
+fn default_input() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+/// Load `schedules.yaml`, validate each entry against the live engine
+/// registry, and insert cron timers into the scheduler.
+///
+/// Idempotent: if a timer with the same `(workflow, cron, namespace)` tuple
+/// already exists it's left alone. New entries are added; removed entries
+/// are not auto-deleted (operator must call `cancel:schedule` or delete
+/// the redb file to clean up).
+async fn register_schedules(
+    scheduler: &konf_runtime::RedbScheduler,
+    path: &std::path::Path,
+    engine: &Engine,
+) -> anyhow::Result<()> {
+    let yaml = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("failed to read {}: {e}", path.display()))?;
+    let entries: Vec<CronEntry> = serde_yaml::from_str(&yaml)
+        .map_err(|e| anyhow::anyhow!("failed to parse {}: {e}", path.display()))?;
+
+    // Build an index of existing timers keyed by (workflow, cron, namespace)
+    // so we don't re-register duplicates on config:reload or restart.
+    let existing = scheduler.list(None).await.map_err(|e| anyhow::anyhow!("scheduler list: {e}"))?;
+    let existing_keys: std::collections::HashSet<(String, String, String)> = existing
+        .iter()
+        .filter_map(|s| match &s.mode {
+            konf_runtime::TimerMode::Cron { expr } => Some((
+                s.workflow.clone(),
+                expr.clone(),
+                s.namespace.clone(),
+            )),
+            _ => None,
+        })
+        .collect();
+
+    for entry in entries {
+        let key = (entry.workflow.clone(), entry.cron.clone(), entry.namespace.clone());
+        if existing_keys.contains(&key) {
+            tracing::debug!(workflow = %entry.workflow, cron = %entry.cron, "schedules.yaml entry already registered, skipping");
+            continue;
+        }
+
+        // Fail-soft: warn if the workflow isn't in the registry, but still
+        // register the timer — the fire loop tolerates missing workflows
+        // and will log a visible error at fire time.
+        let tool_name = format!("workflow:{}", entry.workflow);
+        if engine.registry().get(&tool_name).is_none() {
+            tracing::warn!(
+                workflow = %entry.workflow,
+                "schedules.yaml references unknown workflow — timer will fail at fire time"
+            );
+        }
+
+        let record = konf_runtime::TimerRecord {
+            job_id: konf_runtime::JobId::new_v4(),
+            workflow: entry.workflow.clone(),
+            input: entry.input.clone(),
+            namespace: entry.namespace.clone(),
+            capabilities: entry.capabilities.clone(),
+            actor: konf_runtime::Actor {
+                id: "schedules.yaml".into(),
+                role: konf_runtime::scope::ActorRole::System,
+            },
+            mode: konf_runtime::TimerMode::Cron {
+                expr: entry.cron.clone(),
+            },
+            created_at: chrono::Utc::now(),
+            created_by: format!("schedules.yaml:{}", entry.name),
+        };
+
+        match scheduler.schedule_cron(record, entry.cron.clone()).await {
+            Ok(id) => {
+                info!(workflow = %entry.workflow, cron = %entry.cron, schedule_id = %id, "cron registered from schedules.yaml");
+            }
+            Err(e) => {
+                tracing::warn!(workflow = %entry.workflow, cron = %entry.cron, error = %e, "failed to register cron from schedules.yaml");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Parse a database URL into an absolute filesystem path.
+///
+/// Accepted forms:
+/// - `redb:///absolute/path/konf.redb`
+/// - `file:///absolute/path/konf.redb`
+/// - a bare filesystem path (relative or absolute)
+fn parse_db_url(url: &str) -> anyhow::Result<std::path::PathBuf> {
+    const REDB_PREFIX: &str = "redb://";
+    const FILE_PREFIX: &str = "file://";
+    let path_str = if let Some(rest) = url.strip_prefix(REDB_PREFIX) {
+        rest
+    } else if let Some(rest) = url.strip_prefix(FILE_PREFIX) {
+        rest
+    } else {
+        url
+    };
+    if path_str.is_empty() {
+        anyhow::bail!("empty database path in URL: {url}");
+    }
+    Ok(std::path::PathBuf::from(path_str))
 }
 
 /// Replace `${VAR}` and `${VAR:-default}` patterns with environment variable values.

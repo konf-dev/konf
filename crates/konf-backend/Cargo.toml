@@ -8,7 +8,7 @@ description = "HTTP server for the Konf agentic AI platform — a thin transport
 
 [dependencies]
 # Platform (bootstrap + runtime)
-konf-init = { path = "../konf-init", default-features = false, features = ["postgres"] }
+konf-init = { path = "../konf-init", default-features = false, features = ["memory-surreal"] }
 konf-runtime = { path = "../konf-runtime" }
 konflux-core = { path = "../konflux-core" }
 
@@ -24,9 +24,6 @@ tokio = { workspace = true }
 async-stream = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
-
-# Scheduling (optional — server-only, requires Postgres)
-sqlx = { workspace = true, optional = true }
 
 # Config
 serde = { workspace = true }
@@ -47,9 +44,8 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 
 [features]
-default = ["mcp", "scheduling"]
+default = ["mcp"]
 mcp = ["konf-mcp"]
-scheduling = ["sqlx"]
 
 [dev-dependencies]
 tokio = { workspace = true }

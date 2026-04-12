@@ -1,17 +1,72 @@
-//! Event journal — append-only Postgres log for audit and monitoring.
+//! Event journal — append-only audit log for workflow lifecycle events.
 //!
-//! NOT for replay — for audit trails, debugging, and billing.
-//! The process table (in-memory) tracks live state.
+//! The journal is an **audit** trail, not a replay log. It records every
+//! workflow lifecycle event (`workflow_started`, `node_started`,
+//! `workflow_completed`, etc.) for debugging, monitoring, and admin query.
+//! It is not used to reconstruct mid-workflow execution state — konf
+//! explicitly rejects checkpoint-and-replay durability because AI workflows
+//! are non-deterministic (see `docs/architecture/durability.md`).
+//!
+//! # Shape
+//!
+//! - [`JournalStore`] is the trait every backend implements. It is
+//!   intentionally small: append, query-by-run, query-by-session, recent,
+//!   and reconcile-zombies.
+//! - [`JournalEntry`] is the write-side view — what callers append.
+//! - [`JournalRow`] is the read-side view — what queries return. It carries
+//!   the backend-assigned sequence id and the timestamp at which the entry
+//!   was recorded.
+//!
+//! # Backends
+//!
+//! - [`redb::RedbJournal`] — the default, embedded, pure-Rust backend.
+//!   Backed by a single redb file shared with the scheduler and runner
+//!   intent store via [`crate::storage::KonfStorage`].
+
+use std::error::Error as StdError;
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::PgPool;
-use tracing::debug;
 
-use crate::error::{RunId, RuntimeError};
+use crate::error::RunId;
 
-/// A journal entry recording a runtime event.
-#[derive(Debug, Clone)]
+pub mod redb;
+
+pub use redb::RedbJournal;
+
+/// Errors raised by [`JournalStore`] operations.
+#[derive(Debug, thiserror::Error)]
+pub enum JournalError {
+    /// The backing store raised an error (IO, corruption, transaction
+    /// failure). The underlying error is boxed so the trait surface stays
+    /// backend-agnostic.
+    #[error("storage: {0}")]
+    Storage(#[source] Box<dyn StdError + Send + Sync>),
+
+    /// A value could not be serialized or deserialized to/from the backend.
+    #[error("serialization: {0}")]
+    Serialization(Box<dyn StdError + Send + Sync>),
+
+    /// The requested entry was not found.
+    #[error("not found")]
+    NotFound,
+}
+
+impl JournalError {
+    /// Helper to wrap any `Error + Send + Sync + 'static` as a storage error.
+    pub fn storage<E: StdError + Send + Sync + 'static>(e: E) -> Self {
+        Self::Storage(Box::new(e))
+    }
+
+    /// Helper to wrap any `Error + Send + Sync + 'static` as a serialization error.
+    pub fn serialization<E: StdError + Send + Sync + 'static>(e: E) -> Self {
+        Self::Serialization(Box::new(e))
+    }
+}
+
+/// One event to append to the journal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JournalEntry {
     pub run_id: RunId,
     pub session_id: String,
@@ -20,156 +75,49 @@ pub struct JournalEntry {
     pub payload: Value,
 }
 
-/// Append-only event journal backed by Postgres.
-pub struct EventJournal {
-    pool: PgPool,
-}
-
-impl EventJournal {
-    /// Create a new journal, running migrations if needed.
-    pub async fn new(pool: PgPool) -> Result<Self, RuntimeError> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS runtime_events (
-                id BIGSERIAL PRIMARY KEY,
-                run_id UUID NOT NULL,
-                session_id TEXT NOT NULL,
-                namespace TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                payload JSONB NOT NULL DEFAULT '{}',
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await?;
-
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_runtime_events_run ON runtime_events (run_id)")
-            .execute(&pool)
-            .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_runtime_events_session ON runtime_events (session_id, created_at DESC)",
-        )
-        .execute(&pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_runtime_events_namespace ON runtime_events (namespace, created_at DESC)",
-        )
-        .execute(&pool)
-        .await?;
-
-        Ok(Self { pool })
-    }
-
-    /// Append a journal entry.
-    pub async fn append(&self, entry: JournalEntry) -> Result<i64, RuntimeError> {
-        debug!(
-            run_id = %entry.run_id,
-            event_type = %entry.event_type,
-            "journal.append"
-        );
-        let row = sqlx::query_scalar::<_, i64>(
-            r#"
-            INSERT INTO runtime_events (run_id, session_id, namespace, event_type, payload)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id
-            "#,
-        )
-        .bind(entry.run_id)
-        .bind(&entry.session_id)
-        .bind(&entry.namespace)
-        .bind(&entry.event_type)
-        .bind(&entry.payload)
-        .fetch_one(&self.pool)
-        .await?;
-
-        Ok(row)
-    }
-
-    /// Query journal entries for a specific run.
-    pub async fn query_by_run(&self, run_id: RunId) -> Result<Vec<JournalRow>, RuntimeError> {
-        let rows = sqlx::query_as::<_, JournalRow>(
-            "SELECT id, run_id, session_id, namespace, event_type, payload, created_at FROM runtime_events WHERE run_id = $1 ORDER BY id",
-        )
-        .bind(run_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows)
-    }
-
-    /// Query journal entries for a session.
-    pub async fn query_by_session(
-        &self,
-        session_id: &str,
-        limit: i64,
-    ) -> Result<Vec<JournalRow>, RuntimeError> {
-        let rows = sqlx::query_as::<_, JournalRow>(
-            "SELECT id, run_id, session_id, namespace, event_type, payload, created_at FROM runtime_events WHERE session_id = $1 ORDER BY created_at DESC LIMIT $2",
-        )
-        .bind(session_id)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows)
-    }
-
-    /// Query the most recent journal events (for admin dashboard).
-    pub async fn recent(&self, limit: i64) -> Result<Vec<JournalRow>, RuntimeError> {
-        let rows = sqlx::query_as::<_, JournalRow>(
-            r#"
-            SELECT id, run_id, session_id, namespace, event_type, payload, created_at
-            FROM runtime_events
-            ORDER BY created_at DESC
-            LIMIT $1
-            "#,
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows)
-    }
-
-    /// Reconcile zombie workflows on startup.
-    /// Finds runs with a "started" event but no terminal event and marks them as failed.
-    pub async fn reconcile_zombies(&self) -> Result<u64, RuntimeError> {
-        let result = sqlx::query(
-            r#"
-            INSERT INTO runtime_events (run_id, session_id, namespace, event_type, payload)
-            SELECT
-                e.run_id,
-                e.session_id,
-                e.namespace,
-                'workflow_failed',
-                jsonb_build_object('error', 'System restart — workflow was interrupted', 'reconciled', true)
-            FROM runtime_events e
-            WHERE e.event_type = 'workflow_started'
-              AND NOT EXISTS (
-                SELECT 1 FROM runtime_events t
-                WHERE t.run_id = e.run_id
-                  AND t.event_type IN ('workflow_completed', 'workflow_failed', 'workflow_cancelled')
-              )
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        Ok(result.rows_affected())
-    }
-}
-
-/// A row from the runtime_events table.
-#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+/// One row returned from the journal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JournalRow {
-    pub id: i64,
+    /// Monotonic sequence assigned by the backend at append time.
+    pub id: u64,
     pub run_id: RunId,
     pub session_id: String,
     pub namespace: String,
     pub event_type: String,
     pub payload: Value,
     pub created_at: DateTime<Utc>,
+}
+
+/// Append-only event journal.
+///
+/// All methods are async even when the underlying backend is synchronous,
+/// because implementations wrap blocking work in `tokio::task::spawn_blocking`
+/// to keep the tokio scheduler responsive.
+#[async_trait::async_trait]
+pub trait JournalStore: Send + Sync + 'static {
+    /// Append one event. Returns the backend-assigned sequence id.
+    async fn append(&self, entry: JournalEntry) -> Result<u64, JournalError>;
+
+    /// Return every entry for a specific run, ordered by sequence ascending.
+    async fn query_by_run(&self, run_id: RunId) -> Result<Vec<JournalRow>, JournalError>;
+
+    /// Return up to `limit` entries for a specific session, most recent first.
+    async fn query_by_session(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<JournalRow>, JournalError>;
+
+    /// Return the `limit` most recent entries across all runs.
+    async fn recent(&self, limit: usize) -> Result<Vec<JournalRow>, JournalError>;
+
+    /// Inspect the journal for workflows that started but never reached a
+    /// terminal event, and append a synthetic `workflow_failed` event for
+    /// each. Returns the number of entries reconciled.
+    ///
+    /// Intended to be called once at startup. Matches the semantics of the
+    /// prior Postgres implementation's `reconcile_zombies` — a crashed
+    /// `konf-backend` left live workflows in an ambiguous state; after
+    /// restart the journal should surface them as failed.
+    async fn reconcile_zombies(&self) -> Result<u64, JournalError>;
 }

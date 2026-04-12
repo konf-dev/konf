@@ -139,6 +139,18 @@ impl RunRegistry {
     /// backend can update its state as the run progresses.
     pub(crate) fn insert_pending(&self, workflow: &str, backend: &str) -> (RunId, Arc<RunSlot>) {
         let id = Self::fresh_id();
+        self.insert_pending_with_id(id, workflow, backend)
+    }
+
+    /// Insert a new pending run with an explicit run id. Used by replay
+    /// from persisted intents so the same id survives across restarts
+    /// (preserving external references like TUI bookmarks).
+    pub(crate) fn insert_pending_with_id(
+        &self,
+        id: RunId,
+        workflow: &str,
+        backend: &str,
+    ) -> (RunId, Arc<RunSlot>) {
         let record = RunRecord {
             id: id.clone(),
             workflow: workflow.to_string(),

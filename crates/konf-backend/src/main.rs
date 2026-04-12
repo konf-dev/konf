@@ -6,7 +6,6 @@
 mod api;
 mod auth;
 mod error;
-mod scheduling;
 mod templates;
 
 use std::path::PathBuf;
@@ -47,19 +46,7 @@ async fn main() -> anyhow::Result<()> {
     // 3. Set up auth
     let verifier = Arc::new(JwtVerifier::new(&instance.config.auth));
 
-    // 4. Set up scheduler (only if DB pool is available from konf-init)
-    #[cfg(feature = "scheduling")]
-    if let Some(ref pool) = instance.pool {
-        let scheduler = Arc::new(scheduling::Scheduler::new(
-            pool.clone(),
-            instance.runtime.clone(),
-        ));
-        scheduler.migrate().await?;
-        scheduler.clone().start_polling(10);
-        info!("Scheduler started");
-    }
-
-    // 5. Build app state
+    // 4. Build app state
     // Use custom chat workflow from config if available, otherwise fall back to embedded template
     let chat_workflow_path = config_dir.join("workflows").join("chat.yaml");
     let default_workflow = if chat_workflow_path.exists() {
@@ -106,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/v1/monitor/runs/{id}/tree", get(api::monitor::get_tree))
         .route("/v1/monitor/metrics", get(api::monitor::metrics))
+        .route("/v1/monitor/stream", get(api::monitor::stream))
         .route("/v1/admin/config", get(api::admin::get_config))
         .route("/v1/admin/audit", get(api::admin::get_audit))
         .layer(middleware::from_fn({
@@ -137,14 +125,26 @@ async fn main() -> anyhow::Result<()> {
             .allow_headers(Any)
     };
 
-    // MCP is served via konf-mcp binary (stdio transport), not embedded in HTTP server.
-    // SSE transport for MCP will be added when rmcp's StreamableHttpService is integrated.
+    // MCP is also available as a standalone stdio server via the konf-mcp
+    // binary. The optional /mcp Streamable HTTP endpoint below serves the
+    // SAME shared Arc<Runtime> as the REST API (Phase 4 split-brain fix).
+    //
+    // Enabled only when KONF_MCP_HTTP=1 is set. Dev-only: every session gets
+    // capabilities = ["*"]. Never enable on a network-exposed deployment.
 
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/v1/health", get(api::health::health))
-        .merge(protected)
-        .layer(cors)
-        .layer(TraceLayer::new_for_http());
+        .merge(protected);
+
+    #[cfg(feature = "mcp")]
+    if std::env::var("KONF_MCP_HTTP").is_ok() {
+        tracing::warn!(
+            "*** KONF_MCP_HTTP enabled — /mcp mounted with capabilities=[\"*\"]. DEV ONLY. Never use in production. ***"
+        );
+        app = app.merge(api::mcp::routes(instance.runtime.clone()));
+    }
+
+    let app = app.layer(cors).layer(TraceLayer::new_for_http());
 
     // 8. Bind and serve with graceful shutdown
     let addr = format!(

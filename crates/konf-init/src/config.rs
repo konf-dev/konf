@@ -74,32 +74,36 @@ impl PlatformConfig {
     }
 }
 
-/// Database connection settings. Optional — edge deployments have no DB.
-/// Debug impl redacts the URL to prevent credential leakage in logs.
+/// Persistent-storage settings. Optional — edge deployments have no state.
+///
+/// The journal, scheduler, and runner intents are all backed by a single
+/// redb database file. `url` accepts:
+/// - `redb:///absolute/path/konf.redb`
+/// - `file:///absolute/path/konf.redb`
+/// - a bare path (relative or absolute)
+///
+/// Debug impl redacts the URL to prevent path/credential leakage in logs.
 #[derive(Clone, Deserialize)]
 pub struct DatabaseConfig {
+    /// Path or URL to the redb file.
     pub url: String,
-    #[serde(default = "default_pool_min")]
-    pub pool_min: u32,
-    #[serde(default = "default_pool_max")]
-    pub pool_max: u32,
+    /// Retention window in days for journal entries and terminated runner
+    /// intents. Defaults to 7.
+    #[serde(default = "default_retention_days")]
+    pub retention_days: u32,
 }
 
 impl std::fmt::Debug for DatabaseConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DatabaseConfig")
             .field("url", &"[REDACTED]")
-            .field("pool_min", &self.pool_min)
-            .field("pool_max", &self.pool_max)
+            .field("retention_days", &self.retention_days)
             .finish()
     }
 }
 
-fn default_pool_min() -> u32 {
-    5
-}
-fn default_pool_max() -> u32 {
-    20
+fn default_retention_days() -> u32 {
+    7
 }
 
 /// Auth settings.

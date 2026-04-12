@@ -2,6 +2,8 @@
 
 use uuid::Uuid;
 
+use crate::journal::JournalError;
+
 /// Unique identifier for a workflow run.
 pub type RunId = Uuid;
 
@@ -20,12 +22,17 @@ pub enum RuntimeError {
     #[error("capability denied: {0}")]
     CapabilityDenied(String),
 
+    /// A tool was invoked successfully (scope permitted it) but the tool
+    /// itself returned an error. Used by [`crate::Runtime::invoke_tool`].
+    #[error("tool '{tool}' failed: {message}")]
+    Tool { tool: String, message: String },
+
     #[error("engine error: {0}")]
     Engine(#[from] konflux::KonfluxError),
 
     #[error("join failed: {0}")]
     JoinFailed(String),
 
-    #[error("database error: {0}")]
-    Database(#[from] sqlx::Error),
+    #[error("journal: {0}")]
+    Journal(#[from] JournalError),
 }

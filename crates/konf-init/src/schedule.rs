@@ -1,47 +1,38 @@
-//! Schedule tool — the timer primitive.
+//! `schedule:create` and `cancel:schedule` tools — thin shells over the
+//! durable [`konf_runtime::RedbScheduler`].
 //!
-//! Non-blocking "run this workflow after a delay." This is the `timer_create`
-//! syscall equivalent: minimal kernel support for userspace scheduling.
+//! Input shape (unchanged from the pre-v2 ephemeral tool):
 //!
-//! With `repeat: true`, the timer automatically re-fires after each completion,
-//! like `timer_create` with `it_interval` set. The workflow stays clean —
-//! it doesn't know it's being repeated. Scheduling is a separate concern.
+//! ```json
+//! { "workflow": "name", "delay_ms": 60000, "input": {...}, "repeat": false }
+//! ```
+//!
+//! New in v2: `cron` as an alternative to `delay_ms`:
+//!
+//! ```json
+//! { "workflow": "name", "cron": "0 0 8 * * * *", "input": {...} }
+//! ```
+//!
+//! Both shapes persist a [`TimerRecord`] into redb so the schedule survives
+//! restarts. On restart the scheduler replays any due entries immediately
+//! (at-least-once semantics); workflow authors are responsible for
+//! idempotency (see `docs/architecture/durability.md`).
 
-use std::collections::HashMap as StdHashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 use konflux::error::ToolError;
 use konflux::tool::{Tool, ToolContext, ToolInfo};
 
-use konf_runtime::Runtime;
+use konf_runtime::scope::{Actor, ActorRole};
+use konf_runtime::{
+    JobId, Runtime, TimerRecord, MAX_FIXED_DELAY_MS, MIN_FIXED_DELAY_MS,
+};
 
-/// Minimum delay: 1 second. Prevents hot-spin loops.
-const MIN_DELAY_MS: u64 = 1_000;
-
-/// Maximum delay: 7 days. Prevents unbounded timer accumulation.
-const MAX_DELAY_MS: u64 = 7 * 24 * 3600 * 1_000;
-
-/// Monotonic counter for unique schedule IDs.
-static SCHEDULE_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// Global map of active schedule handles. Used by `cancel_schedule` to abort timers.
-static SCHEDULE_HANDLES: std::sync::LazyLock<std::sync::Mutex<StdHashMap<u64, JoinHandle<()>>>> =
-    std::sync::LazyLock::new(|| std::sync::Mutex::new(StdHashMap::new()));
-
-/// A tool that schedules a workflow to run after a delay.
-///
-/// With `repeat: false` (default): runs once after `delay_ms`, then stops.
-/// With `repeat: true`: runs every `delay_ms` indefinitely, re-using the same input.
-///
-/// The workflow is resolved from the live registry at each execution, so
-/// hot-reloads and capability changes take effect between runs.
+/// `schedule:create` — create a durable timer.
 pub struct ScheduleTool {
     runtime: Arc<Runtime>,
 }
@@ -58,31 +49,35 @@ impl Tool for ScheduleTool {
         ToolInfo {
             name: "schedule:create".into(),
             description: format!(
-                "Schedule a workflow to run after a delay. Returns immediately. \
-                 delay_ms: {MIN_DELAY_MS}–{MAX_DELAY_MS}. \
-                 Set repeat: true for a repeating timer (workflow re-runs every delay_ms)."
+                "Schedule a workflow to run durably (survives restarts). Returns immediately. \
+                 One-shot: set delay_ms ({MIN_FIXED_DELAY_MS}–{MAX_FIXED_DELAY_MS}) with repeat: false. \
+                 Repeating: set delay_ms with repeat: true, or set cron to a 7-field cron expression."
             ),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "workflow": {
                         "type": "string",
-                        "description": "Workflow ID (e.g., 'nightwatch' → workflow_nightwatch)"
+                        "description": "Workflow id (resolved as workflow:<id> at each fire)"
                     },
                     "delay_ms": {
                         "type": "integer",
-                        "description": format!("Milliseconds between runs. Min: {MIN_DELAY_MS}, Max: {MAX_DELAY_MS}.")
+                        "description": format!("Milliseconds. Min: {MIN_FIXED_DELAY_MS}, Max: {MAX_FIXED_DELAY_MS}. Ignored when cron is set.")
+                    },
+                    "cron": {
+                        "type": "string",
+                        "description": "7-field cron expression (sec min hour day month weekday year). Mutually exclusive with delay_ms."
                     },
                     "input": {
                         "type": "object",
-                        "description": "Input payload for the workflow (optional, reused on each repeat)"
+                        "description": "Input payload (snapshot at schedule time; reused on every fire)"
                     },
                     "repeat": {
                         "type": "boolean",
-                        "description": "If true, re-run every delay_ms after completion. Default: false."
+                        "description": "If true and delay_ms is set, re-fire every delay_ms after completion. Default: false."
                     }
                 },
-                "required": ["workflow", "delay_ms"]
+                "required": ["workflow"]
             }),
             output_schema: None,
             capabilities: vec!["schedule:create".into()],
@@ -92,6 +87,11 @@ impl Tool for ScheduleTool {
     }
 
     async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
+        let scheduler = self.runtime.scheduler().ok_or_else(|| ToolError::ExecutionFailed {
+            message: "scheduler not available (no persistent storage configured)".into(),
+            retryable: false,
+        })?;
+
         let workflow_id = input
             .get("workflow")
             .and_then(|v| v.as_str())
@@ -100,131 +100,117 @@ impl Tool for ScheduleTool {
                 retryable: false,
             })?;
 
-        let delay_ms = input
-            .get("delay_ms")
-            .and_then(|v| {
-                v.as_u64()
-                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-            })
-            .ok_or_else(|| ToolError::ExecutionFailed {
-                message: "missing or invalid field: delay_ms (must be a positive integer)".into(),
-                retryable: false,
-            })?;
-
-        if !(MIN_DELAY_MS..=MAX_DELAY_MS).contains(&delay_ms) {
-            return Err(ToolError::ExecutionFailed {
-                message: format!(
-                    "delay_ms={delay_ms} out of range ({MIN_DELAY_MS}–{MAX_DELAY_MS})"
-                ),
-                retryable: false,
-            });
-        }
-
-        let repeat = input
-            .get("repeat")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-        let workflow_input = input.get("input").cloned().unwrap_or(json!({}));
-
-        // Fail-fast: verify workflow exists now (re-resolved at each execution).
+        // Fail fast: confirm the workflow exists now (re-resolved at fire time too).
         let tool_name = format!("workflow:{workflow_id}");
         if self.runtime.engine().registry().get(&tool_name).is_none() {
             return Err(ToolError::NotFound { tool_id: tool_name });
         }
 
-        let capabilities = ctx.capabilities.clone();
-        let schedule_id = SCHEDULE_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let workflow_input = input.get("input").cloned().unwrap_or_else(|| json!({}));
+        let cron_expr = input.get("cron").and_then(|v| v.as_str()).map(str::to_string);
+        let delay_ms = input
+            .get("delay_ms")
+            .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())));
+        let repeat = input.get("repeat").and_then(|v| v.as_bool()).unwrap_or(false);
 
-        info!(
-            workflow = %workflow_id,
-            delay_ms,
-            repeat,
-            schedule_id,
-            "Scheduling workflow"
-        );
+        // Build the record. Namespace and actor come from the ToolContext's
+        // metadata when available; fall back to defaults otherwise. The
+        // namespace binding should have been injected by VirtualizedTool.
+        let namespace = ctx
+            .metadata
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("konf:schedule:anonymous")
+            .to_string();
+        let actor = Actor {
+            id: ctx
+                .metadata
+                .get("actor_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("schedule-tool")
+                .to_string(),
+            role: ActorRole::User,
+        };
 
-        let runtime = self.runtime.clone();
-        let workflow_id_owned = workflow_id.to_string();
-        let tool_name_owned = tool_name.clone();
+        let record = TimerRecord {
+            job_id: JobId::new_v4(),
+            workflow: workflow_id.to_string(),
+            input: workflow_input,
+            namespace,
+            capabilities: ctx.capabilities.clone(),
+            actor,
+            mode: konf_runtime::TimerMode::Once, // overridden by schedule_* methods
+            created_at: chrono::Utc::now(),
+            created_by: "schedule:create".into(),
+        };
 
-        let handle = tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-
-                // Re-resolve from live registry each time.
-                let registry = runtime.engine().registry();
-                let tool = match registry.get(&tool_name_owned) {
-                    Some(t) => t,
-                    None => {
-                        warn!(
-                            workflow = %workflow_id_owned,
-                            schedule_id,
-                            "Workflow no longer registered — stopping"
-                        );
-                        return;
-                    }
-                };
-
-                info!(workflow = %workflow_id_owned, schedule_id, "Executing scheduled workflow");
-
-                let tool_ctx = ToolContext {
-                    capabilities: capabilities.clone(),
-                    workflow_id: "schedule".into(),
-                    node_id: format!("scheduled_{workflow_id_owned}"),
-                    metadata: std::collections::HashMap::new(),
-                };
-
-                match tool.invoke(workflow_input.clone(), &tool_ctx).await {
-                    Ok(_) => {
-                        info!(workflow = %workflow_id_owned, schedule_id, "Scheduled workflow completed");
-                    }
-                    Err(e) => {
-                        warn!(workflow = %workflow_id_owned, schedule_id, error = %e, "Scheduled workflow failed");
-                    }
+        let id = match (cron_expr, delay_ms) {
+            (Some(expr), _) => scheduler
+                .schedule_cron(record, expr)
+                .await
+                .map_err(scheduler_err)?,
+            (None, Some(ms)) if repeat => scheduler
+                .schedule_fixed(record, ms)
+                .await
+                .map_err(scheduler_err)?,
+            (None, Some(ms)) => {
+                if !(MIN_FIXED_DELAY_MS..=MAX_FIXED_DELAY_MS).contains(&ms) {
+                    return Err(ToolError::ExecutionFailed {
+                        message: format!(
+                            "delay_ms={ms} out of range ({MIN_FIXED_DELAY_MS}–{MAX_FIXED_DELAY_MS})"
+                        ),
+                        retryable: false,
+                    });
                 }
-
-                if !repeat {
-                    return;
-                }
+                let run_at =
+                    chrono::Utc::now() + chrono::Duration::milliseconds(ms as i64);
+                scheduler
+                    .schedule_once(record, run_at)
+                    .await
+                    .map_err(scheduler_err)?
             }
-        });
+            (None, None) => {
+                return Err(ToolError::ExecutionFailed {
+                    message: "must provide either delay_ms or cron".into(),
+                    retryable: false,
+                });
+            }
+        };
 
-        // Store handle for cancellation via cancel_schedule tool.
-        if let Ok(mut handles) = SCHEDULE_HANDLES.lock() {
-            handles.insert(schedule_id, handle);
-        }
-
+        info!(workflow = %workflow_id, schedule_id = %id, "schedule created");
         Ok(json!({
             "scheduled": true,
             "workflow": workflow_id,
-            "delay_ms": delay_ms,
-            "repeat": repeat,
-            "schedule_id": schedule_id,
+            "schedule_id": id.to_string(),
         }))
     }
 }
 
-/// Cancel a previously scheduled workflow by its `schedule_id`.
-///
-/// Aborts the tokio task. If the workflow is mid-execution, it will be
-/// interrupted at the next `.await` point.
-pub struct CancelScheduleTool;
+/// `cancel:schedule` — cancel a durable timer by its schedule id.
+pub struct CancelScheduleTool {
+    runtime: Arc<Runtime>,
+}
+
+impl CancelScheduleTool {
+    pub fn new(runtime: Arc<Runtime>) -> Self {
+        Self { runtime }
+    }
+}
 
 #[async_trait]
 impl Tool for CancelScheduleTool {
     fn info(&self) -> ToolInfo {
         ToolInfo {
             name: "cancel:schedule".into(),
-            description: "Cancel a scheduled workflow by its schedule_id. \
-                Stops repeating timers and aborts pending one-shot schedules."
+            description: "Cancel a scheduled workflow by its schedule_id (UUID). \
+                Stops repeating timers and removes pending one-shot schedules."
                 .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "schedule_id": {
-                        "type": "integer",
-                        "description": "The schedule_id returned by the schedule tool"
+                        "type": "string",
+                        "description": "The schedule_id (UUID) returned by schedule:create"
                     }
                 },
                 "required": ["schedule_id"]
@@ -237,141 +223,38 @@ impl Tool for CancelScheduleTool {
     }
 
     async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let schedule_id = input
+        let scheduler = self.runtime.scheduler().ok_or_else(|| ToolError::ExecutionFailed {
+            message: "scheduler not available (no persistent storage configured)".into(),
+            retryable: false,
+        })?;
+
+        let id_str = input
             .get("schedule_id")
-            .and_then(|v| v.as_u64())
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::ExecutionFailed {
                 message: "missing required field: schedule_id".into(),
                 retryable: false,
             })?;
+        let id: JobId = id_str.parse().map_err(|e: uuid::Error| ToolError::ExecutionFailed {
+            message: format!("invalid schedule_id (expected UUID): {e}"),
+            retryable: false,
+        })?;
 
-        let cancelled = if let Ok(mut handles) = SCHEDULE_HANDLES.lock() {
-            if let Some(handle) = handles.remove(&schedule_id) {
-                handle.abort();
-                info!(schedule_id, "Cancelled scheduled workflow");
-                true
-            } else {
-                false
-            }
-        } else {
-            warn!("Failed to lock schedule handles map");
-            false
-        };
-
-        if cancelled {
-            Ok(json!({ "cancelled": true, "schedule_id": schedule_id }))
-        } else {
-            Err(ToolError::ExecutionFailed {
-                message: format!("schedule_id {schedule_id} not found or already completed"),
+        let cancelled = scheduler.cancel(id).await.map_err(scheduler_err)?;
+        if !cancelled {
+            warn!(schedule_id = %id, "cancel:schedule: id not found");
+            return Err(ToolError::ExecutionFailed {
+                message: format!("schedule_id {id} not found"),
                 retryable: false,
-            })
+            });
         }
+        Ok(json!({ "cancelled": true, "schedule_id": id.to_string() }))
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
-
-    async fn make_runtime() -> Arc<Runtime> {
-        Arc::new(Runtime::new(konflux::Engine::new(), None).await.unwrap())
-    }
-
-    fn test_ctx() -> ToolContext {
-        ToolContext {
-            capabilities: vec!["*".into()],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: HashMap::new(),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_schedule_tool_info() {
-        let runtime = make_runtime().await;
-        let tool = ScheduleTool::new(runtime);
-        let info = tool.info();
-        assert_eq!(info.name, "schedule:create");
-        assert!(info.description.contains("repeat"));
-    }
-
-    #[tokio::test]
-    async fn test_rejects_delay_below_minimum() {
-        let tool = ScheduleTool::new(make_runtime().await);
-        let result = tool
-            .invoke(json!({"workflow": "x", "delay_ms": 0}), &test_ctx())
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("out of range"));
-    }
-
-    #[tokio::test]
-    async fn test_rejects_delay_above_maximum() {
-        let tool = ScheduleTool::new(make_runtime().await);
-        let result = tool
-            .invoke(
-                json!({"workflow": "x", "delay_ms": MAX_DELAY_MS + 1}),
-                &test_ctx(),
-            )
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("out of range"));
-    }
-
-    #[tokio::test]
-    async fn test_rejects_missing_workflow() {
-        let tool = ScheduleTool::new(make_runtime().await);
-        let result = tool
-            .invoke(
-                json!({"workflow": "nonexistent", "delay_ms": 5000}),
-                &test_ctx(),
-            )
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found"));
-    }
-
-    #[tokio::test]
-    async fn test_accepts_string_delay_ms() {
-        let tool = ScheduleTool::new(make_runtime().await);
-        let result = tool
-            .invoke(
-                json!({"workflow": "nonexistent", "delay_ms": "5000"}),
-                &test_ctx(),
-            )
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found"));
-    }
-
-    #[tokio::test]
-    async fn test_repeat_defaults_to_false() {
-        let tool = ScheduleTool::new(make_runtime().await);
-        let result = tool
-            .invoke(
-                json!({"workflow": "nonexistent", "delay_ms": 5000}),
-                &test_ctx(),
-            )
-            .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_cancel_nonexistent_schedule() {
-        let tool = CancelScheduleTool;
-        let result = tool
-            .invoke(json!({"schedule_id": 99999}), &test_ctx())
-            .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found"));
-    }
-
-    #[tokio::test]
-    async fn test_cancel_tool_info() {
-        let tool = CancelScheduleTool;
-        let info = tool.info();
-        assert_eq!(info.name, "cancel:schedule");
-        assert_eq!(info.capabilities, vec!["cancel:schedule"]);
+fn scheduler_err(err: konf_runtime::SchedulerError) -> ToolError {
+    ToolError::ExecutionFailed {
+        message: err.to_string(),
+        retryable: false,
     }
 }

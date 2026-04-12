@@ -12,7 +12,7 @@ use serde_json::Value;
 use konflux::hooks::ExecutionHooks;
 
 use crate::error::RunId;
-use crate::journal::EventJournal;
+use crate::journal::JournalStore;
 use crate::process::{ActiveNode, NodeStatus, ProcessTable};
 
 /// Hooks implementation that updates the process table and journal.
@@ -21,7 +21,7 @@ pub struct RuntimeHooks {
     pub namespace: String,
     pub session_id: String,
     pub table: Arc<ProcessTable>,
-    pub journal: Option<Arc<EventJournal>>,
+    pub journal: Option<Arc<dyn JournalStore>>,
 }
 
 impl ExecutionHooks for RuntimeHooks {

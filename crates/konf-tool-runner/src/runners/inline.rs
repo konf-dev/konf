@@ -24,7 +24,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::{info, warn};
 
-use konf_runtime::Runtime;
+use konf_runtime::scope::{Actor, ActorRole};
+use konf_runtime::{RunnerIntent, RunnerIntentStore, Runtime, TerminalStatus};
 use konflux::tool::ToolContext;
 
 use crate::error::RunnerError;
@@ -32,19 +33,40 @@ use crate::registry::{RunId, RunRegistry, RunState};
 use crate::runner::{Runner, WorkflowSpec};
 
 /// Inline tokio-task runner. Cheap to clone (`Arc` inside).
+///
+/// If an [`RunnerIntentStore`] is installed, every spawn is persisted to
+/// redb before the tokio task starts and marked terminal on completion.
+/// This lets `konf-init::boot` replay unterminated intents after a crash.
 #[derive(Clone)]
 pub struct InlineRunner {
     runtime: Arc<Runtime>,
     registry: RunRegistry,
+    intents: Option<Arc<RunnerIntentStore>>,
 }
 
 impl InlineRunner {
-    /// Build a runner over the given runtime and registry.
-    ///
-    /// The runner resolves workflows from `runtime.engine().registry()` at
-    /// spawn time, so hot-reloads take effect without rebuilding the runner.
+    /// Build an ephemeral runner with no intent persistence. Spawns made
+    /// through this runner are lost on process restart. Use
+    /// [`InlineRunner::with_intents`] when a `KonfStorage` is available.
     pub fn new(runtime: Arc<Runtime>, registry: RunRegistry) -> Self {
-        Self { runtime, registry }
+        Self {
+            runtime,
+            registry,
+            intents: None,
+        }
+    }
+
+    /// Build a durable runner that persists spawn intents to redb.
+    pub fn with_intents(
+        runtime: Arc<Runtime>,
+        registry: RunRegistry,
+        intents: Arc<RunnerIntentStore>,
+    ) -> Self {
+        Self {
+            runtime,
+            registry,
+            intents: Some(intents),
+        }
     }
 
     fn tool_name(workflow: &str) -> String {
@@ -63,17 +85,56 @@ impl Runner for InlineRunner {
     }
 
     async fn spawn(&self, spec: WorkflowSpec) -> Result<RunId, RunnerError> {
+        self.spawn_with_id(None, spec).await
+    }
+}
+
+impl InlineRunner {
+    /// Internal spawn that optionally reuses an existing run id. Called by
+    /// the public `spawn` with `None` and by [`InlineRunner::replay`] with
+    /// the persisted id.
+    async fn spawn_with_id(
+        &self,
+        existing_id: Option<RunId>,
+        spec: WorkflowSpec,
+    ) -> Result<RunId, RunnerError> {
         let tool_name = Self::tool_name(&spec.workflow);
         let Some(tool) = self.runtime.engine().registry().get(&tool_name) else {
             return Err(RunnerError::WorkflowNotFound(spec.workflow));
         };
 
-        let (run_id, _slot) = self.registry.insert_pending(&spec.workflow, self.name());
+        let (run_id, _slot) = match existing_id {
+            Some(id) => self
+                .registry
+                .insert_pending_with_id(id, &spec.workflow, self.name()),
+            None => self.registry.insert_pending(&spec.workflow, self.name()),
+        };
+
+        // Persist the spawn intent before starting the task so a crash
+        // between here and the task's completion is recoverable on restart.
+        if let Some(ref intents) = self.intents {
+            let intent = RunnerIntent::new(
+                run_id.clone(),
+                spec.workflow.clone(),
+                spec.input.clone(),
+                "konf:runner:inline",
+                vec!["*".to_string()],
+                Actor {
+                    id: "runner".into(),
+                    role: ActorRole::System,
+                },
+                format!("runner:{run_id}"),
+            );
+            if let Err(e) = intents.insert(intent).await {
+                warn!(run_id = %run_id, error = %e, "failed to persist runner intent; continuing without durability");
+            }
+        }
 
         let registry = self.registry.clone();
         let run_id_for_task = run_id.clone();
         let workflow = spec.workflow.clone();
         let input = spec.input;
+        let intents_for_task = self.intents.clone();
 
         let handle = tokio::spawn(async move {
             registry.mark_running(&run_id_for_task).await;
@@ -85,19 +146,32 @@ impl Runner for InlineRunner {
                 metadata: HashMap::new(),
             };
 
-            let terminal = match tool.invoke(input, &ctx).await {
+            let (runner_state, intent_status) = match tool.invoke(input, &ctx).await {
                 Ok(result) => {
                     info!(run_id = %run_id_for_task, workflow = %workflow, "run succeeded");
-                    RunState::Succeeded { result }
+                    (
+                        RunState::Succeeded {
+                            result: result.clone(),
+                        },
+                        TerminalStatus::Succeeded,
+                    )
                 }
                 Err(e) => {
                     warn!(run_id = %run_id_for_task, workflow = %workflow, error = %e, "run failed");
-                    RunState::Failed {
-                        error: e.to_string(),
-                    }
+                    let msg = e.to_string();
+                    (
+                        RunState::Failed { error: msg.clone() },
+                        TerminalStatus::Failed { error: msg },
+                    )
                 }
             };
-            registry.mark_terminal(&run_id_for_task, terminal).await;
+            registry.mark_terminal(&run_id_for_task, runner_state).await;
+
+            if let Some(intents) = intents_for_task {
+                if let Err(e) = intents.mark_terminal(&run_id_for_task, intent_status).await {
+                    warn!(run_id = %run_id_for_task, error = %e, "failed to mark intent terminal");
+                }
+            }
         });
 
         // Register the task's AbortHandle as the slot's cancel hook. The
@@ -109,5 +183,45 @@ impl Runner for InlineRunner {
         });
 
         Ok(run_id)
+    }
+
+    /// Replay an unterminated intent after a restart. Uses the same
+    /// `run_id` as the original spawn so TUI bookmarks and journal entries
+    /// still resolve.
+    ///
+    /// The workflow is re-run from the top with the original input. This
+    /// is NOT checkpoint-and-replay — konf rejects mid-workflow resume
+    /// because LLM calls are non-deterministic. Workflow authors must make
+    /// their workflows idempotent.
+    pub async fn replay(&self, intent: RunnerIntent) -> Result<RunId, RunnerError> {
+        let spec = WorkflowSpec {
+            workflow: intent.workflow.clone(),
+            input: intent.input.clone(),
+        };
+        let run_id = intent.run_id.clone();
+
+        // Increment replay_count and re-persist before respawning so a
+        // crash loop is visible and bounded.
+        if let Some(ref intents) = self.intents {
+            let mut updated = intent;
+            updated.replay_count += 1;
+            if updated.replay_count > 10 {
+                warn!(run_id = %run_id, "replay loop exceeded limit, marking intent failed");
+                let _ = intents
+                    .mark_terminal(
+                        &run_id,
+                        TerminalStatus::Failed {
+                            error: "replay loop exceeded limit (>10 restarts)".into(),
+                        },
+                    )
+                    .await;
+                return Err(RunnerError::Backend("replay loop exceeded limit".into()));
+            }
+            if let Err(e) = intents.insert(updated).await {
+                warn!(run_id = %run_id, error = %e, "failed to update intent replay_count");
+            }
+        }
+
+        self.spawn_with_id(Some(run_id), spec).await
     }
 }

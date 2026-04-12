@@ -36,9 +36,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 tokio = { workspace = true }
-sqlx = { workspace = true, optional = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
@@ -47,7 +48,6 @@ tempfile = { workspace = true }
 # memory-surreal is the default: embedded (RocksDB) or remote, zero external
 # SSH keys required. memory-smrti is opt-in for Postgres+pgvector deployments
 # that already have smrti SSH access.
-default = ["postgres", "memory-surreal"]
-postgres = ["sqlx"]
+default = ["memory-surreal"]
 memory-smrti = ["dep:konf-tool-memory-smrti"]
 memory-surreal = ["dep:konf-tool-memory-surreal"]

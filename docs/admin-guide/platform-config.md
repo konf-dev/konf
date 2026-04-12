@@ -19,7 +19,7 @@ KONF_<SECTION>__<FIELD>=value
 ```
 
 Examples:
-- `KONF__DATABASE__URL=postgresql://...`
+- `KONF__DATABASE__URL=redb:///var/lib/konf/konf.redb`
 - `KONF__SERVER__PORT=9000`
 - `KONF__ENGINE__MAX_STEPS=500`
 
@@ -27,16 +27,33 @@ Examples:
 
 ### [database]
 
-Optional. Edge deployments without a database omit this entirely.
+Optional. Configures the embedded **redb** file that backs the
+journal, scheduler timers, and runner intent store. Edge deployments
+omit this section entirely and run without persistence.
 
 ```toml
 [database]
-url = "postgresql://postgres:konf@localhost/konf"
-pool_min = 5       # default: 5
-pool_max = 20      # default: 20
+url = "redb:///var/lib/konf/konf.redb"
+retention_days = 7
 ```
 
-The `url` field is redacted in logs to prevent credential leakage.
+Accepted URL forms:
+
+- `redb:///absolute/path/konf.redb`
+- `file:///absolute/path/konf.redb`
+- A bare filesystem path (relative or absolute)
+
+`retention_days` (default: 7) controls how long journal entries and
+terminal runner intents are kept before the background GC task
+deletes them.
+
+The `url` field is redacted in logs to prevent path/credential
+leakage. See [`architecture/storage.md`](../architecture/storage.md)
+for the full layout of the redb file.
+
+**Breaking change from v1**: konf v1 used Postgres for the journal
+(`postgresql://...` URLs and `pool_min` / `pool_max` settings).
+Those fields no longer exist in v2. Use redb.
 
 ### [server]
 
