@@ -66,7 +66,7 @@ indexmap = { version = "2", features = ["serde"] }
 papaya = "0.2"
 
 # LLM
-rig-core = "0.34"
+rig-core = "0.35"
 
 # Embeddings
 fastembed = "5"
@@ -78,7 +78,7 @@ rmcp = { version = "1.3", features = ["client", "transport-child-process"] }
 jsonwebtoken = "10"
 
 # Scheduling
-cron = "0.15"
+cron = "0.16"
 
 # Dev/test
 tempfile = "3"
