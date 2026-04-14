@@ -84,7 +84,7 @@ pub async fn chat(
                 .unwrap_or(ActorRole::User),
         },
         depth: 0,
-    };
+        };
 
     // Parse workflow
     let workflow = state
@@ -99,10 +99,15 @@ pub async fn chat(
         "session_id": req.session_id,
     });
 
+    // R2: construct an ExecutionContext at the HTTP boundary. Each chat
+    // turn is a fresh root trace. Downstream dispatches inherit via
+    // ExecutionContext::child.
+    let exec_ctx = konf_runtime::ExecutionContext::new_root(req.session_id.clone());
+
     // Start streaming execution
     let (run_id, mut rx) = state
         .runtime
-        .start_streaming(&workflow, input, scope, req.session_id.clone())
+        .start_streaming(&workflow, input, scope, exec_ctx)
         .await
         .map_err(|e| AppError::Internal(format!("Failed to start workflow: {e}")))?;
 

@@ -31,8 +31,10 @@ use serde_json::Value;
 
 use crate::error::RunId;
 
+pub mod fanout;
 pub mod redb;
 
+pub use fanout::{FanoutJournalStore, FanoutMetrics};
 pub use redb::RedbJournal;
 
 /// Errors raised by [`JournalStore`] operations.

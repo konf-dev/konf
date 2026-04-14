@@ -230,6 +230,8 @@ pub struct ActiveNode {
 pub enum NodeStatus {
     Running,
     Retrying { attempt: u32, max: u32 },
+    Completed { duration_ms: u64 },
+    Failed { error: String },
 }
 
 pub struct ProcessTree {

@@ -17,7 +17,9 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use tracing::{debug, info};
 
-use konf_runtime::{KonfStorage, RedbScheduler, Retention, Runtime};
+use konf_runtime::{
+    FanoutJournalStore, JournalStore, KonfStorage, RedbScheduler, Retention, Runtime,
+};
 use konflux::engine::Engine;
 
 pub use config::{
@@ -148,7 +150,51 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     };
 
     // 9. Create runtime
-    let journal = storage.as_ref().map(|s| s.journal_arc());
+    //
+    // Journal wiring: if both a redb primary (short-retention audit) AND a
+    // surreal memory backend are configured, wrap them in a FanoutJournalStore
+    // so every journal entry lands in both stores. This is the Stigmergic
+    // Engine's fan-out pattern (see docs/architecture/durability.md §fanout
+    // and konf-genesis/docs/STIGMERGIC_ENGINE.md).
+    //
+    // The fanout is opinionated-on: if a surreal memory backend is mounted
+    // we assume the user wants the long-term interaction graph populated.
+    // Users can disable by removing the memory backend or by not configuring
+    // redb. Failure isolation is guaranteed by FanoutJournalStore — secondary
+    // outages never compromise primary audit integrity.
+    let primary_journal: Option<Arc<dyn JournalStore>> =
+        storage.as_ref().map(|s| s.journal_arc());
+
+    let journal: Option<Arc<dyn JournalStore>> =
+        match (&primary_journal, &product_config.tools.memory) {
+            (Some(primary), Some(mem_config)) if mem_config.backend == "surreal" => {
+                #[cfg(feature = "memory-surreal")]
+                {
+                    match konf_tool_memory_surreal::connect_journal(&mem_config.config).await {
+                        Ok(secondary) => {
+                            info!("Journal fan-out enabled: redb primary + surreal secondary");
+                            let fanout: Arc<dyn JournalStore> = Arc::new(
+                                FanoutJournalStore::new(primary.clone(), vec![secondary]),
+                            );
+                            Some(fanout)
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "Failed to open surreal journal secondary; continuing with primary-only"
+                            );
+                            Some(primary.clone())
+                        }
+                    }
+                }
+                #[cfg(not(feature = "memory-surreal"))]
+                {
+                    Some(primary.clone())
+                }
+            }
+            _ => primary_journal.clone(),
+        };
+
     let runtime = Arc::new(
         Runtime::new(engine.clone(), journal)
             .await
@@ -822,7 +868,7 @@ fn register_workflows(
                     role: konf_runtime::scope::ActorRole::System,
                 },
                 depth: 0,
-            };
+                };
 
             let tool = konf_runtime::WorkflowTool::new(workflow.clone(), runtime.clone(), scope);
 

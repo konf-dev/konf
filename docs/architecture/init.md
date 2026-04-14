@@ -58,7 +58,11 @@ pub async fn boot(config_path: &Path) -> anyhow::Result<KonfInstance>;
 8. **Register workflows as tools** — for each `.yaml` file in `workflows/` with `register_as_tool: true`, create a `WorkflowTool` and register it.
 9. **Register resources** — config files, workflow definitions, memory schema as readable Resources.
 10. **Register prompts** — templates from `prompts/` directory as expandable Prompts.
-11. **Create runtime** — `Runtime::new(engine, optional_journal)`. If database URL is configured, create EventJournal and run zombie reconciliation. If no database, journal is None.
+11. **Create runtime and wire journal** — `Runtime::new(engine, journal)`. Journal wiring:
+    - If only redb is configured → journal is the `RedbJournal`.
+    - If both redb (primary) and a SurrealDB memory backend are configured → journal is a `FanoutJournalStore` that writes to redb (short-retention audit) and the SurrealDB `event` table (long-term queryable interaction graph). Primary-succeeds acknowledgment preserves audit integrity; a secondary outage degrades to primary-only with a `tracing::warn!`.
+    - If no database is configured → journal is `None` (edge mode).
+    Zombie reconciliation runs on the primary at startup.
 12. **Return KonfInstance** — all registries populated, runtime ready.
 
 ---

@@ -24,7 +24,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::{info, warn};
 
-use konf_runtime::scope::{Actor, ActorRole};
 use konf_runtime::{RunnerIntent, RunnerIntentStore, Runtime, TerminalStatus};
 use konflux::tool::ToolContext;
 
@@ -110,20 +109,19 @@ impl InlineRunner {
             None => self.registry.insert_pending(&spec.workflow, self.name()),
         };
 
-        // Persist the spawn intent before starting the task so a crash
-        // between here and the task's completion is recoverable on restart.
+        // R1: persist the real parent scope + context in the intent so a
+        // post-crash replay reproduces the correct attenuation. Previously
+        // this hardcoded `"*"` and `"konf:runner:inline"`, which let
+        // replayed runs escape the lattice.
         if let Some(ref intents) = self.intents {
             let intent = RunnerIntent::new(
                 run_id.clone(),
                 spec.workflow.clone(),
                 spec.input.clone(),
-                "konf:runner:inline",
-                vec!["*".to_string()],
-                Actor {
-                    id: "runner".into(),
-                    role: ActorRole::System,
-                },
-                format!("runner:{run_id}"),
+                spec.parent_scope.namespace.clone(),
+                spec.parent_scope.capability_patterns(),
+                spec.parent_scope.actor.clone(),
+                spec.parent_ctx.session_id.clone(),
             );
             if let Err(e) = intents.insert(intent).await {
                 warn!(run_id = %run_id, error = %e, "failed to persist runner intent; continuing without durability");
@@ -136,14 +134,38 @@ impl InlineRunner {
         let input = spec.input;
         let intents_for_task = self.intents.clone();
 
+        // R1: capture the parent's capabilities + trace id + session id
+        // for the ToolContext handed to WorkflowTool. The capabilities
+        // list drives attenuation inside WorkflowTool; the trace id + session
+        // ride as metadata so the nested runtime.run() honors the causation
+        // chain.
+        let parent_capabilities = spec.parent_scope.capability_patterns();
+        let parent_trace_id = spec.parent_ctx.trace_id.to_string();
+        let parent_session_id = spec.parent_ctx.session_id.clone();
+        let parent_namespace = spec.parent_scope.namespace.clone();
+
         let handle = tokio::spawn(async move {
             registry.mark_running(&run_id_for_task).await;
 
+            let mut metadata: HashMap<String, serde_json::Value> = HashMap::new();
+            metadata.insert(
+                "trace_id".into(),
+                serde_json::Value::String(parent_trace_id),
+            );
+            metadata.insert(
+                "session_id".into(),
+                serde_json::Value::String(parent_session_id),
+            );
+            metadata.insert(
+                "namespace".into(),
+                serde_json::Value::String(parent_namespace),
+            );
+
             let ctx = ToolContext {
-                capabilities: vec!["*".into()],
+                capabilities: parent_capabilities,
                 workflow_id: "runner".into(),
                 node_id: format!("runner_{workflow}"),
-                metadata: HashMap::new(),
+                metadata,
             };
 
             let (runner_state, intent_status) = match tool.invoke(input, &ctx).await {
@@ -194,9 +216,32 @@ impl InlineRunner {
     /// because LLM calls are non-deterministic. Workflow authors must make
     /// their workflows idempotent.
     pub async fn replay(&self, intent: RunnerIntent) -> Result<RunId, RunnerError> {
+        // R1: rebuild the parent scope + ctx from the persisted intent so
+        // the replayed run sees the same attenuation the original was
+        // granted. The intent stores the capability patterns, namespace,
+        // and actor; we reconstruct an ExecutionScope from those.
+        let parent_scope = konf_runtime::scope::ExecutionScope {
+            namespace: intent.namespace.clone(),
+            capabilities: intent
+                .capabilities
+                .iter()
+                .map(|p| konf_runtime::scope::CapabilityGrant::new(p.clone()))
+                .collect(),
+            limits: konf_runtime::scope::ResourceLimits::default(),
+            actor: intent.actor.clone(),
+            depth: 0,
+        };
+        // Replay has no live parent to inherit a trace from — each replay
+        // is a fresh root in the trace graph. session_id comes from the
+        // original intent.
+        let parent_ctx =
+            konf_runtime::ExecutionContext::new_root(intent.session_id.clone());
+
         let spec = WorkflowSpec {
             workflow: intent.workflow.clone(),
             input: intent.input.clone(),
+            parent_scope,
+            parent_ctx,
         };
         let run_id = intent.run_id.clone();
 

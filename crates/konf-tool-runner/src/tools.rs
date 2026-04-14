@@ -73,7 +73,7 @@ impl Tool for SpawnTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
         let workflow = input
             .get("workflow")
             .and_then(Value::as_str)
@@ -83,11 +83,24 @@ impl Tool for SpawnTool {
             })?
             .to_string();
         let wf_input = input.get("input").cloned().unwrap_or_else(|| json!({}));
+
+        // R1: reconstruct the parent scope + context from the caller's
+        // ToolContext. The capabilities patterns are already in
+        // `ctx.capabilities`; namespace / actor / trace / session come
+        // from `ctx.metadata` (the runtime stamps them there at
+        // dispatch). This is how the substrate transmits the parent
+        // scope through the untyped `ToolContext` seam without the
+        // spawn tool having to know the full `ExecutionScope` shape.
+        let parent_scope = reconstruct_parent_scope(ctx)?;
+        let parent_ctx = reconstruct_parent_context(ctx)?;
+
         let id = self
             .runner
             .spawn(WorkflowSpec {
                 workflow: workflow.clone(),
                 input: wf_input,
+                parent_scope,
+                parent_ctx,
             })
             .await
             .map_err(runner_err)?;
@@ -284,4 +297,77 @@ fn runner_err(err: crate::error::RunnerError) -> ToolError {
         message: err.to_string(),
         retryable: false,
     }
+}
+
+/// R1: reconstruct the parent `ExecutionScope` from the substrate-stamped
+/// `ToolContext`. The runtime injects actor/namespace/session into
+/// `ctx.metadata` at dispatch, and `ctx.capabilities` carries the
+/// caller's capability patterns. Returns a scope suitable as the
+/// attenuation parent for the spawn.
+fn reconstruct_parent_scope(
+    ctx: &ToolContext,
+) -> Result<konf_runtime::scope::ExecutionScope, ToolError> {
+    let namespace = ctx
+        .metadata
+        .get("namespace")
+        .and_then(Value::as_str)
+        .unwrap_or("konf:runner:unknown")
+        .to_string();
+    let actor_id = ctx
+        .metadata
+        .get("actor_id")
+        .and_then(Value::as_str)
+        .unwrap_or("runner:caller")
+        .to_string();
+    let actor_role = ctx
+        .metadata
+        .get("actor_role")
+        .and_then(Value::as_str)
+        .and_then(|s| match s {
+            "infra_admin" => Some(konf_runtime::scope::ActorRole::InfraAdmin),
+            "product_admin" => Some(konf_runtime::scope::ActorRole::ProductAdmin),
+            "user" => Some(konf_runtime::scope::ActorRole::User),
+            "infra_agent" => Some(konf_runtime::scope::ActorRole::InfraAgent),
+            "product_agent" => Some(konf_runtime::scope::ActorRole::ProductAgent),
+            "user_agent" => Some(konf_runtime::scope::ActorRole::UserAgent),
+            "system" => Some(konf_runtime::scope::ActorRole::System),
+            _ => None,
+        })
+        .unwrap_or(konf_runtime::scope::ActorRole::System);
+
+    Ok(konf_runtime::scope::ExecutionScope {
+        namespace,
+        capabilities: ctx
+            .capabilities
+            .iter()
+            .map(|p| konf_runtime::scope::CapabilityGrant::new(p.clone()))
+            .collect(),
+        limits: konf_runtime::scope::ResourceLimits::default(),
+        actor: konf_runtime::scope::Actor {
+            id: actor_id,
+            role: actor_role,
+        },
+        depth: 0,
+    })
+}
+
+fn reconstruct_parent_context(
+    ctx: &ToolContext,
+) -> Result<konf_runtime::ExecutionContext, ToolError> {
+    let session_id = ctx
+        .metadata
+        .get("session_id")
+        .and_then(Value::as_str)
+        .unwrap_or("runner")
+        .to_string();
+    let trace_id = ctx
+        .metadata
+        .get("trace_id")
+        .and_then(Value::as_str)
+        .and_then(|s| uuid::Uuid::parse_str(s).ok());
+
+    Ok(match trace_id {
+        Some(trace) => konf_runtime::ExecutionContext::with_trace(trace, session_id),
+        None => konf_runtime::ExecutionContext::new_root(session_id),
+    })
 }

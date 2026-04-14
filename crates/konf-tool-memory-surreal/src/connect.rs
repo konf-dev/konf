@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use konf_runtime::JournalStore;
 use konf_tool_memory::{MemoryBackend, MemoryError};
 use serde_json::Value;
 use surrealdb::engine::any::{connect as surreal_connect, Any};
@@ -11,6 +12,7 @@ use tracing::info;
 
 use crate::backend::SurrealBackend;
 use crate::config::{SurrealConfig, SurrealMode};
+use crate::journal_store::SurrealJournalStore;
 use crate::schema::build_schema;
 
 /// Connect to a SurrealDB instance and return a [`MemoryBackend`].
@@ -57,6 +59,45 @@ pub async fn connect(config: &Value) -> anyhow::Result<Arc<dyn MemoryBackend>> {
     info!("surrealdb memory backend connected ({mode_label})");
 
     Ok(Arc::new(SurrealBackend::new(db, cfg)))
+}
+
+/// Open a dedicated SurrealDB connection for journal fan-out.
+///
+/// Opens its own `Surreal<Any>` handle separate from the memory backend's
+/// (they may point at the same database), applies the schema (idempotent
+/// via `IF NOT EXISTS`), and returns a [`JournalStore`] suitable for use
+/// as a secondary in [`konf_runtime::FanoutJournalStore`].
+///
+/// `konf-init` calls this when both a primary (redb) journal and a surreal
+/// memory backend are configured, so every journal entry lands in both
+/// the short-retention audit log AND the long-term queryable graph.
+pub async fn connect_journal(config: &Value) -> anyhow::Result<Arc<dyn JournalStore>> {
+    let cfg: SurrealConfig = serde_json::from_value(config.clone())
+        .map_err(|e| anyhow::anyhow!("invalid SurrealConfig: {e}"))?;
+    cfg.validate()
+        .map_err(|e| anyhow::anyhow!("invalid SurrealConfig: {e}"))?;
+
+    let db = open_connection(&cfg).await?;
+    db.use_ns(cfg.namespace.clone())
+        .use_db(cfg.database.clone())
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "failed to select namespace={}, database={}: {e}",
+                cfg.namespace,
+                cfg.database
+            )
+        })?;
+
+    let schema_sql = build_schema(&cfg);
+    db.query(schema_sql)
+        .await
+        .map_err(|e| anyhow::anyhow!("failed to apply SurrealDB schema: {e}"))?
+        .check()
+        .map_err(|e| anyhow::anyhow!("schema query reported error: {e}"))?;
+
+    info!("surrealdb journal secondary connected");
+    Ok(Arc::new(SurrealJournalStore::new(db)))
 }
 
 /// Open a raw SurrealDB connection per the chosen mode.

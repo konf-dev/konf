@@ -90,8 +90,22 @@ impl Tool for WorkflowTool {
             .unwrap_or("workflow_tool")
             .to_string();
 
+        // Extract trace_id from context metadata if upstream propagated it;
+        // otherwise mint a root trace for this nested workflow. R2 wires
+        // trace_id through konflux::ToolContext::metadata as a string
+        // because the konflux boundary is untyped — the runtime parses it.
+        let trace_id = ctx
+            .metadata
+            .get("trace_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| uuid::Uuid::parse_str(s).ok());
+        let exec_ctx = match trace_id {
+            Some(trace) => crate::ExecutionContext::with_trace(trace, session_id),
+            None => crate::ExecutionContext::new_root(session_id),
+        };
+
         self.runtime
-            .run(&self.workflow, input, child_scope, session_id)
+            .run(&self.workflow, input, child_scope, exec_ctx)
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 message: format!("Workflow '{}' failed: {e}", self.workflow.id),
@@ -115,7 +129,7 @@ mod tests {
                 role: ActorRole::System,
             },
             depth: 0,
-        }
+            }
     }
 
     #[test]

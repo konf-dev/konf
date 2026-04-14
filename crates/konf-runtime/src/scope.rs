@@ -1,7 +1,16 @@
 //! Execution scope — capabilities, resource limits, and actor identity.
 //!
-//! Every workflow run is scoped to a namespace with specific capability grants.
-//! The capability lattice ensures children can only attenuate, never amplify.
+//! Every workflow run is scoped to a namespace with specific capability
+//! grants. The capability lattice ensures children can only attenuate,
+//! never amplify.
+//!
+//! `ExecutionScope` carries **configuration**: who the actor is, what
+//! they're allowed to do, and within what bounds. It does NOT carry
+//! runtime state — for that see [`crate::ExecutionContext`], which
+//! holds the per-dispatch `trace_id`, `parent_interaction_id`, and
+//! `session_id`. This split is deliberate (Phase F2.R2 of the
+//! Stigmergic Engine plan): `ExecutionScope` is immutable once
+//! constructed; `ExecutionContext` mutates as dispatches nest.
 
 use std::collections::HashMap;
 
@@ -374,7 +383,7 @@ mod tests {
                 role: ActorRole::User,
             },
             depth: 0,
-        };
+            };
 
         assert!(scope.check_tool("memory:search").is_ok());
         assert!(scope.check_tool("ai:complete").is_ok());
@@ -398,7 +407,7 @@ mod tests {
                 role: ActorRole::User,
             },
             depth: 0,
-        };
+            };
 
         let result = scope.check_tool("memory:search").unwrap();
         assert_eq!(result.get("namespace").unwrap(), "konf:test:user_1");
@@ -418,7 +427,7 @@ mod tests {
                 role: ActorRole::ProductAdmin,
             },
             depth: 0,
-        };
+            };
 
         // Valid child — subset of parent
         let child = parent.child_scope(
@@ -443,7 +452,7 @@ mod tests {
                 role: ActorRole::ProductAdmin,
             },
             depth: 0,
-        };
+            };
 
         // Child cannot escalate "memory:search" to "memory:*"
         let child = parent.child_scope(vec![CapabilityGrant::new("memory:*")], None);
@@ -471,7 +480,7 @@ mod tests {
                 role: ActorRole::ProductAdmin,
             },
             depth: 0,
-        };
+            };
 
         // Same prefix is allowed
         let child = parent.child_scope(vec![CapabilityGrant::new("memory:*")], None);

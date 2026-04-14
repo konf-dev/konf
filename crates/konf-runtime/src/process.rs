@@ -60,6 +60,13 @@ pub struct ActiveNode {
 pub enum NodeStatus {
     Running,
     Retrying { attempt: u32, max: u32 },
+    /// Node finished successfully. Emitted via [`crate::RunEvent::NodeEnd`]
+    /// (B4 — node lifecycle emission). Not stored in the active-node table
+    /// because completed nodes are removed from it.
+    Completed { duration_ms: u64 },
+    /// Node finished with an error. Emitted via [`crate::RunEvent::NodeEnd`]
+    /// alongside the error message.
+    Failed { error: String },
 }
 
 /// A tracked workflow execution.

@@ -41,7 +41,7 @@ fn test_scope(namespace: &str) -> ExecutionScope {
             role: ActorRole::User,
         },
         depth: 0,
-    }
+        }
 }
 
 #[test]

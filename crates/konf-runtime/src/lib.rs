@@ -9,28 +9,39 @@
 //! Runtime
 //! ├── ProcessTable (papaya — concurrent, lock-free)
 //! ├── Engine (konflux — workflow execution)
-//! ├── JournalStore (trait, default impl backed by redb)
+//! ├── RunEventBus (tokio broadcast — real-time observability)
+//! ├── JournalStore (trait, default redb; optionally wrapped in Fanout)
+//! │   └── FanoutJournalStore (primary redb + optional secondaries)
 //! └── ResourceLimits (configurable)
 //!
 //! KonfStorage (owns one redb::Database)
-//! ├── Journal (RedbJournal — audit log)
-//! ├── Scheduler  [phase 2]
-//! └── Runner Intents  [phase 3]
+//! ├── Journal (RedbJournal — audit log; carries Interactions)
+//! ├── Scheduler
+//! └── Runner Intents
 //! ```
 //!
 //! # Key concepts
 //!
-//! - **ExecutionScope**: namespace + capabilities + resource limits per workflow run
+//! - **ExecutionScope**: namespace + capabilities + resource limits + optional
+//!   `trace_id` per workflow run. Attenuates on `child_scope`, never amplifies.
+//! - **Interaction**: typed envelope for one edge-traversal (tool dispatch,
+//!   workflow node lifecycle, run lifecycle, user input, LLM response, error).
+//!   OpenTelemetry-aligned naming. Serialized into `JournalEntry.payload`.
 //! - **CapabilityGrant**: parameterized tool access with namespace injection
 //! - **VirtualizedTool**: wraps tools to inject bound parameters (e.g., namespace)
 //! - **ProcessTable**: in-memory map of active workflow runs
-//! - **JournalStore**: append-only audit log trait, default impl is redb
+//! - **JournalStore**: append-only audit log trait. Default impl is redb.
+//!   `FanoutJournalStore` composes one primary + N secondaries with failure
+//!   isolation (primary-succeeds-only acknowledgment; secondary drops tracked
+//!   via `FanoutMetrics`).
 
 pub mod context;
 pub mod error;
 pub mod event_bus;
+pub mod execution_context;
 pub mod guard;
 pub mod hooks;
+pub mod interaction;
 pub mod journal;
 pub mod monitor;
 pub mod process;
@@ -44,8 +55,13 @@ pub mod workflow_tool;
 pub use context::VirtualizedTool;
 pub use error::{RunId, RuntimeError};
 pub use event_bus::{RunEvent, RunEventBus, DEFAULT_EVENT_BUS_CAPACITY};
+pub use execution_context::ExecutionContext;
 pub use guard::{DefaultAction, GuardedTool, Predicate, Rule};
-pub use journal::{JournalEntry, JournalError, JournalRow, JournalStore, RedbJournal};
+pub use interaction::{Interaction, InteractionKind, InteractionStatus};
+pub use journal::{
+    FanoutJournalStore, FanoutMetrics, JournalEntry, JournalError, JournalRow, JournalStore,
+    RedbJournal,
+};
 pub use monitor::{ProcessTree, RunDetail, RunSummary, RuntimeMetrics};
 pub use process::{ActiveNode, NodeStatus, ProcessTable, RunStatus, WorkflowRun};
 pub use runner_intents::{IntentError, IntentId, RunnerIntent, RunnerIntentStore, TerminalStatus};

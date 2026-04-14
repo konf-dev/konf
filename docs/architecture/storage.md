@@ -43,6 +43,30 @@ Each store has its own module in `konf-runtime`:
 They never read or write each other's tables. `KonfStorage` owns the
 single `Arc<Database>` and hands out references.
 
+## Journal fan-out (Stigmergic Engine)
+
+The journal is a `JournalStore` trait, not a single implementation.
+When a deployment configures both the redb primary and a SurrealDB
+memory backend, `konf-init` wraps them in a
+[`FanoutJournalStore`](../../crates/konf-runtime/src/journal/fanout.rs)
+so every entry lands in both:
+
+- **Primary (redb)** — synchronous write; the write path acknowledges
+  only after primary success. Audit integrity lives here.
+- **Secondary (SurrealDB `event` table)** — fire-and-forget `tokio::spawn`
+  per entry. Populates the long-term queryable interaction graph.
+  Failures are logged and counted via `FanoutMetrics`; they never block
+  or fail the primary write.
+
+The SurrealDB secondary lives in
+[`konf-tool-memory-surreal::SurrealJournalStore`](../../crates/konf-tool-memory-surreal/src/journal_store.rs)
+and writes through a `Surreal<Any>` handle directly — not through the
+`MemoryBackend` tool trait — so no journal append can dispatch a tool,
+structurally preventing recorder recursion.
+
+See `konf-genesis/docs/STIGMERGIC_ENGINE.md` for the broader design and
+`INTERACTION_SCHEMA.md` for the envelope those entries carry.
+
 ## Serialization
 
 All values are postcard-encoded bytes. Postcard is compact, fast, and

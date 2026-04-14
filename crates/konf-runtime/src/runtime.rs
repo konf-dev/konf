@@ -19,6 +19,7 @@ use konflux::Workflow;
 use crate::context::VirtualizedTool;
 use crate::error::{RunId, RuntimeError};
 use crate::event_bus::{RunEvent, RunEventBus};
+use crate::execution_context::ExecutionContext;
 use crate::guard::{DefaultAction, GuardedTool, Rule};
 use crate::hooks::RuntimeHooks;
 use crate::journal::{JournalEntry, JournalStore};
@@ -259,10 +260,14 @@ impl Runtime {
         tool_name: &str,
         input: Value,
         scope: &ExecutionScope,
+        ctx: &ExecutionContext,
     ) -> Result<Value, RuntimeError> {
         // 1. Capability check — returns the bindings (for namespace
         //    injection) if the scope grants this tool.
         let bindings = scope.check_tool(tool_name)?;
+        // B3: remember whether namespace injection will happen before the
+        //    bindings are moved into `VirtualizedTool` below.
+        let namespace_injected = bindings.contains_key("namespace");
 
         // 2. Resolve the raw tool from the engine registry.
         let raw_tool = self
@@ -313,11 +318,27 @@ impl Runtime {
             }
         };
 
-        // 5. Build the tool context and invoke. The context carries the
-        //    scope's capability patterns so any nested capability checks
-        //    inside the tool (if it happens to call into the engine)
-        //    behave consistently with the rest of the runtime.
-        let ctx = konflux::tool::ToolContext {
+        // 5. Build the tool context and invoke. The context carries:
+        //    - scope's capability patterns (for nested capability checks)
+        //    - enough metadata for tools that need to reconstruct the
+        //      caller's scope + context (notably `runner:spawn`).
+        //
+        //    R1 (Phase F2): we stamp `actor_id`, `actor_role`, `namespace`,
+        //    `trace_id`, and `session_id` into `metadata` so sub-tools can
+        //    rebuild the parent `ExecutionScope` + `ExecutionContext`
+        //    without a side-channel. This is the seam through which the
+        //    substrate's policy crosses the (untyped) `ToolContext`
+        //    boundary into tool code.
+        let actor_role_str = match scope.actor.role {
+            crate::scope::ActorRole::InfraAdmin => "infra_admin",
+            crate::scope::ActorRole::ProductAdmin => "product_admin",
+            crate::scope::ActorRole::User => "user",
+            crate::scope::ActorRole::InfraAgent => "infra_agent",
+            crate::scope::ActorRole::ProductAgent => "product_agent",
+            crate::scope::ActorRole::UserAgent => "user_agent",
+            crate::scope::ActorRole::System => "system",
+        };
+        let tool_ctx = konflux::tool::ToolContext {
             capabilities: scope.capability_patterns(),
             workflow_id: "runtime_invoke".into(),
             node_id: format!("invoke_{tool_name}"),
@@ -330,16 +351,94 @@ impl Runtime {
                     "actor_id".into(),
                     Value::String(scope.actor.id.clone()),
                 ),
+                (
+                    "actor_role".into(),
+                    Value::String(actor_role_str.into()),
+                ),
+                (
+                    "trace_id".into(),
+                    Value::String(ctx.trace_id.to_string()),
+                ),
+                (
+                    "session_id".into(),
+                    Value::String(ctx.session_id.clone()),
+                ),
             ]),
         };
 
-        let result = wrapped.invoke(input, &ctx).await;
+        // B3: record the dispatch as an Interaction before invocation so
+        // edge rules (capability check, namespace injection) are captured
+        // even if the tool panics.
+        let started_at = Utc::now();
+        let edge_rules_fired = {
+            let mut v = vec![format!("cap_check:{tool_name}")];
+            if namespace_injected {
+                v.push(format!("ns_inject:{}", scope.namespace));
+            }
+            v
+        };
+        // R2: trace_id comes from ExecutionContext — minted once at the
+        // transport boundary and propagated. No per-call minting.
+        let trace_id = ctx.trace_id;
+        let interaction_id = uuid::Uuid::new_v4();
+
+        let result = wrapped.invoke(input, &tool_ctx).await;
+        let ended_at = Utc::now();
+        let duration_ms = (ended_at - started_at).num_milliseconds().max(0) as u64;
+
         self.event_bus.emit(RunEvent::ToolInvoked {
             tool: tool_name.to_string(),
             namespace: scope.namespace.clone(),
-            at: Utc::now(),
+            at: ended_at,
             success: result.is_ok(),
         });
+
+        // B3: append an Interaction-shaped JournalEntry for this dispatch.
+        // Fire-and-forget; recorder failures never propagate to the tool
+        // result. Bypass when no journal is configured (edge mode).
+        if let Some(journal) = self.journal.as_ref().cloned() {
+            let interaction = crate::interaction::Interaction {
+                id: interaction_id,
+                parent_id: ctx.parent_interaction_id,
+                trace_id,
+                run_id: None,
+                node_id: None,
+                actor: scope.actor.clone(),
+                namespace: scope.namespace.clone(),
+                target: format!("tool:{tool_name}"),
+                kind: crate::interaction::InteractionKind::ToolDispatch,
+                attributes: serde_json::json!({
+                    "tool_name": tool_name,
+                    "duration_ms": duration_ms,
+                }),
+                edge_rules_fired,
+                status: match &result {
+                    Ok(_) => crate::interaction::InteractionStatus::Ok,
+                    Err(e) => crate::interaction::InteractionStatus::Failed {
+                        error: e.to_string(),
+                    },
+                },
+                summary: None,
+                timestamp: started_at,
+            };
+            let entry = crate::journal::JournalEntry {
+                run_id: uuid::Uuid::nil(),
+                session_id: ctx.session_id.clone(),
+                namespace: scope.namespace.clone(),
+                event_type: "interaction".into(),
+                payload: interaction.to_json(),
+            };
+            // R1/H2: await the primary journal write synchronously. The
+            // fanout store routes secondaries through tokio::spawn
+            // internally, so this does NOT block on the SurrealDB mirror
+            // — only on the durable redb primary. Previously this was
+            // itself a tokio::spawn, which meant a primary outage
+            // silently dropped audit rows without any observable error.
+            if let Err(e) = journal.append(entry).await {
+                tracing::warn!(error = %e, "invoke_tool: failed to append interaction");
+            }
+        }
+
         result.map_err(|e| RuntimeError::Tool {
             tool: tool_name.to_string(),
             message: e.to_string(),
@@ -354,8 +453,10 @@ impl Runtime {
         workflow: &Workflow,
         input: Value,
         scope: ExecutionScope,
-        session_id: String,
+        ctx: ExecutionContext,
     ) -> Result<RunId, RuntimeError> {
+        let session_id = ctx.session_id.clone();
+        let trace_id = ctx.trace_id;
         info!(
             workflow_id = %workflow.id,
             namespace = %scope.namespace,
@@ -424,13 +525,17 @@ impl Runtime {
         let engine = self.build_scoped_engine(&scope);
         let capability_patterns = scope.capability_patterns();
 
-        // Create hooks for process table updates
+        // Create hooks for process table updates + event bus emission +
+        // F1 Interaction-shaped journal append.
         let hooks = Arc::new(RuntimeHooks {
             run_id,
             namespace: scope.namespace.clone(),
             session_id: session_id.clone(),
             table: self.table.clone(),
             journal: self.journal.clone(),
+            event_bus: self.event_bus.clone(),
+            actor: scope.actor.clone(),
+            trace_id,
         });
 
         // Spawn execution
@@ -594,9 +699,9 @@ impl Runtime {
         workflow: &Workflow,
         input: Value,
         scope: ExecutionScope,
-        session_id: String,
+        ctx: ExecutionContext,
     ) -> Result<Value, RuntimeError> {
-        let run_id = self.start(workflow, input, scope, session_id).await?;
+        let run_id = self.start(workflow, input, scope, ctx).await?;
         self.wait(run_id).await
     }
 
@@ -614,8 +719,10 @@ impl Runtime {
         workflow: &Workflow,
         input: Value,
         scope: ExecutionScope,
-        session_id: String,
+        ctx: ExecutionContext,
     ) -> Result<(RunId, konflux::StreamReceiver), RuntimeError> {
+        let session_id = ctx.session_id.clone();
+        let trace_id = ctx.trace_id;
         info!(
             workflow_id = %workflow.id,
             namespace = %scope.namespace,
@@ -682,13 +789,17 @@ impl Runtime {
         let engine = self.build_scoped_engine(&scope);
         let capability_patterns = scope.capability_patterns();
 
-        // Create hooks for process table updates
+        // Create hooks for process table updates + event bus emission +
+        // F1 Interaction-shaped journal append.
         let hooks = Arc::new(RuntimeHooks {
             run_id,
             namespace: scope.namespace.clone(),
             session_id: session_id.clone(),
             table: self.table.clone(),
             journal: self.journal.clone(),
+            event_bus: self.event_bus.clone(),
+            actor: scope.actor.clone(),
+            trace_id,
         });
 
         // Call engine.run_streaming() — returns a StreamReceiver immediately

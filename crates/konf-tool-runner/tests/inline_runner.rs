@@ -272,8 +272,25 @@ async fn registry_tracks_runs() {
 // ------------------------------------------------------------------
 
 fn spec(workflow: &str, input: Value) -> WorkflowSpec {
+    // R1: tests supply a permissive parent scope ("*") because these tests
+    // exercise runner mechanics, not attenuation. Attenuation itself is
+    // covered in `konf-runtime/tests/scope_tests.rs` and the new
+    // `runner_attenuates_parent_scope` test below (if added).
+    let parent_scope = konf_runtime::scope::ExecutionScope {
+        namespace: "konf:test:runner".into(),
+        capabilities: vec![konf_runtime::scope::CapabilityGrant::new("*")],
+        limits: konf_runtime::scope::ResourceLimits::default(),
+        actor: konf_runtime::scope::Actor {
+            id: "test".into(),
+            role: konf_runtime::scope::ActorRole::System,
+        },
+        depth: 0,
+    };
+    let parent_ctx = konf_runtime::ExecutionContext::new_root("test-session");
     WorkflowSpec {
         workflow: workflow.to_string(),
         input,
+        parent_scope,
+        parent_ctx,
     }
 }

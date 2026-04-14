@@ -140,7 +140,7 @@ impl KonfMcpServer {
                 role: ActorRole::System,
             },
             depth: 0,
-        }
+            }
     }
 }
 
@@ -252,7 +252,15 @@ impl ServerHandler for KonfMcpServer {
         // still apply. A future multi-tenant auth layer will swap the
         // scope for a per-session narrower one via SessionManager.
         let scope = self.mcp_session_scope();
-        match self.runtime.invoke_tool(&kernel_name, input, &scope).await {
+        // R2: construct an ExecutionContext at the MCP transport boundary.
+        // Each MCP tool call is a fresh root trace. Future multi-turn MCP
+        // work might thread trace_id through an MCP session header.
+        let exec_ctx = konf_runtime::ExecutionContext::new_root("konf:mcp:http");
+        match self
+            .runtime
+            .invoke_tool(&kernel_name, input, &scope, &exec_ctx)
+            .await
+        {
             Ok(output) => {
                 let text =
                     serde_json::to_string_pretty(&output).unwrap_or_else(|_| output.to_string());
