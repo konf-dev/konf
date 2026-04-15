@@ -6,7 +6,7 @@ Informational only. No linting. If you see these in docs, they are either histor
 
 | Don't use | Use instead | Why |
 |---|---|---|
-| `kell` | `product` | Early naming for a product config directory; replaced by "product" in MENTAL_MODEL.md. The `konf-init-kell` crate binary is vestigial; disposition tracked in the substrate rebuild plan. |
+| `kell` | `product` | Early naming for a product config directory; replaced by "product" in MENTAL_MODEL.md. The `konf-init-kell` crate that used this vocabulary was deleted at stage-1; scaffolding will be re-introduced (if needed) after Stage 11 using structured konf tools rather than a bespoke CLI. |
 | `cell` | `product` | Earlier still; replaced by "product". |
 | `PID 1` as doctrine term | "the konf binary booting in a MicroVM" | The PID-1-as-analogy is evocative for MicroVM scenarios but is not a technical claim about the runtime's process model. Use concrete language. |
 | `Hovercraft` / `Construct` / `Zion` / `Operator` / `Operatives` | product / runtime / namespace / actor / etc. | Matrix-metaphor tourism. Replace with the actual term. |

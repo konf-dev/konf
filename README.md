@@ -58,7 +58,6 @@ The same Rust binary runs every product. Switching LLM providers, memory backend
 | `konflux-core` | Workflow execution engine with tool/resource/prompt registries. Zero I/O. |
 | `konf-runtime` | Process lifecycle, `ExecutionScope`, capability-based security, namespace injection |
 | `konf-init` | Config-driven bootstrap — reads YAML, registers tools, wires runtime |
-| `konf-init-kell` | CLI scaffolder for new product directories |
 | `konf-mcp` | MCP server — exposes products to MCP clients (Claude Desktop, Cursor, etc.) |
 | `konf-backend` | HTTP server — REST API with SSE streaming |
 | `konf-tool-http` | HTTP GET/POST tools with SSRF protection |

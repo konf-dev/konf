@@ -22,7 +22,6 @@ registries, namespaces, and a capability lattice. Each role is a Rust crate.
 | `konf-backend` | HTTP transport. `POST /v1/chat` with SSE streaming. Optional scheduler backed by Postgres. | `crates/konf-backend/src/main.rs` |
 | `konf-mcp` | MCP transport. Exposes workflows as MCP tools over stdio or SSE. Translates tool names at the wire: kernel `foo:bar` → MCP `foo_bar` (required by MCP spec SEP-986). | `crates/konf-mcp/src/main.rs` |
 | `konf-tool-*` | Plugin crates registering built-in tools: `http`, `llm`, `embed`, `memory`, `mcp` (client), `shell`, `secret`, `runner`. | `crates/konf-tool-*/src/lib.rs` |
-| `konf-init-kell` | CLI that scaffolds a new product directory. Binary name is vestigial; the term it refers to ("kell") is deprecated. | `crates/konf-init-kell/src/main.rs` |
 
 Memory is pluggable via the `MemoryBackend` trait in `konf-tool-memory`
 (`crates/konf-tool-memory/src/lib.rs:71-125`). Two backends ship today:
