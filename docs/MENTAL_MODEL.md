@@ -98,7 +98,8 @@ for the doctrine.
 ## Vocabulary
 
 If a doc uses a term not in this table, the term is either a typo, a code-level
-detail not exposed to users, or jargon that belongs in the kill list below.
+detail not exposed to users, or jargon that should be replaced with a concrete
+reference to code or a verified finding per the "Referencing code" rule below.
 
 | Term | What it is | Definition lives at |
 |---|---|---|
