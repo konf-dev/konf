@@ -151,29 +151,11 @@ Three rules. Each cashes out to code or a verified finding.
 
 ---
 
-## Banned words (docs-lint kill list)
+## Deprecated terms
 
-If any of these appear in any doc or config file in the konf repos, the
-docs-lint hook fails. Replace with a concrete description that points at code
-or an experimentally verified finding.
+For a short informational list of dead-name renames (e.g. `kell` → `product`, `cell` → `product`) and retired framings, see `DEPRECATED_TERMS.md` in this directory. That file is informational, not linted.
 
-- **"The Grand Experiment"** — mantra with no operational cash-out
-- **"autonomous agent civilization"** — aspirational framing, no code
-- **"civilization primitives"** — undefined
-- **"honeycomb primitives"** — referenced, never defined
-- **"PID 1"** — analogy; konf is not a Unix kernel with a process table at boot
-- **"Hovercraft", "Construct", "Zion", "Operator", "Operatives"** — Matrix metaphor; replace with the actual term (product, runtime, namespace, etc.)
-- **"cell"** — concept dropped; use "product"
-- **"kell"** — deprecated term; use "product" (may be reintroduced later if it earns its keep)
-- **"Second-in-Command"** — marketing framing with no operational definition
-- **"self-modification"**, **"self-healing bureaucracy"** — no code implements this
-- **"operational honesty"** (as emotional LLM error messages) — no code; the real principle is "errors propagate loudly; runtime events are journaled in `runtime_events`"
-- **"smart bubble"** — metaphor without purpose
-- **"Building Box"** — vague brainstorm
-- **"proper abstractions"**, **"first principles"** — slogans without cash-out; replace with the concrete thing
-- **"production-grade"**, **"best industry practices"** — vague; replace with: tests pass, clippy clean, no `.unwrap()` in production code, errors propagated via `?`
-- **"Broker"** as a doctrine term — not a concept; may still appear as a persona prompt file inside one specific product (e.g. `products/my-product/prompts/broker.md`)
-- **"curiosity"**, **"freedom"**, **"quality"** as a doctrine triplet — founder's orientation, not technical doctrine
+The previous "banned words / docs-lint kill list" has been removed. The real load-bearing discipline is the "Referencing code" rule below — claims cite code, findings, or explicit TBD. Mechanical word-banning proxied for that rule and caught noise rather than substance.
 
 ---
 
@@ -198,4 +180,4 @@ other doc is wrong.
 Maintained in this repo. Updated only when the code structure changes
 (new crate, removed crate, changed primitive) or when an experimentally verified
 finding demands it. Slogans, marketing, and speculative framing do not belong
-here — they belong in the kill list above.
+here — they belong nowhere in the repo's public-facing docs.
