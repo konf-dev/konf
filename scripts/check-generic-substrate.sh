@@ -2,21 +2,18 @@
 # check-generic-substrate.sh — guard the "substrate stays generic" invariant.
 #
 # Greps for agent/role/namespace-shaped opinion in the substrate crate's source.
-# The substrate (konflux-core today, konflux-substrate after Stage 4 rename)
-# must contain ONLY mechanism — no agent roles, no namespace semantics, no
-# resource-limit opinions. Those live in konf-runtime.
+# The substrate (konflux-substrate) must contain ONLY mechanism — no agent
+# roles, no namespace semantics, no resource-limit opinions. Those live in
+# konf-runtime.
 #
 # Exit 1 if any banned term appears in src/. Warnings (doc-only hits, test
 # fixtures) go to stderr but do not fail.
-#
-# TODO Stage 4: update SUBSTRATE_DIR when konflux-core renames to
-# konflux-substrate.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-SUBSTRATE_DIR="crates/konflux-core/src"
+SUBSTRATE_DIR="crates/konflux-substrate/src"
 
 if [[ ! -d "$SUBSTRATE_DIR" ]]; then
     echo "error: substrate dir not found: $SUBSTRATE_DIR" >&2

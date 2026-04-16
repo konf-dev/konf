@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use konflux::error::ToolError;
-use konflux::stream::stream_channel;
-use konflux::tool::{Tool, ToolContext, ToolInfo, ToolRegistry};
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::stream::stream_channel;
+use konflux_substrate::tool::{Tool, ToolInfo, ToolRegistry};
 use serde_json::json;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 struct MockTool {
@@ -18,10 +18,10 @@ impl Tool for MockTool {
 
     async fn invoke(
         &self,
-        input: serde_json::Value,
-        _ctx: &ToolContext,
-    ) -> Result<serde_json::Value, ToolError> {
-        Ok(input)
+        env: Envelope<serde_json::Value>,
+    ) -> Result<Envelope<serde_json::Value>, ToolError> {
+        let output = env.payload.clone();
+        Ok(env.respond(output))
     }
 }
 
@@ -57,17 +57,11 @@ async fn test_tool_registry() {
 }
 
 #[tokio::test]
-async fn test_tool_context() {
-    let ctx = ToolContext {
-        capabilities: vec!["cap1".to_string()],
-        workflow_id: "wf123".to_string(),
-        node_id: "node456".to_string(),
-        metadata: HashMap::new(),
-    };
-
-    assert_eq!(ctx.capabilities, vec!["cap1"]);
-    assert_eq!(ctx.workflow_id, "wf123");
-    assert_eq!(ctx.node_id, "node456");
+async fn test_envelope_test_helper() {
+    let env = Envelope::test(json!({"key": "value"}));
+    assert_eq!(env.payload["key"], "value");
+    assert_eq!(env.actor_id.0, "test");
+    assert_eq!(env.namespace.0, "test");
 }
 
 #[tokio::test]
@@ -84,17 +78,8 @@ async fn test_default_invoke_streaming() {
         },
     };
 
-    let ctx = ToolContext {
-        capabilities: vec![],
-        workflow_id: "wf".to_string(),
-        node_id: "node".to_string(),
-        metadata: HashMap::new(),
-    };
-
     let (tx, _rx) = stream_channel(10);
-    let result = tool
-        .invoke_streaming(json!({"foo": "bar"}), &ctx, tx)
-        .await
-        .unwrap();
-    assert_eq!(result, json!({"foo": "bar"}));
+    let env = Envelope::test(json!({"foo": "bar"}));
+    let result = tool.invoke_streaming(env, tx).await.unwrap();
+    assert_eq!(result.payload, json!({"foo": "bar"}));
 }

@@ -9,9 +9,10 @@ use serde_json::{json, Value};
 use konf_tool_runner::{register, InlineRunner, RunRegistry, Runner};
 
 use konf_runtime::Runtime;
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolContext, ToolInfo};
-use konflux::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolInfo};
+use konflux_substrate::Engine;
 
 struct TrivialWorkflow;
 
@@ -28,17 +29,8 @@ impl Tool for TrivialWorkflow {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        Ok(json!({ "ok": true }))
-    }
-}
-
-fn trivial_ctx() -> ToolContext {
-    ToolContext {
-        capabilities: vec!["*".into()],
-        workflow_id: "test".into(),
-        node_id: "test".into(),
-        metadata: std::collections::HashMap::new(),
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        Ok(env.respond(json!({ "ok": true })))
     }
 }
 
@@ -72,28 +64,30 @@ async fn end_to_end_spawn_then_wait_tool_surface() {
 
     // Spawn.
     let spawn_result = spawn
-        .invoke(json!({"workflow": "trivial"}), &trivial_ctx())
+        .invoke(Envelope::test(json!({"workflow": "trivial"})))
         .await
-        .unwrap();
+        .unwrap()
+        .payload;
     let run_id = spawn_result["run_id"].as_str().unwrap().to_string();
     assert_eq!(spawn_result["backend"], "inline");
 
     // Wait — should reach terminal Succeeded.
     let wait_result = wait
-        .invoke(
+        .invoke(Envelope::test(
             json!({"run_id": run_id.clone(), "timeout_secs": 5}),
-            &trivial_ctx(),
-        )
+        ))
         .await
-        .unwrap();
+        .unwrap()
+        .payload;
     assert_eq!(wait_result["state"], "succeeded");
     assert_eq!(wait_result["result"]["ok"], true);
 
     // Status — should still report terminal.
     let status_result = status
-        .invoke(json!({"run_id": run_id}), &trivial_ctx())
+        .invoke(Envelope::test(json!({"run_id": run_id})))
         .await
-        .unwrap();
+        .unwrap()
+        .payload;
     assert_eq!(status_result["state"], "succeeded");
 }
 
@@ -105,7 +99,7 @@ async fn spawn_missing_workflow_field_errors() {
     register(runtime.engine(), runner).unwrap();
 
     let spawn = runtime.engine().registry().get("runner:spawn").unwrap();
-    let err = spawn.invoke(json!({}), &trivial_ctx()).await.unwrap_err();
+    let err = spawn.invoke(Envelope::test(json!({}))).await.unwrap_err();
     assert!(err.to_string().contains("workflow"));
 }
 
@@ -118,10 +112,9 @@ async fn wait_unknown_run_errors() {
 
     let wait = runtime.engine().registry().get("runner:wait").unwrap();
     let err = wait
-        .invoke(
+        .invoke(Envelope::test(
             json!({"run_id": "does-not-exist", "timeout_secs": 1}),
-            &trivial_ctx(),
-        )
+        ))
         .await
         .unwrap_err();
     let msg = err.to_string();

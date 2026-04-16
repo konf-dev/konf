@@ -73,8 +73,7 @@ impl RawEventRow {
         let run_id = obj
             .and_then(|o| o.get("run_id"))
             .and_then(Value::as_str)
-            .and_then(|s| Uuid::parse_str(s).ok())
-            .unwrap_or_else(Uuid::nil);
+            .and_then(|s| Uuid::parse_str(s).ok());
 
         let session_id = obj
             .and_then(|o| o.get("session_id"))
@@ -129,7 +128,7 @@ impl JournalStore for SurrealJournalStore {
         let seq = self.counter.fetch_add(1, Ordering::Relaxed);
         let payload = json!({
             "seq": seq,
-            "run_id": entry.run_id.to_string(),
+            "run_id": entry.run_id.map(|id| id.to_string()),
             "session_id": entry.session_id,
             "data": entry.payload,
         });

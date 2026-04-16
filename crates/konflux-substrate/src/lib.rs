@@ -7,16 +7,20 @@
 pub mod builtin;
 pub mod capability;
 pub mod engine;
+pub mod envelope;
 pub mod error;
 pub mod executor;
 pub mod expr;
 pub mod hooks;
+pub mod journal;
 pub mod parser;
+pub mod process;
 pub mod prompt;
 pub mod resource;
 pub mod stream;
 pub mod template;
 pub mod tool;
+pub mod tracing_context;
 pub mod workflow;
 
 pub use engine::{Engine, EngineConfig, ToolChangedReceiver};

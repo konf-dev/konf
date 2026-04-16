@@ -20,7 +20,7 @@ use serde_json::json;
 use tracing::info;
 
 use konf_runtime::scope::{Actor, ActorRole, CapabilityGrant, ExecutionScope, ResourceLimits};
-use konflux::stream::{ProgressType, StreamEvent};
+use konflux_substrate::stream::{ProgressType, StreamEvent};
 
 use crate::auth::middleware::AuthUser;
 use crate::error::AppError;
@@ -84,7 +84,7 @@ pub async fn chat(
                 .unwrap_or(ActorRole::User),
         },
         depth: 0,
-        };
+    };
 
     // Parse workflow
     let workflow = state

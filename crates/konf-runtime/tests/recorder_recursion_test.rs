@@ -46,11 +46,7 @@ impl JournalStore for CountingJournal {
     async fn query_by_run(&self, _: RunId) -> Result<Vec<JournalRow>, JournalError> {
         Ok(vec![])
     }
-    async fn query_by_session(
-        &self,
-        _: &str,
-        _: usize,
-    ) -> Result<Vec<JournalRow>, JournalError> {
+    async fn query_by_session(&self, _: &str, _: usize) -> Result<Vec<JournalRow>, JournalError> {
         Ok(vec![])
     }
     async fn recent(&self, _: usize) -> Result<Vec<JournalRow>, JournalError> {
@@ -63,7 +59,7 @@ impl JournalStore for CountingJournal {
 
 fn sample_entry() -> JournalEntry {
     JournalEntry {
-        run_id: Uuid::new_v4(),
+        run_id: Some(Uuid::new_v4()),
         session_id: "s".into(),
         namespace: "konf:test".into(),
         event_type: "interaction".into(),
@@ -112,10 +108,7 @@ async fn fanout_does_not_self_recurse_behavioral_test() {
     let s2 = CountingJournal::new();
     let s3 = CountingJournal::new();
 
-    let fanout = FanoutJournalStore::new(
-        primary.clone(),
-        vec![s1.clone(), s2.clone(), s3.clone()],
-    );
+    let fanout = FanoutJournalStore::new(primary.clone(), vec![s1.clone(), s2.clone(), s3.clone()]);
 
     fanout.append(sample_entry()).await.unwrap();
 

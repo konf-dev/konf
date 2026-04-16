@@ -5,9 +5,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use konflux::engine::Engine;
-use konflux::error::ToolError as KonfluxToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
+use konflux_substrate::engine::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError as KonfluxToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
 
 /// Validates a workflow YAML string against the Konf kernel.
 ///
@@ -63,27 +64,30 @@ impl Tool for ValidateWorkflowTool {
         }
     }
 
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, KonfluxToolError> {
-        let yaml = input.get("yaml").and_then(|v| v.as_str()).ok_or_else(|| {
-            KonfluxToolError::InvalidInput {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, KonfluxToolError> {
+        let yaml = env
+            .payload
+            .get("yaml")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| KonfluxToolError::InvalidInput {
                 message: "Missing required field 'yaml' (string)".into(),
                 field: Some("yaml".into()),
-            }
-        })?;
+            })?;
 
         // Step 1: Parse the YAML into a Workflow
         let workflow = match self.engine.parse_yaml(yaml) {
             Ok(wf) => wf,
             Err(e) => {
-                return Ok(json!({
+                return Ok(env.respond(json!({
                     "valid": false,
                     "errors": [format!("Parse error: {e}")]
-                }));
+                })));
             }
         };
 
         let mut errors: Vec<String> = Vec::new();
         let registry = self.engine.registry();
+        let capability_patterns = env.capabilities.to_patterns();
 
         // Step 2: Check that each step's tool is registered
         for step in &workflow.steps {
@@ -98,8 +102,7 @@ impl Tool for ValidateWorkflowTool {
 
         // Step 3: Check capability attenuation — caller must cover workflow capabilities
         for cap in &workflow.capabilities {
-            let covered = ctx
-                .capabilities
+            let covered = capability_patterns
                 .iter()
                 .any(|grant| matches_capability_pattern(grant, cap));
             if !covered {
@@ -114,17 +117,17 @@ impl Tool for ValidateWorkflowTool {
             let capabilities_required: Vec<&str> =
                 workflow.capabilities.iter().map(|s| s.as_str()).collect();
 
-            Ok(json!({
+            Ok(env.respond(json!({
                 "valid": true,
                 "workflow_id": workflow.id.as_str(),
                 "node_count": workflow.steps.len(),
                 "capabilities_required": capabilities_required,
-            }))
+            })))
         } else {
-            Ok(json!({
+            Ok(env.respond(json!({
                 "valid": false,
                 "errors": errors,
-            }))
+            })))
         }
     }
 }

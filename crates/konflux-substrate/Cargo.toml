@@ -1,5 +1,5 @@
 [package]
-name = "konflux-core"
+name = "konflux-substrate"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,7 +7,7 @@ repository.workspace = true
 description = "YAML workflow execution engine with capability lattice"
 
 [lib]
-name = "konflux"
+name = "konflux_substrate"
 
 [dependencies]
 tokio = { workspace = true }
@@ -20,6 +20,7 @@ async-trait = { workspace = true }
 thiserror = { workspace = true }
 minijinja = { workspace = true }
 uuid = { workspace = true }
+chrono = { workspace = true }
 tracing = { version = "0.1", features = ["attributes"] }
 futures = { workspace = true }
 

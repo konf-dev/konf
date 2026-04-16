@@ -9,8 +9,9 @@ use std::sync::Arc;
 use tracing::info;
 
 use crate::engine::Engine;
+use crate::envelope::Envelope;
 use crate::error::ToolError;
-use crate::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
+use crate::tool::{Tool, ToolAnnotations, ToolInfo};
 
 /// Annotations shared by all builtins: read-only, idempotent, no external I/O.
 const BUILTIN_ANNOTATIONS: ToolAnnotations = ToolAnnotations {
@@ -40,8 +41,9 @@ impl Tool for EchoTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        Ok(input)
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let output = env.payload.clone();
+        Ok(env.respond(output))
     }
 }
 
@@ -72,19 +74,22 @@ impl Tool for JsonGetTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let data = input.get("data").ok_or_else(|| ToolError::InvalidInput {
-            message: "Missing 'data'".into(),
-            field: Some("data".into()),
-        })?;
-        let path =
-            input
-                .get("path")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| ToolError::InvalidInput {
-                    message: "Missing 'path'".into(),
-                    field: Some("path".into()),
-                })?;
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let data = env
+            .payload
+            .get("data")
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing 'data'".into(),
+                field: Some("data".into()),
+            })?;
+        let path = env
+            .payload
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing 'path'".into(),
+                field: Some("path".into()),
+            })?;
 
         let parts: Vec<&str> = path.split('.').collect();
         let mut current = data;
@@ -100,7 +105,7 @@ impl Tool for JsonGetTool {
                 })?;
         }
 
-        Ok(current.clone())
+        Ok(env.respond(current.clone()))
     }
 }
 
@@ -131,15 +136,17 @@ impl Tool for ConcatTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let parts = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let parts = env
+            .payload
             .get("parts")
             .and_then(|v| v.as_array())
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "Missing 'parts' array".into(),
                 field: Some("parts".into()),
             })?;
-        let separator = input
+        let separator = env
+            .payload
             .get("separator")
             .and_then(|v| v.as_str())
             .unwrap_or("");
@@ -155,7 +162,7 @@ impl Tool for ConcatTool {
             })
             .collect();
 
-        Ok(Value::String(strings.join(separator)))
+        Ok(env.respond(Value::String(strings.join(separator))))
     }
 }
 
@@ -179,9 +186,10 @@ impl Tool for LogTool {
         }
     }
 
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
-        info!(workflow_id = %ctx.workflow_id, node_id = %ctx.node_id, "Workflow Log: {:?}", input);
-        Ok(input)
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        info!(target = %env.target, trace_id = %env.trace_id, "Workflow Log: {:?}", env.payload);
+        let output = env.payload.clone();
+        Ok(env.respond(output))
     }
 }
 
@@ -212,15 +220,17 @@ impl Tool for TemplateTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let template = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let template = env
+            .payload
             .get("template")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "Missing 'template'".into(),
                 field: Some("template".into()),
             })?;
-        let vars = input
+        let vars = env
+            .payload
             .get("vars")
             .and_then(|v| v.as_object())
             .ok_or_else(|| ToolError::InvalidInput {
@@ -237,7 +247,7 @@ impl Tool for TemplateTool {
             }
         })?;
 
-        Ok(Value::String(rendered))
+        Ok(env.respond(Value::String(rendered)))
     }
 }
 

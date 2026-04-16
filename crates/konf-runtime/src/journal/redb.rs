@@ -20,14 +20,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{TimeZone, Utc};
-use redb::{
-    Database, MultimapTableDefinition, ReadableDatabase, ReadableTable, TableDefinition,
-};
+use redb::{Database, MultimapTableDefinition, ReadableDatabase, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{JournalEntry, JournalError, JournalRow, JournalStore};
-use crate::error::RunId;
+use crate::journal::RunId;
 
 // ---------------------------------------------------------------------------
 // Table definitions
@@ -53,7 +51,7 @@ const BY_SESSION: MultimapTableDefinition<&str, u64> =
 /// On-disk representation of one journal event. Stored as postcard bytes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredEntry {
-    run_id_bytes: [u8; 16],
+    run_id_bytes: Option<[u8; 16]>,
     session_id: String,
     namespace: String,
     event_type: String,
@@ -64,18 +62,20 @@ struct StoredEntry {
 impl StoredEntry {
     fn from_entry(entry: &JournalEntry) -> Result<Self, JournalError> {
         Ok(Self {
-            run_id_bytes: *entry.run_id.as_bytes(),
+            run_id_bytes: entry.run_id.map(|id| *id.as_bytes()),
             session_id: entry.session_id.clone(),
             namespace: entry.namespace.clone(),
             event_type: entry.event_type.clone(),
-            payload_json: serde_json::to_string(&entry.payload).map_err(JournalError::serialization)?,
+            payload_json: serde_json::to_string(&entry.payload)
+                .map_err(JournalError::serialization)?,
             created_at_micros: Utc::now().timestamp_micros(),
         })
     }
 
     fn into_row(self, id: u64) -> Result<JournalRow, JournalError> {
-        let run_id = Uuid::from_bytes(self.run_id_bytes);
-        let payload = serde_json::from_str(&self.payload_json).map_err(JournalError::serialization)?;
+        let run_id = self.run_id_bytes.map(Uuid::from_bytes);
+        let payload =
+            serde_json::from_str(&self.payload_json).map_err(JournalError::serialization)?;
         let created_at = Utc
             .timestamp_micros(self.created_at_micros)
             .single()
@@ -181,12 +181,12 @@ impl JournalStore for RedbJournal {
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
                 next_id
             };
-            {
+            if let Some(ref run_id_bytes) = stored.run_id_bytes {
                 let mut by_run = write
                     .open_multimap_table(BY_RUN)
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
                 by_run
-                    .insert(stored.run_id_bytes.as_slice(), next_id)
+                    .insert(run_id_bytes.as_slice(), next_id)
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
             }
             {
@@ -338,8 +338,8 @@ impl JournalStore for RedbJournal {
         let db = self.db.clone();
 
         // Phase 1: scan under spawn_blocking
-        let zombies: Vec<JournalEntry> = tokio::task::spawn_blocking(
-            move || -> Result<Vec<JournalEntry>, JournalError> {
+        let zombies: Vec<JournalEntry> =
+            tokio::task::spawn_blocking(move || -> Result<Vec<JournalEntry>, JournalError> {
                 use std::collections::{HashMap, HashSet};
                 let read = db
                     .begin_read()
@@ -359,23 +359,25 @@ impl JournalStore for RedbJournal {
                         .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
                     let stored: StoredEntry = postcard::from_bytes(val_guard.value())
                         .map_err(JournalError::serialization)?;
-                    match stored.event_type.as_str() {
-                        "workflow_started" => {
-                            started
-                                .entry(stored.run_id_bytes)
-                                .or_insert((stored.session_id, stored.namespace));
+                    if let Some(run_id_bytes) = stored.run_id_bytes {
+                        match stored.event_type.as_str() {
+                            "workflow_started" => {
+                                started
+                                    .entry(run_id_bytes)
+                                    .or_insert((stored.session_id, stored.namespace));
+                            }
+                            "workflow_completed" | "workflow_failed" | "workflow_cancelled" => {
+                                terminal.insert(run_id_bytes);
+                            }
+                            _ => {}
                         }
-                        "workflow_completed" | "workflow_failed" | "workflow_cancelled" => {
-                            terminal.insert(stored.run_id_bytes);
-                        }
-                        _ => {}
                     }
                 }
                 let mut result = Vec::new();
                 for (run_id_bytes, (session_id, namespace)) in started {
                     if !terminal.contains(&run_id_bytes) {
                         result.push(JournalEntry {
-                            run_id: Uuid::from_bytes(run_id_bytes),
+                            run_id: Some(Uuid::from_bytes(run_id_bytes)),
                             session_id,
                             namespace,
                             event_type: "workflow_failed".into(),
@@ -387,10 +389,9 @@ impl JournalStore for RedbJournal {
                     }
                 }
                 Ok(result)
-            },
-        )
-        .await
-        .map_err(|e| JournalError::storage(std::io::Error::other(e)))??;
+            })
+            .await
+            .map_err(|e| JournalError::storage(std::io::Error::other(e)))??;
 
         // Phase 2: append the reconciliation events via the normal path.
         let count = zombies.len() as u64;
@@ -415,7 +416,7 @@ mod tests {
 
     fn entry(run_id: Uuid, session: &str, event_type: &str) -> JournalEntry {
         JournalEntry {
-            run_id,
+            run_id: Some(run_id),
             session_id: session.into(),
             namespace: "konf:test:user".into(),
             event_type: event_type.into(),
@@ -427,15 +428,21 @@ mod tests {
     async fn append_and_query_by_run() {
         let (j, _dir) = journal().await;
         let run_id = Uuid::new_v4();
-        let id1 = j.append(entry(run_id, "s1", "workflow_started")).await.unwrap();
-        let id2 = j.append(entry(run_id, "s1", "workflow_completed")).await.unwrap();
+        let id1 = j
+            .append(entry(run_id, "s1", "workflow_started"))
+            .await
+            .unwrap();
+        let id2 = j
+            .append(entry(run_id, "s1", "workflow_completed"))
+            .await
+            .unwrap();
         assert!(id2 > id1);
 
         let rows = j.query_by_run(run_id).await.unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].event_type, "workflow_started");
         assert_eq!(rows[1].event_type, "workflow_completed");
-        assert_eq!(rows[0].run_id, run_id);
+        assert_eq!(rows[0].run_id, Some(run_id));
     }
 
     #[tokio::test]
@@ -443,9 +450,15 @@ mod tests {
         let (j, _dir) = journal().await;
         let run1 = Uuid::new_v4();
         let run2 = Uuid::new_v4();
-        j.append(entry(run1, "sess", "workflow_started")).await.unwrap();
-        j.append(entry(run2, "sess", "workflow_started")).await.unwrap();
-        j.append(entry(run2, "sess", "workflow_completed")).await.unwrap();
+        j.append(entry(run1, "sess", "workflow_started"))
+            .await
+            .unwrap();
+        j.append(entry(run2, "sess", "workflow_started"))
+            .await
+            .unwrap();
+        j.append(entry(run2, "sess", "workflow_completed"))
+            .await
+            .unwrap();
 
         let rows = j.query_by_session("sess", 2).await.unwrap();
         assert_eq!(rows.len(), 2);
@@ -473,9 +486,15 @@ mod tests {
         let (j, _dir) = journal().await;
         let live = Uuid::new_v4();
         let done = Uuid::new_v4();
-        j.append(entry(live, "s1", "workflow_started")).await.unwrap();
-        j.append(entry(done, "s2", "workflow_started")).await.unwrap();
-        j.append(entry(done, "s2", "workflow_completed")).await.unwrap();
+        j.append(entry(live, "s1", "workflow_started"))
+            .await
+            .unwrap();
+        j.append(entry(done, "s2", "workflow_started"))
+            .await
+            .unwrap();
+        j.append(entry(done, "s2", "workflow_completed"))
+            .await
+            .unwrap();
 
         let count = j.reconcile_zombies().await.unwrap();
         assert_eq!(count, 1);

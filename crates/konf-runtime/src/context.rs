@@ -10,9 +10,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use konflux::error::ToolError;
-use konflux::stream::StreamSender;
-use konflux::tool::{Tool, ToolContext, ToolInfo};
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::stream::StreamSender;
+use konflux_substrate::tool::{Tool, ToolInfo};
 
 /// A tool wrapper that injects bound parameters into input before invocation.
 ///
@@ -31,13 +32,12 @@ impl VirtualizedTool {
         Self { inner, bindings }
     }
 
-    fn inject_bindings(&self, mut input: Value) -> Value {
-        if let Value::Object(ref mut map) = input {
+    fn inject_bindings(&self, env: &mut Envelope<Value>) {
+        if let Some(map) = env.payload.as_object_mut() {
             for (k, v) in &self.bindings {
                 map.insert(k.clone(), v.clone());
             }
         }
-        input
     }
 }
 
@@ -47,19 +47,18 @@ impl Tool for VirtualizedTool {
         self.inner.info()
     }
 
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
-        let input = self.inject_bindings(input);
-        self.inner.invoke(input, ctx).await
+    async fn invoke(&self, mut env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        self.inject_bindings(&mut env);
+        self.inner.invoke(env).await
     }
 
     async fn invoke_streaming(
         &self,
-        input: Value,
-        ctx: &ToolContext,
+        mut env: Envelope<Value>,
         sender: StreamSender,
-    ) -> Result<Value, ToolError> {
-        let input = self.inject_bindings(input);
-        self.inner.invoke_streaming(input, ctx, sender).await
+    ) -> Result<Envelope<Value>, ToolError> {
+        self.inject_bindings(&mut env);
+        self.inner.invoke_streaming(env, sender).await
     }
 }
 
@@ -83,18 +82,9 @@ mod tests {
                 annotations: Default::default(),
             }
         }
-        async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-            // Return the input so tests can inspect what was injected
-            Ok(input)
-        }
-    }
-
-    fn test_ctx() -> ToolContext {
-        ToolContext {
-            capabilities: vec![],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: HashMap::new(),
+        async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+            // Return the payload so tests can inspect what was injected
+            Ok(env.respond(env.payload.clone()))
         }
     }
 
@@ -105,12 +95,12 @@ mod tests {
 
         let tool = VirtualizedTool::new(Arc::new(MockTool), bindings);
         let result = tool
-            .invoke(json!({"query": "hello"}), &test_ctx())
+            .invoke(Envelope::test(json!({"query": "hello"})))
             .await
             .unwrap();
 
-        assert_eq!(result["query"], "hello");
-        assert_eq!(result["namespace"], "konf:unspool:user_123");
+        assert_eq!(result.payload["query"], "hello");
+        assert_eq!(result.payload["namespace"], "konf:unspool:user_123");
     }
 
     #[tokio::test]
@@ -121,25 +111,24 @@ mod tests {
         let tool = VirtualizedTool::new(Arc::new(MockTool), bindings);
         // LLM tries to set namespace to something else — should be overridden
         let result = tool
-            .invoke(
+            .invoke(Envelope::test(
                 json!({"query": "hello", "namespace": "konf:unspool:admin"}),
-                &test_ctx(),
-            )
+            ))
             .await
             .unwrap();
 
-        assert_eq!(result["namespace"], "konf:unspool:user_123");
+        assert_eq!(result.payload["namespace"], "konf:unspool:user_123");
     }
 
     #[tokio::test]
     async fn test_no_bindings_passthrough() {
         let tool = VirtualizedTool::new(Arc::new(MockTool), HashMap::new());
         let result = tool
-            .invoke(json!({"query": "hello"}), &test_ctx())
+            .invoke(Envelope::test(json!({"query": "hello"})))
             .await
             .unwrap();
 
-        assert_eq!(result["query"], "hello");
-        assert!(result.get("namespace").is_none());
+        assert_eq!(result.payload["query"], "hello");
+        assert!(result.payload.get("namespace").is_none());
     }
 }

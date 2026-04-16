@@ -11,29 +11,34 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::envelope::Envelope;
 use crate::error::ToolError;
 use crate::stream::StreamSender;
 
-/// A tool is anything that takes input and returns output.
+/// A tool is anything that takes an envelope and returns an envelope.
 /// Tools are registered by the consumer, not built into the engine.
+///
+/// The `Envelope<Value>` carries the payload (tool input/output) plus
+/// typed context: trace_id, namespace, capabilities, actor_id, etc.
+/// Tools access input via `env.payload` and return output via
+/// `env.respond(output)`.
 #[async_trait]
 pub trait Tool: Send + Sync {
     /// Tool metadata: name, description, schemas, capabilities, annotations.
     fn info(&self) -> ToolInfo;
 
     /// Execute the tool.
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError>;
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError>;
 
     /// Execute with streaming. Default: non-streaming fallback.
     /// Tools should only push Progress events (e.g., TextDelta) to the sender.
     /// The executor handles ToolStart/ToolEnd wrapping and the final Done event.
     async fn invoke_streaming(
         &self,
-        input: Value,
-        ctx: &ToolContext,
+        env: Envelope<Value>,
         _sender: StreamSender,
-    ) -> Result<Value, ToolError> {
-        self.invoke(input, ctx).await
+    ) -> Result<Envelope<Value>, ToolError> {
+        self.invoke(env).await
     }
 }
 
@@ -211,8 +216,8 @@ mod tests {
                     annotations: ToolAnnotations::default(),
                 }
             }
-            async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-                Ok(Value::Null)
+            async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+                Ok(env.respond(Value::Null))
             }
         }
 

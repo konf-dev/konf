@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use konflux::Engine;
+use konflux_substrate::Engine;
 
 pub use tools::*;
 
@@ -143,7 +143,8 @@ pub async fn register(engine: &Engine, backend: Arc<dyn MemoryBackend>) -> anyho
 #[cfg(test)]
 mod tests {
     use super::*;
-    use konflux::Tool;
+    use konflux_substrate::envelope::Envelope;
+    use konflux_substrate::Tool;
     use serde_json::json;
 
     struct MockBackend;
@@ -215,26 +216,17 @@ mod tests {
         assert_eq!(registry.len(), 7);
     }
 
-    fn test_ctx() -> konflux::tool::ToolContext {
-        konflux::tool::ToolContext {
-            capabilities: vec!["memory_*".into()],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: std::collections::HashMap::new(),
-        }
-    }
-
     #[tokio::test]
     async fn test_search_tool_delegates_to_backend() {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = SearchTool::new(backend);
         let result = tool
-            .invoke(
+            .invoke(Envelope::test(
                 json!({"query": "hello", "mode": "text", "limit": 5}),
-                &test_ctx(),
-            )
+            ))
             .await
-            .unwrap();
+            .unwrap()
+            .payload;
         assert_eq!(result["query"], "hello");
     }
 
@@ -255,9 +247,10 @@ mod tests {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StoreTool::new(backend);
         let result = tool
-            .invoke(json!({"nodes": [{"content": "test"}]}), &test_ctx())
+            .invoke(Envelope::test(json!({"nodes": [{"content": "test"}]})))
             .await
-            .unwrap();
+            .unwrap()
+            .payload;
         assert_eq!(result["added"], 1);
     }
 
@@ -265,7 +258,7 @@ mod tests {
     async fn test_store_tool_rejects_missing_nodes() {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StoreTool::new(backend);
-        let result = tool.invoke(json!({}), &test_ctx()).await;
+        let result = tool.invoke(Envelope::test(json!({}))).await;
         assert!(result.is_err());
     }
 
@@ -274,12 +267,12 @@ mod tests {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateSetTool::new(backend);
         let result = tool
-            .invoke(
+            .invoke(Envelope::test(
                 json!({"key": "plan", "value": [1,2,3], "session_id": "s1"}),
-                &test_ctx(),
-            )
+            ))
             .await
-            .unwrap();
+            .unwrap()
+            .payload;
         assert_eq!(result["key"], "plan");
     }
 
@@ -288,7 +281,7 @@ mod tests {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateSetTool::new(backend);
         let result = tool
-            .invoke(json!({"value": 1, "session_id": "s1"}), &test_ctx())
+            .invoke(Envelope::test(json!({"value": 1, "session_id": "s1"})))
             .await;
         assert!(result.is_err());
     }
@@ -298,9 +291,10 @@ mod tests {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateGetTool::new(backend);
         let result = tool
-            .invoke(json!({"key": "plan", "session_id": "s1"}), &test_ctx())
+            .invoke(Envelope::test(json!({"key": "plan", "session_id": "s1"})))
             .await
-            .unwrap();
+            .unwrap()
+            .payload;
         assert_eq!(result["key"], "plan");
     }
 
@@ -309,9 +303,10 @@ mod tests {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateDeleteTool::new(backend);
         let result = tool
-            .invoke(json!({"key": "plan", "session_id": "s1"}), &test_ctx())
+            .invoke(Envelope::test(json!({"key": "plan", "session_id": "s1"})))
             .await
-            .unwrap();
+            .unwrap()
+            .payload;
         assert_eq!(result["deleted"], "plan");
     }
 
@@ -320,9 +315,10 @@ mod tests {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateListTool::new(backend);
         let result = tool
-            .invoke(json!({"session_id": "s1"}), &test_ctx())
+            .invoke(Envelope::test(json!({"session_id": "s1"})))
             .await
-            .unwrap();
+            .unwrap()
+            .payload;
         assert!(result["keys"].is_array());
     }
 
@@ -331,9 +327,10 @@ mod tests {
         let backend: Arc<dyn MemoryBackend> = Arc::new(MockBackend);
         let tool = StateClearTool::new(backend);
         let result = tool
-            .invoke(json!({"session_id": "s1"}), &test_ctx())
+            .invoke(Envelope::test(json!({"session_id": "s1"})))
             .await
-            .unwrap();
+            .unwrap()
+            .payload;
         assert_eq!(result["cleared"], 0);
     }
 

@@ -9,15 +9,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use konflux::engine::Engine;
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolContext, ToolInfo};
 use konf_runtime::interaction::{Interaction, InteractionKind, InteractionStatus};
 use konf_runtime::journal::JournalStore;
-use konf_runtime::scope::{
-    Actor, ActorRole, CapabilityGrant, ExecutionScope, ResourceLimits,
-};
+use konf_runtime::scope::{Actor, ActorRole, CapabilityGrant, ExecutionScope, ResourceLimits};
 use konf_runtime::{JournalEntry, JournalError, JournalRow, RunId, Runtime};
+use konflux_substrate::engine::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolInfo};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -54,11 +53,7 @@ impl JournalStore for CaptureJournal {
     async fn query_by_run(&self, _: RunId) -> Result<Vec<JournalRow>, JournalError> {
         Ok(vec![])
     }
-    async fn query_by_session(
-        &self,
-        _: &str,
-        _: usize,
-    ) -> Result<Vec<JournalRow>, JournalError> {
+    async fn query_by_session(&self, _: &str, _: usize) -> Result<Vec<JournalRow>, JournalError> {
         Ok(vec![])
     }
     async fn recent(&self, _: usize) -> Result<Vec<JournalRow>, JournalError> {
@@ -84,8 +79,8 @@ impl Tool for SilentTool {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        Ok(json!(null))
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        Ok(env.respond(json!(null)))
     }
 }
 
@@ -104,7 +99,7 @@ impl Tool for BrokenTool {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, _env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         Err(ToolError::ExecutionFailed {
             message: "explicit failure".into(),
             retryable: false,
@@ -146,7 +141,10 @@ async fn wait_for_entries(journal: &CaptureJournal, expected: usize) -> bool {
 }
 
 fn extract_interaction(entry: &JournalEntry) -> Interaction {
-    assert_eq!(entry.event_type, "interaction", "expected interaction entry");
+    assert_eq!(
+        entry.event_type, "interaction",
+        "expected interaction entry"
+    );
     Interaction::from_json(entry.payload.clone()).expect("deserialize interaction")
 }
 
@@ -162,7 +160,10 @@ async fn invoke_tool_produces_tool_dispatch_interaction_in_journal() {
         .await
         .unwrap();
 
-    assert!(wait_for_entries(&journal, 1).await, "journal must receive 1 entry");
+    assert!(
+        wait_for_entries(&journal, 1).await,
+        "journal must receive 1 entry"
+    );
     let entries = journal.entries();
     let interaction = extract_interaction(&entries[0]);
 
@@ -179,7 +180,10 @@ async fn invoke_tool_with_silent_actor_still_records() {
     let scope = test_scope("konf:test:ns", "alice");
     let exec_ctx = konf_runtime::ExecutionContext::new_root("sess-test");
 
-    runtime.invoke_tool("silent", json!({}), &scope, &exec_ctx).await.unwrap();
+    runtime
+        .invoke_tool("silent", json!({}), &scope, &exec_ctx)
+        .await
+        .unwrap();
 
     assert!(wait_for_entries(&journal, 1).await);
     let entries = journal.entries();
@@ -194,7 +198,9 @@ async fn invoke_tool_producing_error_records_failed_status() {
     let scope = test_scope("konf:test:ns", "alice");
     let exec_ctx = konf_runtime::ExecutionContext::new_root("sess-test");
 
-    let result = runtime.invoke_tool("broken", json!({}), &scope, &exec_ctx).await;
+    let result = runtime
+        .invoke_tool("broken", json!({}), &scope, &exec_ctx)
+        .await;
     assert!(result.is_err(), "broken tool must surface error");
 
     assert!(wait_for_entries(&journal, 1).await);
@@ -220,7 +226,10 @@ async fn invoke_tool_records_edge_rules_fired_list() {
     let scope = test_scope("konf:test:ns", "alice");
     let exec_ctx = konf_runtime::ExecutionContext::new_root("sess-test");
 
-    runtime.invoke_tool("silent", json!({}), &scope, &exec_ctx).await.unwrap();
+    runtime
+        .invoke_tool("silent", json!({}), &scope, &exec_ctx)
+        .await
+        .unwrap();
 
     assert!(wait_for_entries(&journal, 1).await);
     let entries = journal.entries();
@@ -243,7 +252,10 @@ async fn invoke_tool_records_actor_and_namespace_inline() {
     let scope = test_scope("konf:unspool:user_99", "user_99");
     let exec_ctx = konf_runtime::ExecutionContext::new_root("sess-test");
 
-    runtime.invoke_tool("silent", json!({}), &scope, &exec_ctx).await.unwrap();
+    runtime
+        .invoke_tool("silent", json!({}), &scope, &exec_ctx)
+        .await
+        .unwrap();
 
     assert!(wait_for_entries(&journal, 1).await);
     let entries = journal.entries();
@@ -265,7 +277,10 @@ async fn invoke_tool_preserves_context_trace_id() {
     let scope = test_scope("konf:test:ns", "alice");
     let exec_ctx = konf_runtime::ExecutionContext::with_trace(trace, "sess-test");
 
-    runtime.invoke_tool("silent", json!({}), &scope, &exec_ctx).await.unwrap();
+    runtime
+        .invoke_tool("silent", json!({}), &scope, &exec_ctx)
+        .await
+        .unwrap();
 
     assert!(wait_for_entries(&journal, 1).await);
     let interaction = extract_interaction(&journal.entries()[0]);
@@ -283,13 +298,22 @@ async fn consecutive_invoke_tool_calls_share_trace_id_via_context() {
     let scope = test_scope("konf:test:ns", "alice");
     let exec_ctx = konf_runtime::ExecutionContext::new_root("sess-test");
 
-    runtime.invoke_tool("silent", json!({}), &scope, &exec_ctx).await.unwrap();
-    runtime.invoke_tool("silent", json!({}), &scope, &exec_ctx).await.unwrap();
+    runtime
+        .invoke_tool("silent", json!({}), &scope, &exec_ctx)
+        .await
+        .unwrap();
+    runtime
+        .invoke_tool("silent", json!({}), &scope, &exec_ctx)
+        .await
+        .unwrap();
 
     assert!(wait_for_entries(&journal, 2).await);
     let entries = journal.entries();
     let ia = extract_interaction(&entries[0]);
     let ib = extract_interaction(&entries[1]);
-    assert_eq!(ia.trace_id, ib.trace_id, "C3: consecutive calls share trace_id");
+    assert_eq!(
+        ia.trace_id, ib.trace_id,
+        "C3: consecutive calls share trace_id"
+    );
     assert_eq!(ia.trace_id, exec_ctx.trace_id);
 }

@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
-use konflux::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
+use konflux_substrate::Engine;
 
 /// Configuration for the secret tool.
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -58,15 +59,15 @@ impl Tool for SecretGetTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let key =
-            input
-                .get("key")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| ToolError::InvalidInput {
-                    message: "Missing 'key'".into(),
-                    field: Some("key".into()),
-                })?;
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let key = env
+            .payload
+            .get("key")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "Missing 'key'".into(),
+                field: Some("key".into()),
+            })?;
 
         if !self.allowed_keys.contains(&key.to_string()) {
             return Err(ToolError::AccessDenied {
@@ -75,7 +76,7 @@ impl Tool for SecretGetTool {
         }
 
         match std::env::var(key) {
-            Ok(val) => Ok(Value::String(val)),
+            Ok(val) => Ok(env.respond(Value::String(val))),
             Err(_) => Err(ToolError::ExecutionFailed {
                 message: format!(
                     "Secret key '{}' is allowed but not found in the environment.",
@@ -117,8 +118,8 @@ impl Tool for SecretListTool {
         }
     }
 
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        Ok(json!(self.allowed_keys))
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        Ok(env.respond(json!(self.allowed_keys)))
     }
 }
 
@@ -126,24 +127,17 @@ impl Tool for SecretListTool {
 mod tests {
     use super::*;
 
-    fn mock_context() -> ToolContext {
-        ToolContext {
-            capabilities: vec!["*".into()],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: std::collections::HashMap::new(),
-        }
-    }
-
     #[tokio::test]
     async fn test_secret_get_allowed() {
         std::env::set_var("TEST_SECRET_ALLOWED", "secret_value");
         let tool = SecretGetTool {
             allowed_keys: vec!["TEST_SECRET_ALLOWED".into()],
         };
-        let input = json!({ "key": "TEST_SECRET_ALLOWED" });
-        let result = tool.invoke(input, &mock_context()).await.unwrap();
-        assert_eq!(result, Value::String("secret_value".into()));
+        let result = tool
+            .invoke(Envelope::test(json!({ "key": "TEST_SECRET_ALLOWED" })))
+            .await
+            .unwrap();
+        assert_eq!(result.payload, Value::String("secret_value".into()));
     }
 
     #[tokio::test]
@@ -152,8 +146,9 @@ mod tests {
         let tool = SecretGetTool {
             allowed_keys: vec!["OTHER_KEY".into()],
         };
-        let input = json!({ "key": "TEST_SECRET_HIDDEN" });
-        let result = tool.invoke(input, &mock_context()).await;
+        let result = tool
+            .invoke(Envelope::test(json!({ "key": "TEST_SECRET_HIDDEN" })))
+            .await;
         match result {
             Err(ToolError::AccessDenied { .. }) => (),
             _ => panic!("Expected AccessDenied error"),
@@ -165,8 +160,9 @@ mod tests {
         let tool = SecretGetTool {
             allowed_keys: vec!["MISSING_KEY".into()],
         };
-        let input = json!({ "key": "MISSING_KEY" });
-        let result = tool.invoke(input, &mock_context()).await;
+        let result = tool
+            .invoke(Envelope::test(json!({ "key": "MISSING_KEY" })))
+            .await;
         match result {
             Err(ToolError::ExecutionFailed { .. }) => (),
             _ => panic!("Expected ExecutionFailed error"),
@@ -178,7 +174,7 @@ mod tests {
         let tool = SecretListTool {
             allowed_keys: vec!["A".into(), "B".into()],
         };
-        let result = tool.invoke(json!({}), &mock_context()).await.unwrap();
-        assert_eq!(result, json!(["A", "B"]));
+        let result = tool.invoke(Envelope::test(json!({}))).await.unwrap();
+        assert_eq!(result.payload, json!(["A", "B"]));
     }
 }

@@ -7,7 +7,7 @@
 //! 2. A fresh `RunId` is inserted into the shared registry as `Pending`.
 //! 3. A tokio task is launched that:
 //!    - Transitions the slot to `Running`.
-//!    - Builds a `ToolContext` and invokes the workflow tool.
+//!    - Builds an `Envelope` and invokes the workflow tool.
 //!    - Stores the terminal state (`Succeeded` with the JSON result, or
 //!      `Failed` with the error message).
 //!    - Notifies any `wait_terminal` callers.
@@ -18,14 +18,13 @@
 //! that need those should graduate to the (not-yet-implemented) systemd or
 //! docker backends.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use tracing::{info, warn};
 
 use konf_runtime::{RunnerIntent, RunnerIntentStore, Runtime, TerminalStatus};
-use konflux::tool::ToolContext;
+use konflux_substrate::envelope::Envelope;
 
 use crate::error::RunnerError;
 use crate::registry::{RunId, RunRegistry, RunState};
@@ -135,45 +134,39 @@ impl InlineRunner {
         let intents_for_task = self.intents.clone();
 
         // R1: capture the parent's capabilities + trace id + session id
-        // for the ToolContext handed to WorkflowTool. The capabilities
+        // for the Envelope handed to WorkflowTool. The capabilities
         // list drives attenuation inside WorkflowTool; the trace id + session
         // ride as metadata so the nested runtime.run() honors the causation
         // chain.
         let parent_capabilities = spec.parent_scope.capability_patterns();
-        let parent_trace_id = spec.parent_ctx.trace_id.to_string();
+        let parent_trace_id = spec.parent_ctx.trace_id;
         let parent_session_id = spec.parent_ctx.session_id.clone();
         let parent_namespace = spec.parent_scope.namespace.clone();
 
         let handle = tokio::spawn(async move {
             registry.mark_running(&run_id_for_task).await;
 
-            let mut metadata: HashMap<String, serde_json::Value> = HashMap::new();
-            metadata.insert(
-                "trace_id".into(),
-                serde_json::Value::String(parent_trace_id),
+            let mut env = Envelope::for_tool_dispatch(
+                &format!("workflow:{workflow}"),
+                input,
+                &parent_capabilities,
+                parent_trace_id,
+                &parent_namespace,
+                "runner:inline",
+                &format!("runner_{workflow}"),
             );
-            metadata.insert(
+            // Propagate session_id via metadata for downstream use
+            env.metadata.0.insert(
                 "session_id".into(),
                 serde_json::Value::String(parent_session_id),
             );
-            metadata.insert(
-                "namespace".into(),
-                serde_json::Value::String(parent_namespace),
-            );
 
-            let ctx = ToolContext {
-                capabilities: parent_capabilities,
-                workflow_id: "runner".into(),
-                node_id: format!("runner_{workflow}"),
-                metadata,
-            };
-
-            let (runner_state, intent_status) = match tool.invoke(input, &ctx).await {
-                Ok(result) => {
+            let (runner_state, intent_status) = match tool.invoke(env).await {
+                Ok(result_env) => {
                     info!(run_id = %run_id_for_task, workflow = %workflow, "run succeeded");
                     (
                         RunState::Succeeded {
-                            result: result.clone(),
+                            result: result_env.payload.clone(),
                         },
                         TerminalStatus::Succeeded,
                     )
@@ -234,8 +227,7 @@ impl InlineRunner {
         // Replay has no live parent to inherit a trace from — each replay
         // is a fresh root in the trace graph. session_id comes from the
         // original intent.
-        let parent_ctx =
-            konf_runtime::ExecutionContext::new_root(intent.session_id.clone());
+        let parent_ctx = konf_runtime::ExecutionContext::new_root(intent.session_id.clone());
 
         let spec = WorkflowSpec {
             workflow: intent.workflow.clone(),

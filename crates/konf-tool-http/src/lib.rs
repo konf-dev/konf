@@ -10,9 +10,10 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
-use konflux::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
+use konflux_substrate::Engine;
 
 /// Maximum timeout for HTTP requests (5 minutes) to prevent resource exhaustion.
 const MAX_TIMEOUT_SECS: u64 = 300;
@@ -165,18 +166,19 @@ impl Tool for HttpGetTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let url =
-            input
-                .get("url")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| ToolError::InvalidInput {
-                    message: "missing 'url'".into(),
-                    field: Some("url".into()),
-                })?;
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let url = env
+            .payload
+            .get("url")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'url'".into(),
+                field: Some("url".into()),
+            })?;
         validate_url(url)?;
 
-        let timeout_secs = input
+        let timeout_secs = env
+            .payload
             .get("timeout")
             .and_then(|v| v.as_u64())
             .unwrap_or(30)
@@ -187,7 +189,7 @@ impl Tool for HttpGetTool {
             .get(url)
             .timeout(std::time::Duration::from_secs(timeout_secs));
 
-        if let Some(headers) = input.get("headers").and_then(|v| v.as_object()) {
+        if let Some(headers) = env.payload.get("headers").and_then(|v| v.as_object()) {
             for (k, v) in headers {
                 if let Some(val) = v.as_str() {
                     req = req.header(k.as_str(), val);
@@ -218,7 +220,7 @@ impl Tool for HttpGetTool {
 
         let body_value = serde_json::from_str::<Value>(&body).unwrap_or(Value::String(body));
 
-        Ok(json!({
+        Ok(env.respond(json!({
             "status": status,
             "headers": headers,
             "body": body_value,
@@ -226,7 +228,7 @@ impl Tool for HttpGetTool {
                 "tool": "http:get",
                 "duration_ms": duration_ms,
             }
-        }))
+        })))
     }
 }
 
@@ -280,23 +282,24 @@ impl Tool for HttpPostTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let url =
-            input
-                .get("url")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| ToolError::InvalidInput {
-                    message: "missing 'url'".into(),
-                    field: Some("url".into()),
-                })?;
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let url = env
+            .payload
+            .get("url")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'url'".into(),
+                field: Some("url".into()),
+            })?;
         validate_url(url)?;
 
-        let timeout_secs = input
+        let timeout_secs = env
+            .payload
             .get("timeout")
             .and_then(|v| v.as_u64())
             .unwrap_or(30)
             .min(MAX_TIMEOUT_SECS);
-        let body = input.get("body").cloned().unwrap_or(Value::Null);
+        let body = env.payload.get("body").cloned().unwrap_or(Value::Null);
 
         let mut req = self
             .client
@@ -304,7 +307,7 @@ impl Tool for HttpPostTool {
             .json(&body)
             .timeout(std::time::Duration::from_secs(timeout_secs));
 
-        if let Some(headers) = input.get("headers").and_then(|v| v.as_object()) {
+        if let Some(headers) = env.payload.get("headers").and_then(|v| v.as_object()) {
             for (k, v) in headers {
                 if let Some(val) = v.as_str() {
                     req = req.header(k.as_str(), val);
@@ -326,14 +329,14 @@ impl Tool for HttpPostTool {
         let body_value =
             serde_json::from_str::<Value>(&resp_body).unwrap_or(Value::String(resp_body));
 
-        Ok(json!({
+        Ok(env.respond(json!({
             "status": status,
             "body": body_value,
             "_meta": {
                 "tool": "http:post",
                 "duration_ms": duration_ms,
             }
-        }))
+        })))
     }
 }
 
@@ -427,13 +430,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_invoke_missing_url() {
         let tool = HttpGetTool::new();
-        let ctx = ToolContext {
-            capabilities: vec![],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: std::collections::HashMap::new(),
-        };
-        let result = tool.invoke(json!({}), &ctx).await;
+        let result = tool.invoke(Envelope::test(json!({}))).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             ToolError::InvalidInput { field, .. } => assert_eq!(field, Some("url".into())),
@@ -444,17 +441,10 @@ mod tests {
     #[tokio::test]
     async fn test_get_invoke_ssrf_blocked() {
         let tool = HttpGetTool::new();
-        let ctx = ToolContext {
-            capabilities: vec![],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: std::collections::HashMap::new(),
-        };
         let result = tool
-            .invoke(
+            .invoke(Envelope::test(
                 json!({"url": "http://169.254.169.254/latest/meta-data/"}),
-                &ctx,
-            )
+            ))
             .await;
         assert!(result.is_err());
     }
@@ -462,13 +452,9 @@ mod tests {
     #[tokio::test]
     async fn test_post_invoke_missing_url() {
         let tool = HttpPostTool::new();
-        let ctx = ToolContext {
-            capabilities: vec![],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: std::collections::HashMap::new(),
-        };
-        let result = tool.invoke(json!({"body": {"key": "value"}}), &ctx).await;
+        let result = tool
+            .invoke(Envelope::test(json!({"body": {"key": "value"}})))
+            .await;
         assert!(result.is_err());
     }
 }

@@ -76,7 +76,7 @@ impl JournalStore for MockJournal {
             .lock()
             .unwrap()
             .iter()
-            .filter(|r| r.run_id == run_id)
+            .filter(|r| r.run_id == Some(run_id))
             .cloned()
             .collect())
     }
@@ -117,7 +117,7 @@ impl JournalStore for MockJournal {
 
 fn sample_entry() -> JournalEntry {
     JournalEntry {
-        run_id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+        run_id: Some(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap()),
         session_id: "session-a".to_string(),
         namespace: "konf:test".to_string(),
         event_type: "tool_invoked".to_string(),
@@ -128,10 +128,7 @@ fn sample_entry() -> JournalEntry {
 /// Busy-wait until the predicate is true or `timeout` elapses. Returns
 /// whether the predicate became true. Tests secondary fan-out completion
 /// without introducing flakiness from arbitrary sleeps.
-async fn wait_until(
-    timeout: Duration,
-    mut check: impl FnMut() -> bool,
-) -> bool {
+async fn wait_until(timeout: Duration, mut check: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if check() {
@@ -147,10 +144,7 @@ async fn fanout_writes_to_primary_and_all_secondaries_on_success() {
     let primary = MockJournal::new();
     let s1 = MockJournal::new();
     let s2 = MockJournal::new();
-    let fanout = FanoutJournalStore::new(
-        primary.clone(),
-        vec![s1.clone(), s2.clone()],
-    );
+    let fanout = FanoutJournalStore::new(primary.clone(), vec![s1.clone(), s2.clone()]);
 
     fanout.append(sample_entry()).await.expect("primary ok");
 
@@ -166,8 +160,7 @@ async fn fanout_primary_failure_returns_error() {
     let primary = MockJournal::new();
     primary.set_fail(true);
     let secondary = MockJournal::new();
-    let fanout =
-        FanoutJournalStore::new(primary.clone(), vec![secondary.clone()]);
+    let fanout = FanoutJournalStore::new(primary.clone(), vec![secondary.clone()]);
 
     let result = fanout.append(sample_entry()).await;
     assert!(result.is_err(), "primary failure must surface as error");
@@ -186,8 +179,7 @@ async fn fanout_secondary_failure_does_not_return_error() {
     let primary = MockJournal::new();
     let secondary = MockJournal::new();
     secondary.set_fail(true);
-    let fanout =
-        FanoutJournalStore::new(primary.clone(), vec![secondary.clone()]);
+    let fanout = FanoutJournalStore::new(primary.clone(), vec![secondary.clone()]);
 
     let result = fanout.append(sample_entry()).await;
     assert!(
@@ -206,15 +198,15 @@ async fn fanout_secondary_failure_increments_drop_metric() {
     let primary = MockJournal::new();
     let secondary = MockJournal::new();
     secondary.set_fail(true);
-    let fanout =
-        FanoutJournalStore::new(primary.clone(), vec![secondary.clone()]);
+    let fanout = FanoutJournalStore::new(primary.clone(), vec![secondary.clone()]);
     let metrics = fanout.metrics();
 
     fanout.append(sample_entry()).await.unwrap();
 
     assert!(
         wait_until(Duration::from_secs(1), || metrics
-            .dropped_secondary_writes() == 1)
+            .dropped_secondary_writes()
+            == 1)
         .await,
         "drop metric must increment on secondary failure"
     );
@@ -266,14 +258,11 @@ async fn fanout_with_zero_secondaries_behaves_like_primary() {
 async fn fanout_query_methods_delegate_to_primary() {
     let primary = MockJournal::new();
     let secondary = MockJournal::new();
-    let fanout =
-        FanoutJournalStore::new(primary.clone(), vec![secondary.clone()]);
+    let fanout = FanoutJournalStore::new(primary.clone(), vec![secondary.clone()]);
 
     fanout.append(sample_entry()).await.unwrap();
     // Let secondary fanout settle so we can reason about its state.
-    assert!(
-        wait_until(Duration::from_secs(1), || secondary.len() == 1).await
-    );
+    assert!(wait_until(Duration::from_secs(1), || secondary.len() == 1).await);
 
     let by_run = fanout
         .query_by_run(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())

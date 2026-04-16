@@ -17,11 +17,12 @@ use serde_json::{json, Value};
 use konf_runtime::scope::{Actor, ActorRole, CapabilityGrant, ExecutionScope, ResourceLimits};
 use konf_runtime::{ExecutionContext, Runtime};
 use konf_tool_runner::{InlineRunner, RunRegistry, Runner, WorkflowSpec};
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolContext, ToolInfo};
-use konflux::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolInfo};
+use konflux_substrate::Engine;
 
-/// A fake workflow-tool that records the `ToolContext.capabilities` it
+/// A fake workflow-tool that records the `Envelope.capabilities` it
 /// receives. The test then inspects those to assert the runner passed
 /// the **parent's** capabilities through, not the legacy hardcoded
 /// `vec!["*".into()]`.
@@ -43,9 +44,10 @@ impl Tool for CapturingWorkflow {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
-        *self.last_caps.lock().unwrap() = Some(ctx.capabilities.clone());
-        Ok(input)
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        *self.last_caps.lock().unwrap() = Some(env.capabilities.to_patterns());
+        let output = env.payload.clone();
+        Ok(env.respond(output))
     }
 }
 
@@ -125,7 +127,7 @@ async fn runner_propagates_parent_capabilities_not_hardcoded_wildcard() {
 #[tokio::test]
 async fn runner_propagates_trace_id_into_tool_context_metadata() {
     // R1 companion: the parent's trace_id must ride through
-    // ToolContext::metadata so nested workflows can honor the causation
+    // Envelope::metadata so nested workflows can honor the causation
     // chain. Previously the runner's metadata was empty HashMap::new().
     let engine = Engine::new();
     let capturing = CapturingWorkflow::default();

@@ -76,8 +76,7 @@ fn child_can_override_session_id_for_spawn_boundary() {
     // or a sandboxed execution), the child gets a new session_id but
     // retains the trace.
     let parent = ExecutionContext::new_root("sess-outer");
-    let child =
-        parent.child(Uuid::new_v4(), Some("sess-spawn-42".to_string()));
+    let child = parent.child(Uuid::new_v4(), Some("sess-spawn-42".to_string()));
     assert_eq!(child.trace_id, parent.trace_id);
     assert_eq!(child.session_id, "sess-spawn-42");
     assert_ne!(parent.session_id, child.session_id);

@@ -67,8 +67,8 @@ pub use process::{ActiveNode, NodeStatus, ProcessTable, RunStatus, WorkflowRun};
 pub use runner_intents::{IntentError, IntentId, RunnerIntent, RunnerIntentStore, TerminalStatus};
 pub use runtime::Runtime;
 pub use scheduler::{
-    new_record as new_timer_record, JobId, JobSummary, RedbScheduler, SchedulerError,
-    TimerMode, TimerRecord, MAX_FIXED_DELAY_MS, MIN_FIXED_DELAY_MS,
+    new_record as new_timer_record, JobId, JobSummary, RedbScheduler, SchedulerError, TimerMode,
+    TimerRecord, MAX_FIXED_DELAY_MS, MIN_FIXED_DELAY_MS,
 };
 pub use scope::{
     dev_scope, scope_from_role, Actor, CapabilityGrant, ExecutionScope, ResourceLimits,

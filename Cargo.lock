@@ -3026,7 +3026,7 @@ dependencies = [
  "konf-init",
  "konf-mcp",
  "konf-runtime",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
@@ -3060,7 +3060,7 @@ dependencies = [
  "konf-tool-runner",
  "konf-tool-secret",
  "konf-tool-shell",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "notify",
  "serde",
  "serde_json",
@@ -3079,7 +3079,7 @@ dependencies = [
  "async-trait",
  "konf-init",
  "konf-runtime",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "rmcp",
  "serde_json",
  "tokio",
@@ -3094,7 +3094,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "cron",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "papaya",
  "postcard",
  "redb",
@@ -3116,7 +3116,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "fastembed",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "serde_json",
  "tokio",
  "tracing",
@@ -3128,7 +3128,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "reqwest 0.13.2",
  "serde_json",
  "tokio",
@@ -3142,7 +3142,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "rig-core",
  "serde",
  "serde_json",
@@ -3158,7 +3158,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "konf-runtime",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "rmcp",
  "serde",
  "serde_json",
@@ -3172,7 +3172,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3187,7 +3187,7 @@ source = "git+ssh://git@github.com/konf-dev/konf.git#4557a52302d5df19bfed51ae487
 dependencies = [
  "anyhow",
  "async-trait",
- "konflux-core 0.1.0 (git+ssh://git@github.com/konf-dev/konf.git)",
+ "konflux-core",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3234,7 +3234,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "konf-runtime",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "papaya",
  "serde",
  "serde_json",
@@ -3250,7 +3250,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3264,34 +3264,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "konflux-core 0.1.0",
+ "konflux-substrate",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "konflux-core"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures",
- "indexmap 2.14.0",
- "minijinja",
- "opentelemetry 0.27.1",
- "opentelemetry-otlp",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
@@ -3310,6 +3287,30 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "konflux-substrate"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures",
+ "indexmap 2.14.0",
+ "minijinja",
+ "opentelemetry 0.27.1",
+ "opentelemetry-otlp",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
  "uuid",
 ]
 

@@ -19,7 +19,7 @@ use crate::registry::{RunId, RunRegistry};
 /// as the parent in the capability-lattice's attenuation: the spawned
 /// workflow's effective scope is a subset of the parent. This closes
 /// finding C1 from the Phase E audit — previously the inline runner
-/// hand-built a `ToolContext` with `capabilities: vec!["*".into()]`,
+/// hand-built an `Envelope` with `capabilities: vec!["*".into()]`,
 /// bypassing the lattice entirely.
 #[derive(Debug, Clone)]
 pub struct WorkflowSpec {

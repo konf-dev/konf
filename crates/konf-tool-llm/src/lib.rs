@@ -2,13 +2,13 @@
 //! LLM tool — wraps rig for multi-provider LLM with tool calling (ReAct loop).
 //!
 //! The ai_complete tool implements konflux's Tool trait and uses rig internally.
-//! Inner tools (memory_search, http_get, etc.) are bridged from konflux::Tool
+//! Inner tools (memory_search, http_get, etc.) are bridged from konflux_substrate::Tool
 //! to rig::ToolDyn, enabling the LLM to call them during reasoning.
 //!
 //! ## Capability enforcement
 //!
 //! Tools are resolved dynamically at invocation time from the engine's live
-//! registry, filtered by the caller's ToolContext capabilities. The LLM only
+//! registry, filtered by the caller's Envelope capabilities. The LLM only
 //! sees tools that the workflow node has been granted access to. An optional
 //! `tools` whitelist in the `with:` block further restricts the visible set.
 
@@ -24,11 +24,12 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tracing::{debug, info};
 
-use konflux::capability::check_tool_access;
-use konflux::error::ToolError as KonfluxToolError;
-use konflux::stream::{ProgressType, StreamEvent, StreamSender};
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
-use konflux::Engine;
+use konflux_substrate::capability::check_tool_access;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError as KonfluxToolError;
+use konflux_substrate::stream::{ProgressType, StreamEvent, StreamSender};
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
+use konflux_substrate::Engine;
 
 // ============================================================
 // LLM Configuration
@@ -75,22 +76,22 @@ impl Default for LlmConfig {
 }
 
 // ============================================================
-// Bridge: konflux::Tool → rig::ToolDyn
+// Bridge: konflux_substrate::Tool → rig::ToolDyn
 // ============================================================
 
 /// Bridges a konflux Tool to rig's dynamic tool interface.
 /// This allows the LLM (via rig) to call konflux-registered tools
 /// during its ReAct reasoning loop.
 ///
-/// The bridge propagates the parent workflow's ToolContext so that
-/// capability checks, workflow_id, and metadata flow through to
+/// The bridge propagates the parent workflow's Envelope context so that
+/// capability checks, trace_id, namespace, and metadata flow through to
 /// inner tool invocations.
 struct KonfluxToolBridge {
     inner: Arc<dyn Tool>,
     tool_info: ToolInfo,
-    /// ToolContext inherited from the parent ai_complete invocation.
-    /// The node_id is set to `"{parent_node_id}:react:{tool_name}"`.
-    parent_ctx: ToolContext,
+    /// Envelope inherited from the parent ai_complete invocation.
+    /// When dispatching, a child envelope is created via `respond()`.
+    parent_env: Envelope<Value>,
 }
 
 impl rig::tool::ToolDyn for KonfluxToolBridge {
@@ -120,17 +121,14 @@ impl rig::tool::ToolDyn for KonfluxToolBridge {
             let input: Value =
                 serde_json::from_str(&args).map_err(rig::tool::ToolError::JsonError)?;
 
-            let result = self
-                .inner
-                .invoke(input, &self.parent_ctx)
-                .await
-                .map_err(|e| {
-                    rig::tool::ToolError::ToolCallError(Box::new(std::io::Error::other(
-                        e.to_string(),
-                    )))
-                })?;
+            // Create a child envelope from the parent, replacing the payload
+            let child_env = self.parent_env.respond(input);
 
-            serde_json::to_string(&result).map_err(rig::tool::ToolError::JsonError)
+            let result_env = self.inner.invoke(child_env).await.map_err(|e| {
+                rig::tool::ToolError::ToolCallError(Box::new(std::io::Error::other(e.to_string())))
+            })?;
+
+            serde_json::to_string(&result_env.payload).map_err(rig::tool::ToolError::JsonError)
         })
     }
 }
@@ -149,7 +147,7 @@ impl rig::tool::ToolDyn for KonfluxToolBridge {
 ///
 /// Tools are resolved **dynamically at invocation time** from the engine's
 /// live registry. Only tools that pass both checks are exposed to the LLM:
-/// 1. The caller's `ToolContext.capabilities` must grant access (same rules as the executor)
+/// 1. The caller's `Envelope.capabilities` must grant access (same rules as the executor)
 /// 2. If `with.tools` is specified, the tool name must be in that whitelist
 ///
 /// The `ai_complete` tool itself is always excluded from the inner set to
@@ -168,14 +166,15 @@ impl AiCompleteTool {
 
     /// Resolve and bridge inner tools for the LLM, filtered by capabilities and optional whitelist.
     ///
-    /// - `ctx`: the parent ToolContext (capabilities, workflow_id, node_id, metadata)
+    /// - `env`: the parent Envelope (capabilities, trace_id, namespace, metadata)
     /// - `tool_whitelist`: optional explicit list of tool names from `with.tools`
     fn resolve_tools(
         &self,
-        ctx: &ToolContext,
+        env: &Envelope<Value>,
         tool_whitelist: Option<&[String]>,
     ) -> Vec<Box<dyn rig::tool::ToolDyn>> {
         let registry = self.engine.registry();
+        let capability_patterns = env.capabilities.to_patterns();
         let mut tools: Vec<Box<dyn rig::tool::ToolDyn>> = Vec::new();
 
         for info in registry.list() {
@@ -188,7 +187,7 @@ impl AiCompleteTool {
             }
 
             // Check 1: capability gate
-            if check_tool_access(&info.name, &ctx.capabilities).is_err() {
+            if check_tool_access(&info.name, &capability_patterns).is_err() {
                 continue;
             }
 
@@ -200,24 +199,20 @@ impl AiCompleteTool {
             }
 
             if let Some(tool) = registry.get(&info.name) {
-                let child_ctx = ToolContext {
-                    capabilities: ctx.capabilities.clone(),
-                    workflow_id: ctx.workflow_id.clone(),
-                    node_id: format!("{}:react:{}", ctx.node_id, info.name),
-                    metadata: ctx.metadata.clone(),
-                };
+                // Create a child envelope scoped to this inner tool
+                let child_env = env.respond(json!(null));
 
                 tools.push(Box::new(KonfluxToolBridge {
                     inner: tool,
                     tool_info: info,
-                    parent_ctx: child_ctx,
+                    parent_env: child_env,
                 }));
             }
         }
 
         debug!(
             tool_count = tools.len(),
-            capabilities = ?ctx.capabilities,
+            capabilities = ?capability_patterns,
             whitelist = ?tool_whitelist,
             "ai_complete resolved inner tools"
         );
@@ -295,18 +290,18 @@ impl Tool for AiCompleteTool {
         }
     }
 
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, KonfluxToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, KonfluxToolError> {
         // Delegate to invoke_streaming with a no-op channel (dropped immediately).
-        let (sender, _rx) = konflux::stream::stream_channel(1);
-        self.invoke_streaming(input, ctx, sender).await
+        let (sender, _rx) = konflux_substrate::stream::stream_channel(1);
+        self.invoke_streaming(env, sender).await
     }
 
     async fn invoke_streaming(
         &self,
-        input: Value,
-        ctx: &ToolContext,
+        env: Envelope<Value>,
         sender: StreamSender,
-    ) -> Result<Value, KonfluxToolError> {
+    ) -> Result<Envelope<Value>, KonfluxToolError> {
+        let input = &env.payload;
         let prompt = input.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
         let system = input.get("system").and_then(|v| v.as_str());
 
@@ -319,26 +314,27 @@ impl Tool for AiCompleteTool {
             });
 
         // Merge per-node config overrides
-        let config = self.merge_config(&input);
+        let config = self.merge_config(input);
 
         // Resolve tools dynamically from live registry, filtered by capabilities + whitelist
-        let inner_tools = self.resolve_tools(ctx, tool_whitelist.as_deref());
+        let inner_tools = self.resolve_tools(&env, tool_whitelist.as_deref());
 
+        let node_id = env.target.0.clone();
         let start = std::time::Instant::now();
 
-        let result = react_loop(&config, system, prompt, inner_tools, ctx, &sender).await?;
+        let result = react_loop(&config, system, prompt, inner_tools, &node_id, &sender).await?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
         info!(
             provider = %config.provider,
             model = %config.model,
             duration_ms,
-            node_id = %ctx.node_id,
-            workflow_id = %ctx.workflow_id,
+            target = %env.target,
+            trace_id = %env.trace_id,
             "LLM completion"
         );
 
-        Ok(json!({
+        Ok(env.respond(json!({
             "text": result.text,
             "_meta": {
                 "tool": "ai:complete",
@@ -348,7 +344,7 @@ impl Tool for AiCompleteTool {
                 "iterations": result.iterations,
                 "tool_calls": result.tool_call_count,
             }
-        }))
+        })))
     }
 }
 
@@ -378,7 +374,7 @@ async fn react_loop(
     system: Option<&str>,
     prompt: &str,
     inner_tools: Vec<Box<dyn rig::tool::ToolDyn>>,
-    ctx: &ToolContext,
+    node_id: &str,
     sender: &StreamSender,
 ) -> Result<ReactResult, KonfluxToolError> {
     use rig::completion::Message;
@@ -422,7 +418,7 @@ async fn react_loop(
     for iteration in 0..config.max_iterations {
         // Emit iteration status
         let _ = sender.try_send(StreamEvent::Progress {
-            node_id: ctx.node_id.clone(),
+            node_id: node_id.to_string(),
             event_type: ProgressType::Status,
             data: json!({ "iteration": iteration, "max": config.max_iterations }),
         });
@@ -457,7 +453,7 @@ async fn react_loop(
             // Stream final text
             if !final_text.is_empty() {
                 let _ = sender.try_send(StreamEvent::Progress {
-                    node_id: ctx.node_id.clone(),
+                    node_id: node_id.to_string(),
                     event_type: ProgressType::TextDelta,
                     data: json!(final_text),
                 });
@@ -480,7 +476,7 @@ async fn react_loop(
 
             // Emit ToolStart
             let _ = sender.try_send(StreamEvent::Progress {
-                node_id: ctx.node_id.clone(),
+                node_id: node_id.to_string(),
                 event_type: ProgressType::ToolStart,
                 data: json!({ "tool": tool_name, "input": tool_args, "call_id": tc.id }),
             });
@@ -504,7 +500,7 @@ async fn react_loop(
 
             // Emit ToolEnd
             let _ = sender.try_send(StreamEvent::Progress {
-                node_id: ctx.node_id.clone(),
+                node_id: node_id.to_string(),
                 event_type: ProgressType::ToolEnd,
                 data: json!({
                     "tool": tool_name,
@@ -646,7 +642,10 @@ async fn call_completion(
 /// The tool holds a reference to the engine and resolves inner tools dynamically
 /// at invocation time — no tool snapshotting at registration. This ensures the
 /// LLM always sees the current tool set, filtered by the caller's capabilities.
-pub async fn register(engine: &konflux::Engine, config: &serde_json::Value) -> anyhow::Result<()> {
+pub async fn register(
+    engine: &konflux_substrate::Engine,
+    config: &serde_json::Value,
+) -> anyhow::Result<()> {
     let llm_config: LlmConfig = serde_json::from_value(config.clone())?;
     engine.register_tool(Arc::new(AiCompleteTool::new(
         llm_config,
@@ -656,7 +655,7 @@ pub async fn register(engine: &konflux::Engine, config: &serde_json::Value) -> a
 }
 
 /// Register the ai_complete tool with the given engine reference.
-pub fn register_llm_tools(engine: &konflux::Engine, config: &LlmConfig) {
+pub fn register_llm_tools(engine: &konflux_substrate::Engine, config: &LlmConfig) {
     engine.register_tool(Arc::new(AiCompleteTool::new(
         config.clone(),
         Arc::new(engine.clone()),
@@ -666,15 +665,17 @@ pub fn register_llm_tools(engine: &konflux::Engine, config: &LlmConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use konflux_substrate::envelope::{CapSet, Capability};
 
-    fn mock_ctx(capabilities: Vec<&str>) -> ToolContext {
-        ToolContext {
-            capabilities: capabilities.into_iter().map(String::from).collect(),
-            workflow_id: "test_wf".into(),
-            node_id: "test_node".into(),
-            metadata: HashMap::new(),
-        }
+    fn mock_env(capabilities: Vec<&str>) -> Envelope<Value> {
+        let mut env = Envelope::test(json!({}));
+        env.capabilities = CapSet(
+            capabilities
+                .into_iter()
+                .map(|c| Capability(c.to_string()))
+                .collect(),
+        );
+        env
     }
 
     struct MockTool {
@@ -700,12 +701,8 @@ mod tests {
                 annotations: ToolAnnotations::default(),
             }
         }
-        async fn invoke(
-            &self,
-            input: Value,
-            _ctx: &ToolContext,
-        ) -> Result<Value, KonfluxToolError> {
-            Ok(input)
+        async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, KonfluxToolError> {
+            Ok(env.respond(env.payload.clone()))
         }
     }
 
@@ -746,8 +743,8 @@ mod tests {
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
         // Only grant echo and http_get
-        let ctx = mock_ctx(vec!["echo", "http:get"]);
-        let resolved = tool.resolve_tools(&ctx, None);
+        let env = mock_env(vec!["echo", "http:get"]);
+        let resolved = tool.resolve_tools(&env, None);
 
         let names: Vec<String> = resolved.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"echo".to_string()));
@@ -762,8 +759,8 @@ mod tests {
         let engine = engine_with_tools(&["echo", "shell:exec", "http:get"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
-        let ctx = mock_ctx(vec!["*"]);
-        let resolved = tool.resolve_tools(&ctx, None);
+        let env = mock_env(vec!["*"]);
+        let resolved = tool.resolve_tools(&env, None);
         // 3 tools (ai_complete not in registry, so no self-exclusion issue)
         assert_eq!(resolved.len(), 3);
     }
@@ -773,8 +770,8 @@ mod tests {
         let engine = engine_with_tools(&["memory:search", "memory:store", "http:get"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
-        let ctx = mock_ctx(vec!["memory:*"]);
-        let resolved = tool.resolve_tools(&ctx, None);
+        let env = mock_env(vec!["memory:*"]);
+        let resolved = tool.resolve_tools(&env, None);
 
         let names: Vec<String> = resolved.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"memory:search".to_string()));
@@ -789,9 +786,9 @@ mod tests {
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
         // Grant all, but whitelist only echo
-        let ctx = mock_ctx(vec!["*"]);
+        let env = mock_env(vec!["*"]);
         let whitelist = vec!["echo".to_string()];
-        let resolved = tool.resolve_tools(&ctx, Some(&whitelist));
+        let resolved = tool.resolve_tools(&env, Some(&whitelist));
 
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].name(), "echo");
@@ -803,9 +800,9 @@ mod tests {
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
         // Only grant echo, but whitelist shell_exec
-        let ctx = mock_ctx(vec!["echo"]);
+        let env = mock_env(vec!["echo"]);
         let whitelist = vec!["shell:exec".to_string()];
-        let resolved = tool.resolve_tools(&ctx, Some(&whitelist));
+        let resolved = tool.resolve_tools(&env, Some(&whitelist));
 
         // shell_exec fails capability check, so nothing resolved
         assert_eq!(resolved.len(), 0);
@@ -816,8 +813,8 @@ mod tests {
         let engine = engine_with_tools(&["echo", "ai:complete"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
-        let ctx = mock_ctx(vec!["*"]);
-        let resolved = tool.resolve_tools(&ctx, None);
+        let env = mock_env(vec!["*"]);
+        let resolved = tool.resolve_tools(&env, None);
 
         let names: Vec<String> = resolved.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"echo".to_string()));
@@ -830,9 +827,9 @@ mod tests {
         let engine = engine_with_tools(&["echo", "ai:complete"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
-        let ctx = mock_ctx(vec!["*"]);
+        let env = mock_env(vec!["*"]);
         let whitelist = vec!["ai:complete".to_string()];
-        let resolved = tool.resolve_tools(&ctx, Some(&whitelist));
+        let resolved = tool.resolve_tools(&env, Some(&whitelist));
 
         // Explicit whitelist overrides the self-exclusion
         assert_eq!(resolved.len(), 1);
@@ -844,8 +841,8 @@ mod tests {
         let engine = engine_with_tools(&["echo", "shell:exec"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
-        let ctx = mock_ctx(vec![]);
-        let resolved = tool.resolve_tools(&ctx, None);
+        let env = mock_env(vec![]);
+        let resolved = tool.resolve_tools(&env, None);
         assert_eq!(resolved.len(), 0);
     }
 
@@ -854,19 +851,14 @@ mod tests {
         let engine = engine_with_tools(&["echo"]);
         let tool = AiCompleteTool::new(LlmConfig::default(), engine);
 
-        let ctx = ToolContext {
-            capabilities: vec!["*".into()],
-            workflow_id: "my_workflow".into(),
-            node_id: "step_3".into(),
-            metadata: HashMap::from([("session".into(), json!("abc"))]),
-        };
+        let env = mock_env(vec!["*"]);
 
-        let resolved = tool.resolve_tools(&ctx, None);
+        let resolved = tool.resolve_tools(&env, None);
         assert_eq!(resolved.len(), 1);
         // Bridge name should be the tool name
         assert_eq!(resolved[0].name(), "echo");
-        // Note: we can't directly inspect the bridge's parent_ctx from here,
-        // but the node_id format is tested via the KonfluxToolBridge construction
+        // Note: we can't directly inspect the bridge's parent_env from here,
+        // but the envelope propagation is tested via the KonfluxToolBridge construction
     }
 
     #[test]

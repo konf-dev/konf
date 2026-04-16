@@ -20,7 +20,7 @@ tokio = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 papaya = { workspace = true }
-konflux-core = { path = "../konflux-core" }
+konflux-substrate = { path = "../konflux-substrate" }
 konf-runtime = { path = "../konf-runtime" }
 
 [dev-dependencies]

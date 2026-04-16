@@ -78,7 +78,7 @@ impl CapabilityGrant {
 }
 
 /// Check if a capability pattern matches a tool name.
-/// Uses the same logic as konflux::capability::matches_capability.
+/// Uses the same logic as konflux_substrate::capability::matches_capability.
 fn matches_capability_pattern(pattern: &str, tool_name: &str) -> bool {
     if pattern == "*" {
         return true;
@@ -383,7 +383,7 @@ mod tests {
                 role: ActorRole::User,
             },
             depth: 0,
-            };
+        };
 
         assert!(scope.check_tool("memory:search").is_ok());
         assert!(scope.check_tool("ai:complete").is_ok());
@@ -407,7 +407,7 @@ mod tests {
                 role: ActorRole::User,
             },
             depth: 0,
-            };
+        };
 
         let result = scope.check_tool("memory:search").unwrap();
         assert_eq!(result.get("namespace").unwrap(), "konf:test:user_1");
@@ -427,7 +427,7 @@ mod tests {
                 role: ActorRole::ProductAdmin,
             },
             depth: 0,
-            };
+        };
 
         // Valid child — subset of parent
         let child = parent.child_scope(
@@ -452,7 +452,7 @@ mod tests {
                 role: ActorRole::ProductAdmin,
             },
             depth: 0,
-            };
+        };
 
         // Child cannot escalate "memory:search" to "memory:*"
         let child = parent.child_scope(vec![CapabilityGrant::new("memory:*")], None);
@@ -480,7 +480,7 @@ mod tests {
                 role: ActorRole::ProductAdmin,
             },
             depth: 0,
-            };
+        };
 
         // Same prefix is allowed
         let child = parent.child_scope(vec![CapabilityGrant::new("memory:*")], None);

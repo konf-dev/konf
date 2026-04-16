@@ -1,5 +1,5 @@
-use konflux::template::{has_templates, render, resolve_expr};
-use konflux::workflow::Expr;
+use konflux_substrate::template::{has_templates, render, resolve_expr};
+use konflux_substrate::workflow::Expr;
 use serde_json::json;
 use std::collections::HashMap;
 

@@ -3,10 +3,11 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use konflux::engine::{Engine, EngineConfig};
-use konflux::error::ToolError;
-use konflux::stream::{ProgressType, StreamEvent};
-use konflux::tool::{Tool, ToolContext, ToolInfo};
+use konflux_substrate::engine::{Engine, EngineConfig};
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::stream::{ProgressType, StreamEvent};
+use konflux_substrate::tool::{Tool, ToolInfo};
 
 // ============================================================
 // Mock Tools
@@ -26,8 +27,9 @@ impl Tool for EchoTool {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        Ok(input)
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let output = env.payload.clone();
+        Ok(env.respond(output))
     }
 }
 
@@ -45,7 +47,7 @@ impl Tool for FailTool {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, _env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         Err(ToolError::ExecutionFailed {
             message: "Intentional failure".into(),
             retryable: true,
@@ -69,9 +71,10 @@ impl Tool for RetryTool {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let input = &env.payload;
         let mut attempts = self.attempts.lock().await;
-        let count = attempts.entry(ctx.node_id.clone()).or_insert(0);
+        let count = attempts.entry(env.target.0.clone()).or_insert(0);
         *count += 1;
 
         let fail_until = input
@@ -91,7 +94,7 @@ impl Tool for RetryTool {
                 retryable: true,
             })
         } else {
-            Ok(json!({ "attempts": *count }))
+            Ok(env.respond(json!({ "attempts": *count })))
         }
     }
 }
@@ -110,20 +113,20 @@ impl Tool for StreamingTool {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        Ok(json!({ "status": "done" }))
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        Ok(env.respond(json!({ "status": "done" })))
     }
     async fn invoke_streaming(
         &self,
-        _input: Value,
-        ctx: &ToolContext,
-        sender: konflux::stream::StreamSender,
-    ) -> Result<Value, ToolError> {
+        env: Envelope<Value>,
+        sender: konflux_substrate::stream::StreamSender,
+    ) -> Result<Envelope<Value>, ToolError> {
+        let node_id = env.target.0.clone();
         let chunks = vec!["Hello", " ", "world", "!"];
         for chunk in chunks {
             sender
                 .send(StreamEvent::Progress {
-                    node_id: ctx.node_id.clone(),
+                    node_id: node_id.clone(),
                     event_type: ProgressType::TextDelta,
                     data: json!(chunk),
                 })
@@ -131,7 +134,7 @@ impl Tool for StreamingTool {
                 .ok();
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
-        Ok(json!({ "status": "streamed" }))
+        Ok(env.respond(json!({ "status": "streamed" })))
     }
 }
 
@@ -152,7 +155,7 @@ fn setup_engine() -> Engine {
         attempts: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
     }));
     engine.register_tool(Arc::new(StreamingTool));
-    konflux::builtin::register_builtins(&engine);
+    konflux_substrate::builtin::register_builtins(&engine);
     engine
 }
 
@@ -561,7 +564,8 @@ async fn test_nested_workflow_capabilities() {
                 annotations: Default::default(),
             }
         }
-        async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
+        async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+            let input = &env.payload;
             let yaml = input["yaml"].as_str().ok_or(ToolError::InvalidInput {
                 message: "missing yaml".into(),
                 field: None,
@@ -573,8 +577,9 @@ async fn test_nested_workflow_capabilities() {
                         message: e.to_string(),
                         retryable: false,
                     })?;
-            let granted = ctx.capabilities.clone();
-            self.engine
+            let granted = env.capabilities.to_patterns();
+            let result = self
+                .engine
                 .run(
                     &workflow,
                     input["input"].clone(),
@@ -587,7 +592,8 @@ async fn test_nested_workflow_capabilities() {
                 .map_err(|e| ToolError::ExecutionFailed {
                     message: e.to_string(),
                     retryable: false,
-                })
+                })?;
+            Ok(env.respond(result))
         }
     }
 
@@ -689,7 +695,7 @@ async fn test_panic_tool() {
                 annotations: Default::default(),
             }
         }
-        async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+        async fn invoke(&self, _env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
             panic!("Intentional panic!");
         }
     }
@@ -841,7 +847,7 @@ async fn test_global_workflow_timeout() {
     };
     let engine = Engine::with_config(config);
     engine.register_tool(Arc::new(SlowTool));
-    konflux::builtin::register_builtins(&engine);
+    konflux_substrate::builtin::register_builtins(&engine);
 
     let yaml = r#"
 workflow: timeout_test
@@ -910,9 +916,9 @@ impl Tool for SlowTool {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        Ok(json!({"status": "done"}))
+        Ok(env.respond(json!({"status": "done"})))
     }
 }
 
@@ -965,24 +971,22 @@ async fn test_hooks_receive_events() {
     struct TestHooks {
         events: Mutex<Vec<String>>,
     }
-    impl konflux::hooks::ExecutionHooks for TestHooks {
-        fn on_node_start(&self, node_id: &str, tool: &str) {
-            self.events
-                .lock()
-                .unwrap()
-                .push(format!("start:{node_id}:{tool}"));
-        }
-        fn on_node_complete(&self, node_id: &str, tool: &str, _duration_ms: u64, _output: &Value) {
-            self.events
-                .lock()
-                .unwrap()
-                .push(format!("complete:{node_id}:{tool}"));
-        }
-        fn on_node_failed(&self, node_id: &str, tool: &str, _error: &str) {
-            self.events
-                .lock()
-                .unwrap()
-                .push(format!("failed:{node_id}:{tool}"));
+    impl konflux_substrate::hooks::EventRecorder for TestHooks {
+        fn on_event(&self, event: konflux_substrate::hooks::ExecutorEvent<'_>) {
+            use konflux_substrate::hooks::ExecutorEvent;
+            let msg = match event {
+                ExecutorEvent::NodeStarted { node_id, tool } => {
+                    format!("start:{node_id}:{tool}")
+                }
+                ExecutorEvent::NodeCompleted { node_id, tool, .. } => {
+                    format!("complete:{node_id}:{tool}")
+                }
+                ExecutorEvent::NodeFailed { node_id, tool, .. } => {
+                    format!("failed:{node_id}:{tool}")
+                }
+                ExecutorEvent::ToolRetry { .. } => return,
+            };
+            self.events.lock().unwrap().push(msg);
         }
     }
 
@@ -1001,7 +1005,7 @@ nodes:
 "#;
     let workflow = engine.parse_yaml(yaml).unwrap();
     let hooks = Arc::new(TestHooks::default());
-    let hooks_clone: Arc<dyn konflux::hooks::ExecutionHooks> = hooks.clone();
+    let hooks_clone: Arc<dyn konflux_substrate::hooks::EventRecorder> = hooks.clone();
 
     let _result = engine
         .run(

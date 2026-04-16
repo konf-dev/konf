@@ -33,9 +33,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone, Utc};
-use redb::{
-    Database, MultimapTableDefinition, ReadableDatabase, ReadableTable, TableDefinition,
-};
+use redb::{Database, MultimapTableDefinition, ReadableDatabase, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 
 use crate::scope::Actor;
@@ -424,10 +422,7 @@ mod tests {
     async fn insert_and_get_roundtrip() {
         let (store, _dir) = open_store().await;
         let id = Uuid::new_v4().to_string();
-        store
-            .insert(intent(&id, "w", "konf:test:a"))
-            .await
-            .unwrap();
+        store.insert(intent(&id, "w", "konf:test:a")).await.unwrap();
         let got = store.get(&id).await.unwrap().unwrap();
         assert_eq!(got.workflow, "w");
         assert_eq!(got.namespace, "konf:test:a");

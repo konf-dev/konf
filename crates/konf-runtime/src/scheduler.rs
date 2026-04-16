@@ -45,9 +45,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, TimeZone, Utc};
 use cron::Schedule as CronSchedule;
-use redb::{
-    Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
-};
+use redb::{Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -166,7 +164,8 @@ impl StoredTimer {
         Ok(Self {
             job_id_bytes: *record.job_id.as_bytes(),
             workflow: record.workflow.clone(),
-            input_json: serde_json::to_string(&record.input).map_err(SchedulerError::serialization)?,
+            input_json: serde_json::to_string(&record.input)
+                .map_err(SchedulerError::serialization)?,
             namespace: record.namespace.clone(),
             capabilities: record.capabilities.clone(),
             actor: record.actor.clone(),
@@ -217,8 +216,7 @@ pub struct JobSummary {
 const TIMERS: TableDefinition<(u64, &[u8]), &[u8]> = TableDefinition::new("scheduler_timers");
 
 /// Secondary: `job_id_bytes -> fire_at_ms`.
-const TIMERS_BY_ID: TableDefinition<&[u8], u64> =
-    TableDefinition::new("scheduler_timers_by_id");
+const TIMERS_BY_ID: TableDefinition<&[u8], u64> = TableDefinition::new("scheduler_timers_by_id");
 
 // ---------------------------------------------------------------------------
 // RedbScheduler
@@ -292,8 +290,7 @@ impl RedbScheduler {
         }
         self.validate_record(&record)?;
         record.mode = TimerMode::Fixed { delay_ms };
-        let run_at =
-            Utc::now() + chrono::Duration::milliseconds(delay_ms as i64);
+        let run_at = Utc::now() + chrono::Duration::milliseconds(delay_ms as i64);
         self.insert_new(record, run_at).await
     }
 
@@ -307,10 +304,9 @@ impl RedbScheduler {
         let schedule: CronSchedule = expr
             .parse()
             .map_err(|e: cron::error::Error| SchedulerError::Invalid(format!("cron: {e}")))?;
-        let run_at = schedule
-            .upcoming(Utc)
-            .next()
-            .ok_or_else(|| SchedulerError::Invalid("cron expression has no upcoming fire time".into()))?;
+        let run_at = schedule.upcoming(Utc).next().ok_or_else(|| {
+            SchedulerError::Invalid("cron expression has no upcoming fire time".into())
+        })?;
         record.mode = TimerMode::Cron { expr };
         self.insert_new(record, run_at).await
     }
@@ -498,10 +494,7 @@ impl RedbScheduler {
 
     /// Read all timers with `fire_at <= now` in one read transaction. Sorted
     /// by fire time (ascending).
-    async fn collect_due(
-        &self,
-        now_ms: u64,
-    ) -> Result<Vec<(u64, TimerRecord)>, SchedulerError> {
+    async fn collect_due(&self, now_ms: u64) -> Result<Vec<(u64, TimerRecord)>, SchedulerError> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || -> Result<Vec<(u64, TimerRecord)>, SchedulerError> {
             let read = db.begin_read().map_err(SchedulerError::storage)?;
@@ -544,11 +537,13 @@ impl RedbScheduler {
                 job_id = %record.job_id,
                 "scheduler fire: workflow not in registry — leaving timer in place for future retry"
             );
-            runtime.event_bus().emit(crate::event_bus::RunEvent::ScheduleFailed {
-                job_id: record.job_id,
-                workflow: record.workflow.clone(),
-                reason: format!("workflow '{}' not found in registry", record.workflow),
-            });
+            runtime
+                .event_bus()
+                .emit(crate::event_bus::RunEvent::ScheduleFailed {
+                    job_id: record.job_id,
+                    workflow: record.workflow.clone(),
+                    reason: format!("workflow '{}' not found in registry", record.workflow),
+                });
             return Ok(());
         };
 
@@ -559,39 +554,37 @@ impl RedbScheduler {
             "scheduler fire"
         );
 
-        runtime.event_bus().emit(crate::event_bus::RunEvent::ScheduleFired {
-            job_id: record.job_id,
-            workflow: record.workflow.clone(),
-            namespace: record.namespace.clone(),
-            fired_at: Utc::now(),
-        });
+        runtime
+            .event_bus()
+            .emit(crate::event_bus::RunEvent::ScheduleFired {
+                job_id: record.job_id,
+                workflow: record.workflow.clone(),
+                namespace: record.namespace.clone(),
+                fired_at: Utc::now(),
+            });
 
         // Fire-and-forget invocation through the workflow tool. Individual
         // job failures are logged but do not block the poll loop.
         //
         // NOTE: `WorkflowTool::invoke` uses its registration-time default
-        // scope rather than the ToolContext's namespace. The per-timer
+        // scope rather than the envelope's namespace. The per-timer
         // `record.namespace` is therefore currently used only for listing
         // and audit, not enforcement. Per-timer scope enforcement is
         // tracked as multi-tenant hardening in the v2 plan's future work.
-        let ctx = konflux::tool::ToolContext {
-            capabilities: record.capabilities.clone(),
-            workflow_id: "scheduler".into(),
-            node_id: format!("scheduled_{}", record.workflow),
-            metadata: std::collections::HashMap::from_iter([
-                ("namespace".into(), serde_json::Value::String(record.namespace.clone())),
-                ("session_id".into(), serde_json::Value::String(format!("scheduler:{}", record.job_id))),
-                (
-                    "actor_id".into(),
-                    serde_json::Value::String(record.actor.id.clone()),
-                ),
-            ]),
-        };
-        let input = record.input.clone();
+        let session_id = format!("scheduler:{}", record.job_id);
+        let env = konflux_substrate::envelope::Envelope::for_tool_dispatch(
+            &format!("workflow:{}", record.workflow),
+            record.input.clone(),
+            &record.capabilities,
+            uuid::Uuid::new_v4(),
+            &record.namespace,
+            &record.actor.id,
+            &session_id,
+        );
         let wf_id = record.workflow.clone();
         let job_id = record.job_id;
         tokio::spawn(async move {
-            if let Err(e) = tool.invoke(input, &ctx).await {
+            if let Err(e) = tool.invoke(env).await {
                 warn!(workflow = %wf_id, job_id = %job_id, error = %e, "scheduler fire failed");
             }
         });
@@ -718,7 +711,9 @@ mod tests {
     async fn storage() -> (Arc<KonfStorage>, tempfile::TempDir) {
         let dir = tempdir().unwrap();
         let path = dir.path().join("konf.redb");
-        let s = KonfStorage::open(&path, Retention::default()).await.unwrap();
+        let s = KonfStorage::open(&path, Retention::default())
+            .await
+            .unwrap();
         (Arc::new(s), dir)
     }
 
@@ -738,7 +733,10 @@ mod tests {
         let (storage, _dir) = storage().await;
         let sched = Arc::new(RedbScheduler::new(storage.database(), Weak::new()).unwrap());
         let id = sched
-            .schedule_once(record("morning_brief", "konf:test:a"), Utc::now() + chrono::Duration::hours(1))
+            .schedule_once(
+                record("morning_brief", "konf:test:a"),
+                Utc::now() + chrono::Duration::hours(1),
+            )
             .await
             .unwrap();
         assert_eq!(sched.len().await.unwrap(), 1);
@@ -779,7 +777,10 @@ mod tests {
         let list = sched.list(None).await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].job_id, id);
-        assert!(matches!(list[0].mode, TimerMode::Fixed { delay_ms: 60_000 }));
+        assert!(matches!(
+            list[0].mode,
+            TimerMode::Fixed { delay_ms: 60_000 }
+        ));
     }
 
     #[tokio::test]
@@ -788,7 +789,10 @@ mod tests {
         let sched = Arc::new(RedbScheduler::new(storage.database(), Weak::new()).unwrap());
         // cron crate uses 7-field format: sec min hour day month weekday year
         let id = sched
-            .schedule_cron(record("morning_brief", "konf:test:a"), "0 0 8 * * * *".into())
+            .schedule_cron(
+                record("morning_brief", "konf:test:a"),
+                "0 0 8 * * * *".into(),
+            )
             .await
             .unwrap();
         let list = sched.list(None).await.unwrap();
@@ -814,7 +818,10 @@ mod tests {
         let (storage, _dir) = storage().await;
         let sched = Arc::new(RedbScheduler::new(storage.database(), Weak::new()).unwrap());
         let id = sched
-            .schedule_once(record("w", "konf:test:a"), Utc::now() + chrono::Duration::hours(1))
+            .schedule_once(
+                record("w", "konf:test:a"),
+                Utc::now() + chrono::Duration::hours(1),
+            )
             .await
             .unwrap();
         assert!(sched.cancel(id).await.unwrap());
@@ -851,17 +858,28 @@ mod tests {
 
         // First instance: schedule one timer
         {
-            let s = Arc::new(KonfStorage::open(&path, Retention::default()).await.unwrap());
+            let s = Arc::new(
+                KonfStorage::open(&path, Retention::default())
+                    .await
+                    .unwrap(),
+            );
             let sched = Arc::new(RedbScheduler::new(s.database(), Weak::new()).unwrap());
             sched
-                .schedule_once(record("persistent", "konf:test:a"), Utc::now() + chrono::Duration::hours(1))
+                .schedule_once(
+                    record("persistent", "konf:test:a"),
+                    Utc::now() + chrono::Duration::hours(1),
+                )
                 .await
                 .unwrap();
         }
 
         // Second instance over the same file: timer is still there
         {
-            let s = Arc::new(KonfStorage::open(&path, Retention::default()).await.unwrap());
+            let s = Arc::new(
+                KonfStorage::open(&path, Retention::default())
+                    .await
+                    .unwrap(),
+            );
             let sched = Arc::new(RedbScheduler::new(s.database(), Weak::new()).unwrap());
             let list = sched.list(None).await.unwrap();
             assert_eq!(list.len(), 1);

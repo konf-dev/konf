@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-konflux-core = { path = "../konflux-core" }
+konflux-substrate = { path = "../konflux-substrate" }
 konf-runtime = { path = "../konf-runtime" }
 rmcp = { workspace = true }
 async-trait = { workspace = true }

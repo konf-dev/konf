@@ -1,11 +1,9 @@
 //! Error types for the konf-runtime.
 
-use uuid::Uuid;
-
 use crate::journal::JournalError;
 
-/// Unique identifier for a workflow run.
-pub type RunId = Uuid;
+// Re-export RunId so existing `use crate::error::RunId` paths still work.
+pub use crate::journal::RunId;
 
 /// Errors from the runtime.
 #[derive(Debug, thiserror::Error)]
@@ -28,7 +26,7 @@ pub enum RuntimeError {
     Tool { tool: String, message: String },
 
     #[error("engine error: {0}")]
-    Engine(#[from] konflux::KonfluxError),
+    Engine(#[from] konflux_substrate::KonfluxError),
 
     #[error("join failed: {0}")]
     JoinFailed(String),

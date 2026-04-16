@@ -82,10 +82,7 @@ pub struct KonfStorage {
 impl KonfStorage {
     /// Open (or create) the redb database at `path` and initialise all
     /// stores over it.
-    pub async fn open(
-        path: impl AsRef<Path>,
-        retention: Retention,
-    ) -> Result<Self, StorageError> {
+    pub async fn open(path: impl AsRef<Path>, retention: Retention) -> Result<Self, StorageError> {
         let path_buf = path.as_ref().to_path_buf();
         let path_for_task = path_buf.clone();
         let db = tokio::task::spawn_blocking(move || Database::create(&path_for_task))

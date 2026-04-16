@@ -14,9 +14,10 @@ use serde_json::{json, Value};
 use konf_tool_runner::{InlineRunner, RunRegistry, RunState, Runner, WorkflowSpec};
 
 use konf_runtime::Runtime;
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolContext, ToolInfo};
-use konflux::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolInfo};
+use konflux_substrate::Engine;
 
 // ------------------------------------------------------------------
 // test doubles
@@ -38,8 +39,9 @@ impl Tool for EchoWorkflow {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        Ok(json!({ "echo_of": input }))
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let input = env.payload.clone();
+        Ok(env.respond(json!({ "echo_of": input })))
     }
 }
 
@@ -59,7 +61,7 @@ impl Tool for FailingWorkflow {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, _env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         Err(ToolError::ExecutionFailed {
             message: "intentional failure".into(),
             retryable: false,
@@ -87,12 +89,12 @@ impl Tool for SleepyWorkflow {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         self.started.fetch_add(1, Ordering::SeqCst);
         // Far longer than any reasonable test deadline; the test aborts
         // this via runner:cancel before it can return.
         tokio::time::sleep(Duration::from_secs(3600)).await;
-        Ok(json!({}))
+        Ok(env.respond(json!({})))
     }
 }
 

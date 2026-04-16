@@ -10,7 +10,7 @@ use tracing::{info_span, Instrument};
 use crate::capability;
 use crate::error::KonfluxError;
 use crate::executor::Executor;
-use crate::hooks::{ExecutionHooks, NoopHooks};
+use crate::hooks::{EventRecorder, NoopRecorder};
 use crate::prompt::{Prompt, PromptRegistry};
 use crate::resource::{Resource, ResourceRegistry};
 use crate::stream::{stream_channel, StreamEvent, StreamReceiver};
@@ -215,7 +215,7 @@ impl Engine {
         granted_capabilities: &[String],
         execution_metadata: HashMap<String, Value>,
         cancel_token: Option<CancellationToken>,
-        hooks: Option<Arc<dyn ExecutionHooks>>,
+        hooks: Option<Arc<dyn EventRecorder>>,
     ) -> Result<Value, KonfluxError> {
         let span = info_span!("workflow.run", workflow_id = %workflow.id);
 
@@ -224,7 +224,7 @@ impl Engine {
                 .map_err(KonfluxError::CapabilityDenied)?;
 
             let token = cancel_token.unwrap_or_default();
-            let hooks: Arc<dyn ExecutionHooks> = hooks.unwrap_or_else(|| Arc::new(NoopHooks));
+            let hooks: Arc<dyn EventRecorder> = hooks.unwrap_or_else(|| Arc::new(NoopRecorder));
             let (tx, mut rx) = stream_channel(self.config.stream_buffer);
             let registry = self.registry_snapshot();
             let executor = Executor::new(
@@ -310,7 +310,7 @@ impl Engine {
         granted_capabilities: &[String],
         execution_metadata: HashMap<String, Value>,
         cancel_token: Option<CancellationToken>,
-        hooks: Option<Arc<dyn ExecutionHooks>>,
+        hooks: Option<Arc<dyn EventRecorder>>,
     ) -> Result<StreamReceiver, KonfluxError> {
         let span = info_span!("workflow.run_streaming", workflow_id = %workflow.id);
 
@@ -319,7 +319,7 @@ impl Engine {
                 .map_err(KonfluxError::CapabilityDenied)?;
 
             let token = cancel_token.unwrap_or_default();
-            let hooks: Arc<dyn ExecutionHooks> = hooks.unwrap_or_else(|| Arc::new(NoopHooks));
+            let hooks: Arc<dyn EventRecorder> = hooks.unwrap_or_else(|| Arc::new(NoopRecorder));
             let (tx, rx) = stream_channel(self.config.stream_buffer);
             let registry = self.registry_snapshot();
             let executor = Executor::new(

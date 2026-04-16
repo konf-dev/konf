@@ -100,11 +100,7 @@ impl ExecutionContext {
     /// the dispatch that is calling `child()`. Session can be changed
     /// (e.g. for `runner:spawn` into a different session scope) or
     /// kept.
-    pub fn child(
-        &self,
-        parent_interaction_id: Uuid,
-        session_id: Option<String>,
-    ) -> Self {
+    pub fn child(&self, parent_interaction_id: Uuid, session_id: Option<String>) -> Self {
         Self {
             trace_id: self.trace_id,
             parent_interaction_id: Some(parent_interaction_id),

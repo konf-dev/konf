@@ -11,12 +11,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use konflux::hooks::ExecutionHooks;
 use konf_runtime::process::{NodeStatus, ProcessTable};
 use konf_runtime::scope::{Actor, ActorRole};
 use konf_runtime::{
     JournalEntry, JournalError, JournalRow, JournalStore, RunEvent, RunEventBus, RunId,
 };
+use konflux_substrate::hooks::{EventRecorder, ExecutorEvent};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -38,11 +38,7 @@ impl JournalStore for CaptureJournal {
     async fn query_by_run(&self, _: RunId) -> Result<Vec<JournalRow>, JournalError> {
         Ok(vec![])
     }
-    async fn query_by_session(
-        &self,
-        _: &str,
-        _: usize,
-    ) -> Result<Vec<JournalRow>, JournalError> {
+    async fn query_by_session(&self, _: &str, _: usize) -> Result<Vec<JournalRow>, JournalError> {
         Ok(vec![])
     }
     async fn recent(&self, _: usize) -> Result<Vec<JournalRow>, JournalError> {
@@ -100,7 +96,10 @@ async fn on_node_start_emits_run_event_node_start() {
     let rx = bus.subscribe();
     let hooks = hooks_with_bus(bus, None);
 
-    hooks.on_node_start("step_1", "tool:memory:search");
+    hooks.on_event(ExecutorEvent::NodeStarted {
+        node_id: "step_1",
+        tool: "tool:memory:search",
+    });
 
     let events = collect_events(rx, 1, Duration::from_millis(200)).await;
     assert_eq!(events.len(), 1, "exactly one event");
@@ -128,15 +127,18 @@ async fn on_node_complete_emits_run_event_node_end_with_completed_status() {
     let rx = bus.subscribe();
     let hooks = hooks_with_bus(bus, None);
 
-    hooks.on_node_complete("step_1", "tool:memory:search", 142, &json!({"ok": true}));
+    hooks.on_event(ExecutorEvent::NodeCompleted {
+        node_id: "step_1",
+        tool: "tool:memory:search",
+        duration_ms: 142,
+        output: &json!({"ok": true}),
+    });
 
     let events = collect_events(rx, 1, Duration::from_millis(200)).await;
     assert_eq!(events.len(), 1);
     match &events[0] {
         RunEvent::NodeEnd {
-            node_id,
-            status,
-            ..
+            node_id, status, ..
         } => {
             assert_eq!(node_id, "step_1");
             match status {
@@ -154,7 +156,11 @@ async fn on_node_failed_emits_run_event_node_end_with_failed_status() {
     let rx = bus.subscribe();
     let hooks = hooks_with_bus(bus, None);
 
-    hooks.on_node_failed("step_1", "tool:memory:search", "out of memory");
+    hooks.on_event(ExecutorEvent::NodeFailed {
+        node_id: "step_1",
+        tool: "tool:memory:search",
+        error: "out of memory",
+    });
 
     let events = collect_events(rx, 1, Duration::from_millis(200)).await;
     assert_eq!(events.len(), 1);
@@ -180,8 +186,16 @@ async fn multiple_subscribers_all_receive_node_events() {
     let rx3 = bus.subscribe();
     let hooks = hooks_with_bus(bus, None);
 
-    hooks.on_node_start("step_1", "tool:a");
-    hooks.on_node_complete("step_1", "tool:a", 10, &json!(null));
+    hooks.on_event(ExecutorEvent::NodeStarted {
+        node_id: "step_1",
+        tool: "tool:a",
+    });
+    hooks.on_event(ExecutorEvent::NodeCompleted {
+        node_id: "step_1",
+        tool: "tool:a",
+        duration_ms: 10,
+        output: &json!(null),
+    });
 
     // Each subscriber must observe both events independently.
     for (name, rx) in [("rx1", rx1), ("rx2", rx2), ("rx3", rx3)] {
@@ -197,8 +211,16 @@ async fn events_emit_alongside_journal_append() {
     let journal = Arc::new(CaptureJournal::default());
     let hooks = hooks_with_bus(bus, Some(journal.clone() as Arc<dyn JournalStore>));
 
-    hooks.on_node_start("step_1", "tool:memory:search");
-    hooks.on_node_complete("step_1", "tool:memory:search", 42, &json!(null));
+    hooks.on_event(ExecutorEvent::NodeStarted {
+        node_id: "step_1",
+        tool: "tool:memory:search",
+    });
+    hooks.on_event(ExecutorEvent::NodeCompleted {
+        node_id: "step_1",
+        tool: "tool:memory:search",
+        duration_ms: 42,
+        output: &json!(null),
+    });
 
     // Event bus: both events visible.
     let events = collect_events(rx, 2, Duration::from_millis(200)).await;
@@ -235,10 +257,18 @@ async fn node_start_uses_monotonic_timestamp_relative_to_completion() {
     let rx = bus.subscribe();
     let hooks = hooks_with_bus(bus, None);
 
-    hooks.on_node_start("step_1", "tool:a");
+    hooks.on_event(ExecutorEvent::NodeStarted {
+        node_id: "step_1",
+        tool: "tool:a",
+    });
     // small gap so timestamps are definitely distinct
     tokio::time::sleep(Duration::from_millis(2)).await;
-    hooks.on_node_complete("step_1", "tool:a", 2, &json!(null));
+    hooks.on_event(ExecutorEvent::NodeCompleted {
+        node_id: "step_1",
+        tool: "tool:a",
+        duration_ms: 2,
+        output: &json!(null),
+    });
 
     let events = collect_events(rx, 2, Duration::from_millis(200)).await;
     let start_at = match &events[0] {
@@ -264,7 +294,10 @@ async fn on_node_start_emits_interaction_shaped_journal_entry() {
     let journal = Arc::new(CaptureJournal::default());
     let hooks = hooks_with_bus(bus, Some(journal.clone() as Arc<dyn JournalStore>));
 
-    hooks.on_node_start("step_1", "tool:memory:search");
+    hooks.on_event(ExecutorEvent::NodeStarted {
+        node_id: "step_1",
+        tool: "tool:memory:search",
+    });
 
     // Wait for fire-and-forget journal append.
     let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
@@ -287,7 +320,10 @@ async fn on_node_start_emits_interaction_shaped_journal_entry() {
     assert_eq!(payload["attributes"]["phase"], "start");
     assert_eq!(payload["attributes"]["tool"], "tool:memory:search");
     assert!(payload["actor"]["id"].is_string(), "actor inline for audit");
-    assert!(payload["namespace"].is_string(), "namespace inline for audit");
+    assert!(
+        payload["namespace"].is_string(),
+        "namespace inline for audit"
+    );
 }
 
 /// F1: on_node_complete emits NodeLifecycle with status=Ok and duration.
@@ -297,7 +333,12 @@ async fn on_node_complete_emits_interaction_with_ok_status() {
     let journal = Arc::new(CaptureJournal::default());
     let hooks = hooks_with_bus(bus, Some(journal.clone() as Arc<dyn JournalStore>));
 
-    hooks.on_node_complete("step_1", "tool:memory:search", 142, &json!(null));
+    hooks.on_event(ExecutorEvent::NodeCompleted {
+        node_id: "step_1",
+        tool: "tool:memory:search",
+        duration_ms: 142,
+        output: &json!(null),
+    });
 
     let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
     while tokio::time::Instant::now() < deadline {
@@ -321,7 +362,11 @@ async fn on_node_failed_emits_interaction_with_failed_status() {
     let journal = Arc::new(CaptureJournal::default());
     let hooks = hooks_with_bus(bus, Some(journal.clone() as Arc<dyn JournalStore>));
 
-    hooks.on_node_failed("step_1", "tool:memory:search", "oom");
+    hooks.on_event(ExecutorEvent::NodeFailed {
+        node_id: "step_1",
+        tool: "tool:memory:search",
+        error: "oom",
+    });
 
     let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
     while tokio::time::Instant::now() < deadline {
@@ -352,7 +397,10 @@ async fn tool_dispatch_and_node_lifecycle_share_event_type() {
     let journal = Arc::new(CaptureJournal::default());
     let hooks = hooks_with_bus(bus, Some(journal.clone() as Arc<dyn JournalStore>));
 
-    hooks.on_node_start("x", "tool:y");
+    hooks.on_event(ExecutorEvent::NodeStarted {
+        node_id: "x",
+        tool: "tool:y",
+    });
     let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
     while tokio::time::Instant::now() < deadline {
         if !journal.entries.lock().unwrap().is_empty() {
@@ -382,8 +430,7 @@ async fn pre_existing_bug_closed_node_events_emitted_after_subscribe() {
     let subscriber = tokio::spawn(async move {
         let deadline = tokio::time::Instant::now() + Duration::from_millis(100);
         while tokio::time::Instant::now() < deadline {
-            let remaining =
-                deadline.saturating_duration_since(tokio::time::Instant::now());
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
                 break;
             }
@@ -398,10 +445,25 @@ async fn pre_existing_bug_closed_node_events_emitted_after_subscribe() {
     });
 
     let hooks = hooks_with_bus(bus, None);
-    hooks.on_node_start("step_1", "tool:a");
-    hooks.on_node_complete("step_1", "tool:a", 1, &json!(null));
-    hooks.on_node_start("step_2", "tool:b");
-    hooks.on_node_failed("step_2", "tool:b", "whoops");
+    hooks.on_event(ExecutorEvent::NodeStarted {
+        node_id: "step_1",
+        tool: "tool:a",
+    });
+    hooks.on_event(ExecutorEvent::NodeCompleted {
+        node_id: "step_1",
+        tool: "tool:a",
+        duration_ms: 1,
+        output: &json!(null),
+    });
+    hooks.on_event(ExecutorEvent::NodeStarted {
+        node_id: "step_2",
+        tool: "tool:b",
+    });
+    hooks.on_event(ExecutorEvent::NodeFailed {
+        node_id: "step_2",
+        tool: "tool:b",
+        error: "whoops",
+    });
 
     subscriber.await.unwrap();
     assert_eq!(

@@ -29,8 +29,8 @@ pub mod http {
 
 use konf_runtime::scope::{Actor, ActorRole, CapabilityGrant, ExecutionScope, ResourceLimits};
 use konf_runtime::Runtime;
-use konflux::tool::ToolInfo;
-use konflux::Engine;
+use konflux_substrate::tool::ToolInfo;
+use konflux_substrate::Engine;
 
 /// MCP server info type alias (rmcp names it InitializeResult).
 type ServerInfo = rmcp::model::InitializeResult;
@@ -140,7 +140,7 @@ impl KonfMcpServer {
                 role: ActorRole::System,
             },
             depth: 0,
-            }
+        }
     }
 }
 
@@ -168,7 +168,7 @@ fn tool_info_to_mcp(info: &ToolInfo) -> McpTool {
 /// Check if a tool name matches session capability patterns.
 /// Delegates to the engine's authoritative capability matching to avoid divergence.
 fn tool_allowed_by_session(tool_name: &str, capabilities: &[String]) -> bool {
-    konflux::capability::check_tool_access(tool_name, capabilities).is_ok()
+    konflux_substrate::capability::check_tool_access(tool_name, capabilities).is_ok()
 }
 
 impl ServerHandler for KonfMcpServer {
@@ -341,7 +341,7 @@ mod tests {
             output_schema: None,
             capabilities: vec!["test_tool".into()],
             supports_streaming: false,
-            annotations: konflux::tool::ToolAnnotations {
+            annotations: konflux_substrate::tool::ToolAnnotations {
                 read_only: true,
                 destructive: false,
                 idempotent: true,

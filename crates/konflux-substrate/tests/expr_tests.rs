@@ -1,6 +1,6 @@
 //! Expression Evaluator Tests
 
-use konflux::expr::{ExprError, ExprEvaluator, ExprValue};
+use konflux_substrate::expr::{ExprError, ExprEvaluator, ExprValue};
 use std::collections::HashMap;
 
 fn ctx(pairs: &[(&str, ExprValue)]) -> HashMap<String, ExprValue> {

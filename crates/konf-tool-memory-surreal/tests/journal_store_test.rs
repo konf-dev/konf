@@ -43,7 +43,7 @@ async fn fresh_db() -> Surreal<Any> {
 
 fn sample_entry(run_id: Uuid, session: &str, event_type: &str) -> JournalEntry {
     JournalEntry {
-        run_id,
+        run_id: Some(run_id),
         session_id: session.to_string(),
         namespace: "konf:test".to_string(),
         event_type: event_type.to_string(),
@@ -128,7 +128,7 @@ async fn query_by_run_returns_matching_entries() {
 
     let a = store.query_by_run(run_a).await.unwrap();
     assert_eq!(a.len(), 2, "both run_a entries returned");
-    assert!(a.iter().all(|r| r.run_id == run_a));
+    assert!(a.iter().all(|r| r.run_id == Some(run_a)));
     assert_eq!(a[0].event_type, "a1");
     assert_eq!(a[1].event_type, "a2");
 

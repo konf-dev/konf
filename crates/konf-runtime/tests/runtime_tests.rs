@@ -13,9 +13,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use konflux::engine::Engine;
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolContext, ToolInfo};
+use konflux_substrate::engine::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolInfo};
 
 use konf_runtime::journal::JournalStore;
 use konf_runtime::scope::*;
@@ -39,8 +40,9 @@ impl Tool for EchoTool {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        Ok(input)
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let output = env.payload.clone();
+        Ok(env.respond(output))
     }
 }
 
@@ -58,9 +60,9 @@ impl Tool for SlowTool {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        Ok(json!({"done": true}))
+        Ok(env.respond(json!({"done": true})))
     }
 }
 
@@ -68,7 +70,7 @@ fn setup_engine() -> Engine {
     let engine = Engine::new();
     engine.register_tool(Arc::new(EchoTool));
     engine.register_tool(Arc::new(SlowTool));
-    konflux::builtin::register_builtins(&engine);
+    konflux_substrate::builtin::register_builtins(&engine);
     engine
 }
 
@@ -82,7 +84,7 @@ fn test_scope(namespace: &str) -> ExecutionScope {
             role: ActorRole::User,
         },
         depth: 0,
-        }
+    }
 }
 
 // ============================================================
@@ -130,7 +132,12 @@ nodes:
 
     let scope = test_scope("konf:test:user_1");
     let result = runtime
-        .run(&workflow, json!({}), scope, konf_runtime::ExecutionContext::new_root("sess_1"))
+        .run(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_1"),
+        )
         .await;
     assert!(
         result.is_ok(),
@@ -157,7 +164,12 @@ nodes:
 
     let scope = test_scope("konf:test:user_1");
     let run_id = runtime
-        .start(&workflow, json!({}), scope, konf_runtime::ExecutionContext::new_root("sess_1"))
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_1"),
+        )
         .await
         .unwrap();
 
@@ -189,7 +201,12 @@ nodes:
 
     let scope = test_scope("konf:test:user_list");
     let _run_id = runtime
-        .start(&workflow, json!({}), scope, konf_runtime::ExecutionContext::new_root("sess_list"))
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_list"),
+        )
         .await
         .unwrap();
 
@@ -218,7 +235,12 @@ nodes:
 
     let scope = test_scope("konf:test:journal");
     let _ = runtime
-        .run(&workflow, json!({}), scope, konf_runtime::ExecutionContext::new_root("sess_journal"))
+        .run(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_journal"),
+        )
         .await;
 
     // Give async journal appends a moment to land.
@@ -235,9 +257,7 @@ nodes:
         "journal should have recorded workflow lifecycle events"
     );
     // Newest-first ordering: the last event should be a terminal one.
-    assert!(rows
-        .iter()
-        .any(|r| r.event_type == "workflow_started"));
+    assert!(rows.iter().any(|r| r.event_type == "workflow_started"));
 }
 
 #[tokio::test]
@@ -268,15 +288,25 @@ nodes:
             role: ActorRole::User,
         },
         depth: 0,
-        };
+    };
 
     let _run1 = runtime
-        .start(&workflow, json!({}), scope.clone(), konf_runtime::ExecutionContext::new_root("sess_a"))
+        .start(
+            &workflow,
+            json!({}),
+            scope.clone(),
+            konf_runtime::ExecutionContext::new_root("sess_a"),
+        )
         .await
         .unwrap();
 
     let result = runtime
-        .start(&workflow, json!({}), scope, konf_runtime::ExecutionContext::new_root("sess_b"))
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_b"),
+        )
         .await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("max_active_runs"));
@@ -291,7 +321,12 @@ async fn test_invoke_tool_happy_path() {
     let runtime = create_runtime_edge().await;
     let scope = test_scope("konf:test:invoke");
     let result = runtime
-        .invoke_tool("echo", json!({"hello": "world"}), &scope, &konf_runtime::ExecutionContext::new_root("sess-t"))
+        .invoke_tool(
+            "echo",
+            json!({"hello": "world"}),
+            &scope,
+            &konf_runtime::ExecutionContext::new_root("sess-t"),
+        )
         .await
         .unwrap();
     assert_eq!(result, json!({"hello": "world"}));
@@ -310,9 +345,14 @@ async fn test_invoke_tool_capability_denied() {
             role: ActorRole::User,
         },
         depth: 0,
-        };
+    };
     let err = runtime
-        .invoke_tool("echo", json!({}), &scope, &konf_runtime::ExecutionContext::new_root("sess-t"))
+        .invoke_tool(
+            "echo",
+            json!({}),
+            &scope,
+            &konf_runtime::ExecutionContext::new_root("sess-t"),
+        )
         .await
         .unwrap_err()
         .to_string();
@@ -325,7 +365,12 @@ async fn test_invoke_tool_emits_tool_invoked_event() {
     let mut rx = runtime.event_bus().subscribe();
     let scope = test_scope("konf:test:event");
     let _ = runtime
-        .invoke_tool("echo", json!({"hello": "world"}), &scope, &konf_runtime::ExecutionContext::new_root("sess-t"))
+        .invoke_tool(
+            "echo",
+            json!({"hello": "world"}),
+            &scope,
+            &konf_runtime::ExecutionContext::new_root("sess-t"),
+        )
         .await
         .unwrap();
     // Drain events until we find the ToolInvoked.
@@ -363,7 +408,12 @@ nodes:
         .unwrap();
     let scope = test_scope("konf:test:lifecycle");
     let _ = runtime
-        .run(&workflow, json!({}), scope, konf_runtime::ExecutionContext::new_root("sess_lifecycle"))
+        .run(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_lifecycle"),
+        )
         .await;
 
     // Drain events looking for RunStarted and one of RunCompleted/RunFailed.
@@ -393,7 +443,12 @@ async fn test_invoke_tool_unknown_tool() {
     let runtime = create_runtime_edge().await;
     let scope = test_scope("konf:test:unknown");
     let err = runtime
-        .invoke_tool("nonexistent:tool", json!({}), &scope, &konf_runtime::ExecutionContext::new_root("sess-t"))
+        .invoke_tool(
+            "nonexistent:tool",
+            json!({}),
+            &scope,
+            &konf_runtime::ExecutionContext::new_root("sess-t"),
+        )
         .await
         .unwrap_err()
         .to_string();
@@ -464,7 +519,12 @@ nodes:
 
     let scope = test_scope("konf:edge:metrics");
     let _result = runtime
-        .run(&workflow, json!({}), scope, konf_runtime::ExecutionContext::new_root("metrics_sess"))
+        .run(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("metrics_sess"),
+        )
         .await;
 
     let metrics = runtime.metrics();
@@ -494,7 +554,12 @@ nodes:
 
     let scope = test_scope("konf:edge:cancel");
     let run_id = runtime
-        .start(&workflow, json!({}), scope, konf_runtime::ExecutionContext::new_root("cancel_sess"))
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("cancel_sess"),
+        )
         .await
         .unwrap();
 
@@ -528,10 +593,15 @@ nodes:
             role: ActorRole::User,
         },
         depth: 0,
-        };
+    };
 
     let run_id = runtime
-        .start(&workflow, json!({}), scope, konf_runtime::ExecutionContext::new_root("sess_deny"))
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_deny"),
+        )
         .await
         .unwrap();
     let result = runtime.wait(run_id).await;

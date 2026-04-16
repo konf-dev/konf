@@ -1,7 +1,7 @@
 //! Workflow IR Tests
 
-use konflux::error::ValidationError;
-use konflux::workflow::{EdgeTarget, Step, Workflow};
+use konflux_substrate::error::ValidationError;
+use konflux_substrate::workflow::{EdgeTarget, Step, Workflow};
 
 #[test]
 fn test_valid_linear_workflow() {

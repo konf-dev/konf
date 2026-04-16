@@ -25,15 +25,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use konflux::engine::Engine;
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolContext, ToolInfo};
 use konf_runtime::interaction::{Interaction, InteractionKind};
 use konf_runtime::journal::JournalStore;
-use konf_runtime::scope::{
-    Actor, ActorRole, CapabilityGrant, ExecutionScope, ResourceLimits,
-};
+use konf_runtime::scope::{Actor, ActorRole, CapabilityGrant, ExecutionScope, ResourceLimits};
 use konf_runtime::{JournalEntry, JournalError, JournalRow, RunId, Runtime};
+use konflux_substrate::engine::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolInfo};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -95,8 +94,9 @@ impl Tool for ClockReadTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let id = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let id = env
+            .payload
             .get("id")
             .and_then(Value::as_u64)
             .ok_or_else(|| ToolError::InvalidInput {
@@ -110,7 +110,7 @@ impl Tool for ClockReadTool {
             });
         }
         let (tick, value) = self.wall.read(id);
-        Ok(json!({"id": id, "tick": tick, "value": value}))
+        Ok(env.respond(json!({"id": id, "tick": tick, "value": value})))
     }
 }
 
@@ -156,11 +156,7 @@ impl JournalStore for InteractionJournal {
     async fn query_by_run(&self, _: RunId) -> Result<Vec<JournalRow>, JournalError> {
         Ok(vec![])
     }
-    async fn query_by_session(
-        &self,
-        _: &str,
-        _: usize,
-    ) -> Result<Vec<JournalRow>, JournalError> {
+    async fn query_by_session(&self, _: &str, _: usize) -> Result<Vec<JournalRow>, JournalError> {
         Ok(vec![])
     }
     async fn recent(&self, _: usize) -> Result<Vec<JournalRow>, JournalError> {
@@ -204,10 +200,8 @@ async fn run_widened_reads(n: usize, runtime: Arc<Runtime>, trace: Uuid) -> Dura
         tasks.spawn(async move {
             // R2: every widened read shares the trace via a per-read
             // ExecutionContext derived from the outer trace id.
-            let child_ctx = konf_runtime::ExecutionContext::with_trace(
-                trace,
-                format!("clock-reader-{id}"),
-            );
+            let child_ctx =
+                konf_runtime::ExecutionContext::with_trace(trace, format!("clock-reader-{id}"));
             rt.invoke_tool("clock:read", json!({"id": id}), &sc, &child_ctx)
                 .await
         });
@@ -262,9 +256,7 @@ async fn assert_widened_challenge(n: usize) -> Duration {
     let interactions = journal.interactions();
     assert_eq!(interactions.len(), n, "exactly N interactions landed");
     assert!(
-        interactions
-            .iter()
-            .all(|i| i.trace_id == trace),
+        interactions.iter().all(|i| i.trace_id == trace),
         "all interactions share the widened trace_id"
     );
     assert!(
@@ -274,9 +266,7 @@ async fn assert_widened_challenge(n: usize) -> Duration {
         "all kinds are ToolDispatch"
     );
     assert!(
-        interactions
-            .iter()
-            .all(|i| i.target == "tool:clock:read"),
+        interactions.iter().all(|i| i.target == "tool:clock:read"),
         "all target the clock_read tool"
     );
 

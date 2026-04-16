@@ -32,12 +32,13 @@ use tracing::{info_span, warn, Instrument};
 
 use crate::capability;
 use crate::engine::EngineConfig;
+use crate::envelope::Envelope;
 use crate::error::{ExecutionError, KonfluxError, ToolError};
 use crate::expr::{ExprEvaluator, ExprValue};
-use crate::hooks::ExecutionHooks;
+use crate::hooks::{EventRecorder, ExecutorEvent};
 use crate::stream::{ProgressType, StreamEvent, StreamSender};
 use crate::template;
-use crate::tool::{Tool, ToolContext, ToolRegistry};
+use crate::tool::{Tool, ToolRegistry};
 use crate::workflow::{
     BackoffStrategy, EdgeTarget, ErrorAction, JoinPolicy, RetryPolicy, Step, StepId, Workflow,
 };
@@ -82,7 +83,7 @@ struct StepContext {
     metadata: HashMap<String, Value>,
     workflow_id: String,
     cancel_token: CancellationToken,
-    hooks: Arc<dyn ExecutionHooks>,
+    hooks: Arc<dyn EventRecorder>,
 }
 
 pub struct Executor {
@@ -91,7 +92,7 @@ pub struct Executor {
     config: EngineConfig,
     metadata: HashMap<String, Value>,
     cancel_token: CancellationToken,
-    hooks: Arc<dyn ExecutionHooks>,
+    hooks: Arc<dyn EventRecorder>,
 }
 
 impl Executor {
@@ -101,7 +102,7 @@ impl Executor {
         config: &EngineConfig,
         metadata: HashMap<String, Value>,
         cancel_token: CancellationToken,
-        hooks: Arc<dyn ExecutionHooks>,
+        hooks: Arc<dyn EventRecorder>,
     ) -> Self {
         Self {
             registry: registry.clone(),
@@ -480,14 +481,17 @@ struct NodeExecutionResult {
 
 async fn execute_step(
     step: &Step,
-    workflow: &Workflow,
+    _workflow: &Workflow,
     state: Arc<State>,
     tx: StreamSender,
     ctx: &StepContext,
 ) -> Result<Value, KonfluxError> {
     let node_id = step.id.to_string();
     let tool_name = step.tool.to_string();
-    ctx.hooks.on_node_start(&node_id, &tool_name);
+    ctx.hooks.on_event(ExecutorEvent::NodeStarted {
+        node_id: &node_id,
+        tool: &tool_name,
+    });
     let start_time = std::time::Instant::now();
 
     let outputs = state.get_outputs().await;
@@ -516,43 +520,69 @@ async fn execute_step(
         ctx.capabilities.to_vec()
     };
 
-    let tool_ctx = ToolContext {
-        capabilities: tool_capabilities,
-        workflow_id: workflow.id.to_string(),
-        node_id: node_id.clone(),
-        metadata: ctx.metadata.clone(),
-    };
+    // Bridge: construct Envelope from existing executor context.
+    // trace_id and namespace are extracted from the metadata HashMap
+    // (the stringly-typed side-channel). This bridge is transitional —
+    // 4.f/4.g will make these fields flow through the Envelope from the start.
+    let trace_id = ctx
+        .metadata
+        .get("trace_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+        .unwrap_or_else(uuid::Uuid::new_v4);
+    let namespace = ctx
+        .metadata
+        .get("namespace")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let actor_id = ctx
+        .metadata
+        .get("actor_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let session_id = ctx
+        .metadata
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
 
-    let result = invoke_with_retry(
-        tool,
+    let env = Envelope::for_tool_dispatch(
+        step.tool.as_str(),
         Value::Object(resolved_inputs.into_iter().collect()),
-        &tool_ctx,
-        step,
-        ctx,
-        &tx,
-    )
-    .await;
+        &tool_capabilities,
+        trace_id,
+        namespace,
+        actor_id,
+        session_id,
+    );
+
+    let result = invoke_with_retry(tool, env, step, ctx, &tx).await;
     let duration_ms = start_time.elapsed().as_millis() as u64;
     match &result {
-        Ok(output) => ctx
-            .hooks
-            .on_node_complete(&node_id, &tool_name, duration_ms, output),
-        Err(e) => ctx
-            .hooks
-            .on_node_failed(&node_id, &tool_name, &e.to_string()),
+        Ok(output) => ctx.hooks.on_event(ExecutorEvent::NodeCompleted {
+            node_id: &node_id,
+            tool: &tool_name,
+            duration_ms,
+            output: &output.payload,
+        }),
+        Err(e) => ctx.hooks.on_event(ExecutorEvent::NodeFailed {
+            node_id: &node_id,
+            tool: &tool_name,
+            error: &e.to_string(),
+        }),
     }
-    result
+    // Extract payload from response envelope for the DAG state.
+    result.map(|env| env.payload)
 }
 
 async fn invoke_with_retry(
     tool: Arc<dyn Tool>,
-    input: Value,
-    tool_ctx: &ToolContext,
+    env: Envelope<Value>,
     step: &Step,
     ctx: &StepContext,
     tx: &StreamSender,
-) -> Result<Value, KonfluxError> {
-    let node_id = &tool_ctx.node_id;
+) -> Result<Envelope<Value>, KonfluxError> {
+    let node_id = step.id.to_string();
     let retry_policy = step.retry.as_ref();
     let timeout_duration = step.timeout;
     let max_attempts = retry_policy.map(|r| r.max_attempts + 1).unwrap_or(1);
@@ -591,7 +621,7 @@ async fn invoke_with_retry(
         let dur = timeout_duration.unwrap_or(Duration::from_millis(ctx.config.default_timeout_ms));
         let invoke_res = match timeout(
             dur,
-            tool.invoke_streaming(input.clone(), tool_ctx, tx.clone())
+            tool.invoke_streaming(env.clone(), tx.clone())
                 .instrument(tool_span),
         )
         .await
@@ -627,8 +657,12 @@ async fn invoke_with_retry(
                 if !retryable || attempt >= max_attempts {
                     break;
                 }
-                ctx.hooks
-                    .on_tool_retry(node_id, &tool.info().name, attempt, &e.to_string());
+                ctx.hooks.on_event(ExecutorEvent::ToolRetry {
+                    node_id: &node_id,
+                    tool: &tool.info().name,
+                    attempt,
+                    error: &e.to_string(),
+                });
                 warn!(tool = %tool.info().name, attempt, error = %e, "Tool failed, retrying");
             }
         }

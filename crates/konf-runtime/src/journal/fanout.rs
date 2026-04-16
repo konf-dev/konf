@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::error::RunId;
+use crate::journal::RunId;
 use crate::journal::{JournalEntry, JournalError, JournalRow, JournalStore};
 
 /// Counters exposed to observability. All atomics use `Ordering::Relaxed`
@@ -73,10 +73,7 @@ pub struct FanoutJournalStore {
 impl FanoutJournalStore {
     /// Construct a new fan-out store. `secondaries` may be empty; in that
     /// case the store behaves identically to its primary.
-    pub fn new(
-        primary: Arc<dyn JournalStore>,
-        secondaries: Vec<Arc<dyn JournalStore>>,
-    ) -> Self {
+    pub fn new(primary: Arc<dyn JournalStore>, secondaries: Vec<Arc<dyn JournalStore>>) -> Self {
         Self {
             primary,
             secondaries,

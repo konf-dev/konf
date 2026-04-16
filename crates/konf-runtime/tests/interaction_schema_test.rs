@@ -150,8 +150,8 @@ fn interaction_status_failed_preserves_error_message() {
 
 #[test]
 fn interaction_ignores_unknown_fields_for_forward_compat() {
-    let mut json = sample_interaction(InteractionKind::ToolDispatch, InteractionStatus::Ok)
-        .to_json();
+    let mut json =
+        sample_interaction(InteractionKind::ToolDispatch, InteractionStatus::Ok).to_json();
     // Inject an unknown field that a future schema version might add.
     let obj = json.as_object_mut().unwrap();
     obj.insert(

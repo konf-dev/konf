@@ -7,7 +7,7 @@ repository.workspace = true
 description = "Shell execution tool (shell:exec) for the Konf platform — runs commands in a Docker sandbox"
 
 [dependencies]
-konflux-core = { path = "../konflux-core" }
+konflux-substrate = { path = "../konflux-substrate" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

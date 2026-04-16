@@ -13,8 +13,8 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use konflux::engine::{Engine, EngineConfig};
-use konflux::Workflow;
+use konflux_substrate::engine::{Engine, EngineConfig};
+use konflux_substrate::Workflow;
 
 use crate::context::VirtualizedTool;
 use crate::error::{RunId, RuntimeError};
@@ -196,7 +196,8 @@ impl Runtime {
                 match scope.check_tool(tool_name) {
                     Ok(bindings) => {
                         // Layer 1: VirtualizedTool (namespace injection)
-                        let wrapped: Arc<dyn konflux::tool::Tool> = if bindings.is_empty() {
+                        let wrapped: Arc<dyn konflux_substrate::tool::Tool> = if bindings.is_empty()
+                        {
                             tool
                         } else {
                             Arc::new(VirtualizedTool::new(tool, bindings))
@@ -270,21 +271,17 @@ impl Runtime {
         let namespace_injected = bindings.contains_key("namespace");
 
         // 2. Resolve the raw tool from the engine registry.
-        let raw_tool = self
-            .engine
-            .registry()
-            .get(tool_name)
-            .ok_or_else(|| {
-                RuntimeError::CapabilityDenied(format!(
-                    "tool '{tool_name}' not found in engine registry"
-                ))
-            })?;
+        let raw_tool = self.engine.registry().get(tool_name).ok_or_else(|| {
+            RuntimeError::CapabilityDenied(format!(
+                "tool '{tool_name}' not found in engine registry"
+            ))
+        })?;
 
         // 3. Layer 1: VirtualizedTool wraps the raw tool to inject the
         //    scope's parameter bindings (e.g. namespace) before the tool
         //    sees the input. Skipped when there are no bindings to save
         //    an Arc allocation.
-        let wrapped: Arc<dyn konflux::tool::Tool> = if bindings.is_empty() {
+        let wrapped: Arc<dyn konflux_substrate::tool::Tool> = if bindings.is_empty() {
             raw_tool
         } else {
             Arc::new(VirtualizedTool::new(raw_tool, bindings))
@@ -294,10 +291,7 @@ impl Runtime {
         //    tools.yaml::tool_guards. If no guard is configured for this
         //    tool, we skip the wrapper entirely.
         let wrapped = {
-            let guards = self
-                .tool_guards
-                .read()
-                .expect("tool_guards lock poisoned");
+            let guards = self.tool_guards.read().expect("tool_guards lock poisoned");
             if let Some(guard_entry) = guards.get(tool_name) {
                 if guard_entry.rules.is_empty() {
                     wrapped
@@ -318,17 +312,13 @@ impl Runtime {
             }
         };
 
-        // 5. Build the tool context and invoke. The context carries:
-        //    - scope's capability patterns (for nested capability checks)
-        //    - enough metadata for tools that need to reconstruct the
-        //      caller's scope + context (notably `runner:spawn`).
+        // 5. Build the dispatch envelope and invoke. The envelope carries
+        //    typed context: trace_id, namespace, actor_id, capabilities,
+        //    session_id — no more untyped ToolContext metadata map.
         //
-        //    R1 (Phase F2): we stamp `actor_id`, `actor_role`, `namespace`,
-        //    `trace_id`, and `session_id` into `metadata` so sub-tools can
-        //    rebuild the parent `ExecutionScope` + `ExecutionContext`
-        //    without a side-channel. This is the seam through which the
-        //    substrate's policy crosses the (untyped) `ToolContext`
-        //    boundary into tool code.
+        //    R1 (Phase F2): `actor_role` and `session_id` are stamped into
+        //    envelope metadata so sub-tools can rebuild the parent
+        //    `ExecutionScope` + `ExecutionContext` without a side-channel.
         let actor_role_str = match scope.actor.role {
             crate::scope::ActorRole::InfraAdmin => "infra_admin",
             crate::scope::ActorRole::ProductAdmin => "product_admin",
@@ -338,33 +328,22 @@ impl Runtime {
             crate::scope::ActorRole::UserAgent => "user_agent",
             crate::scope::ActorRole::System => "system",
         };
-        let tool_ctx = konflux::tool::ToolContext {
-            capabilities: scope.capability_patterns(),
-            workflow_id: "runtime_invoke".into(),
-            node_id: format!("invoke_{tool_name}"),
-            metadata: HashMap::from_iter([
-                (
-                    "namespace".into(),
-                    Value::String(scope.namespace.clone()),
-                ),
-                (
-                    "actor_id".into(),
-                    Value::String(scope.actor.id.clone()),
-                ),
-                (
-                    "actor_role".into(),
-                    Value::String(actor_role_str.into()),
-                ),
-                (
-                    "trace_id".into(),
-                    Value::String(ctx.trace_id.to_string()),
-                ),
-                (
-                    "session_id".into(),
-                    Value::String(ctx.session_id.clone()),
-                ),
-            ]),
-        };
+        let mut env = konflux_substrate::envelope::Envelope::for_tool_dispatch(
+            tool_name,
+            input,
+            &scope.capability_patterns(),
+            ctx.trace_id,
+            &scope.namespace,
+            &scope.actor.id,
+            &ctx.session_id,
+        );
+        // Stamp extra metadata for tools that need to reconstruct scope.
+        env.metadata
+            .0
+            .insert("actor_role".into(), Value::String(actor_role_str.into()));
+        env.metadata
+            .0
+            .insert("session_id".into(), Value::String(ctx.session_id.clone()));
 
         // B3: record the dispatch as an Interaction before invocation so
         // edge rules (capability check, namespace injection) are captured
@@ -382,7 +361,7 @@ impl Runtime {
         let trace_id = ctx.trace_id;
         let interaction_id = uuid::Uuid::new_v4();
 
-        let result = wrapped.invoke(input, &tool_ctx).await;
+        let result = wrapped.invoke(env).await;
         let ended_at = Utc::now();
         let duration_ms = (ended_at - started_at).num_milliseconds().max(0) as u64;
 
@@ -422,7 +401,7 @@ impl Runtime {
                 timestamp: started_at,
             };
             let entry = crate::journal::JournalEntry {
-                run_id: uuid::Uuid::nil(),
+                run_id: None,
                 session_id: ctx.session_id.clone(),
                 namespace: scope.namespace.clone(),
                 event_type: "interaction".into(),
@@ -439,10 +418,12 @@ impl Runtime {
             }
         }
 
-        result.map_err(|e| RuntimeError::Tool {
-            tool: tool_name.to_string(),
-            message: e.to_string(),
-        })
+        result
+            .map(|env| env.payload)
+            .map_err(|e| RuntimeError::Tool {
+                tool: tool_name.to_string(),
+                message: e.to_string(),
+            })
     }
 
     // ---- Execution ----
@@ -504,7 +485,7 @@ impl Runtime {
         if let Some(ref journal) = self.journal {
             if let Err(e) = journal
                 .append(JournalEntry {
-                    run_id,
+                    run_id: Some(run_id),
                     session_id: session_id.clone(),
                     namespace: scope.namespace.clone(),
                     event_type: "workflow_started".into(),
@@ -566,17 +547,15 @@ impl Runtime {
                 Ok(_) => false,
                 Err(e) => matches!(
                     e,
-                    konflux::KonfluxError::Execution(
-                        konflux::error::ExecutionError::Cancelled { .. }
+                    konflux_substrate::KonfluxError::Execution(
+                        konflux_substrate::error::ExecutionError::Cancelled { .. }
                     )
                 ),
             };
 
             // Compute duration once and reuse it for status + metrics + events.
             let duration_ms = {
-                let started_at = table
-                    .get(&run_id, |run| run.started_at)
-                    .unwrap_or(now);
+                let started_at = table.get(&run_id, |run| run.started_at).unwrap_or(now);
                 (now - started_at).num_milliseconds().max(0) as u64
             };
 
@@ -640,7 +619,7 @@ impl Runtime {
             if let Some(ref journal) = journal {
                 if let Err(e) = journal
                     .append(JournalEntry {
-                        run_id,
+                        run_id: Some(run_id),
                         session_id,
                         namespace,
                         event_type: event_type.into(),
@@ -669,20 +648,24 @@ impl Runtime {
             match status {
                 Some(RunStatus::Completed { output, .. }) => return Ok(output),
                 Some(RunStatus::Failed { error, .. }) => {
-                    return Err(RuntimeError::Engine(konflux::KonfluxError::Execution(
-                        konflux::error::ExecutionError::NodeFailed {
-                            workflow_id: "runtime".into(),
-                            node: "wait".into(),
-                            message: error,
-                        },
-                    )));
+                    return Err(RuntimeError::Engine(
+                        konflux_substrate::KonfluxError::Execution(
+                            konflux_substrate::error::ExecutionError::NodeFailed {
+                                workflow_id: "runtime".into(),
+                                node: "wait".into(),
+                                message: error,
+                            },
+                        ),
+                    ));
                 }
                 Some(RunStatus::Cancelled { reason, .. }) => {
-                    return Err(RuntimeError::Engine(konflux::KonfluxError::Execution(
-                        konflux::error::ExecutionError::Cancelled {
-                            workflow_id: reason,
-                        },
-                    )));
+                    return Err(RuntimeError::Engine(
+                        konflux_substrate::KonfluxError::Execution(
+                            konflux_substrate::error::ExecutionError::Cancelled {
+                                workflow_id: reason,
+                            },
+                        ),
+                    ));
                 }
                 None => return Err(RuntimeError::NotFound(run_id)),
                 _ => {
@@ -720,7 +703,7 @@ impl Runtime {
         input: Value,
         scope: ExecutionScope,
         ctx: ExecutionContext,
-    ) -> Result<(RunId, konflux::StreamReceiver), RuntimeError> {
+    ) -> Result<(RunId, konflux_substrate::StreamReceiver), RuntimeError> {
         let session_id = ctx.session_id.clone();
         let trace_id = ctx.trace_id;
         info!(
@@ -768,7 +751,7 @@ impl Runtime {
         if let Some(ref journal) = self.journal {
             if let Err(e) = journal
                 .append(JournalEntry {
-                    run_id,
+                    run_id: Some(run_id),
                     session_id: session_id.clone(),
                     namespace: scope.namespace.clone(),
                     event_type: "workflow_started".into(),
@@ -817,7 +800,7 @@ impl Runtime {
 
         // Create a forwarding channel: engine_rx → (caller_rx + process table update)
         let (caller_tx, caller_rx) =
-            konflux::stream::stream_channel(self.engine.config().stream_buffer);
+            konflux_substrate::stream::stream_channel(self.engine.config().stream_buffer);
 
         let table = self.table.clone();
         let journal = self.journal.clone();
@@ -834,15 +817,15 @@ impl Runtime {
             while let Some(event) = engine_rx.recv().await {
                 let is_terminal = matches!(
                     event,
-                    konflux::stream::StreamEvent::Done { .. }
-                        | konflux::stream::StreamEvent::Error { .. }
+                    konflux_substrate::stream::StreamEvent::Done { .. }
+                        | konflux_substrate::stream::StreamEvent::Error { .. }
                 );
 
                 match &event {
-                    konflux::stream::StreamEvent::Done { .. } => {
+                    konflux_substrate::stream::StreamEvent::Done { .. } => {
                         final_status = Some(("workflow_completed", serde_json::json!({}), true));
                     }
-                    konflux::stream::StreamEvent::Error { code, message, .. } => {
+                    konflux_substrate::stream::StreamEvent::Error { code, message, .. } => {
                         let is_cancel = code == "cancelled" || message.contains("cancelled");
                         if is_cancel {
                             final_status = Some((
@@ -950,7 +933,7 @@ impl Runtime {
                 if let Some(ref journal) = journal {
                     if let Err(e) = journal
                         .append(JournalEntry {
-                            run_id,
+                            run_id: Some(run_id),
                             session_id,
                             namespace,
                             event_type: event_type.into(),

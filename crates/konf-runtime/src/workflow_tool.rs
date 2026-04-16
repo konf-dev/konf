@@ -12,9 +12,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
-use konflux::Workflow;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
+use konflux_substrate::Workflow;
 
 use crate::scope::ExecutionScope;
 use crate::Runtime;
@@ -69,7 +70,7 @@ impl Tool for WorkflowTool {
         }
     }
 
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         // Create a child scope with attenuated capabilities
         let child_scope = self
             .default_scope
@@ -82,35 +83,28 @@ impl Tool for WorkflowTool {
                 retryable: false,
             })?;
 
-        // Extract session_id from context metadata
-        let session_id = ctx
+        // Extract session_id from envelope metadata; fall back to a default
+        let session_id = env
             .metadata
+            .0
             .get("session_id")
             .and_then(|v| v.as_str())
             .unwrap_or("workflow_tool")
             .to_string();
 
-        // Extract trace_id from context metadata if upstream propagated it;
-        // otherwise mint a root trace for this nested workflow. R2 wires
-        // trace_id through konflux::ToolContext::metadata as a string
-        // because the konflux boundary is untyped — the runtime parses it.
-        let trace_id = ctx
-            .metadata
-            .get("trace_id")
-            .and_then(|v| v.as_str())
-            .and_then(|s| uuid::Uuid::parse_str(s).ok());
-        let exec_ctx = match trace_id {
-            Some(trace) => crate::ExecutionContext::with_trace(trace, session_id),
-            None => crate::ExecutionContext::new_root(session_id),
-        };
+        // Use the envelope's trace_id directly — it's typed, no string parsing needed.
+        let exec_ctx = crate::ExecutionContext::with_trace(env.trace_id.0, session_id);
 
-        self.runtime
-            .run(&self.workflow, input, child_scope, exec_ctx)
+        let output = self
+            .runtime
+            .run(&self.workflow, env.payload.clone(), child_scope, exec_ctx)
             .await
             .map_err(|e| ToolError::ExecutionFailed {
                 message: format!("Workflow '{}' failed: {e}", self.workflow.id),
                 retryable: false,
-            })
+            })?;
+
+        Ok(env.respond(output))
     }
 }
 
@@ -129,7 +123,7 @@ mod tests {
                 role: ActorRole::System,
             },
             depth: 0,
-            }
+        }
     }
 
     #[test]
