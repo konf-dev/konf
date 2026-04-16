@@ -5,8 +5,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
 
 use crate::{MemoryBackend, SearchParams};
 
@@ -57,30 +58,39 @@ impl Tool for SearchTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         let params = SearchParams {
-            query: input
+            query: env
+                .payload
                 .get("query")
                 .and_then(|v| v.as_str())
                 .map(String::from),
-            mode: input.get("mode").and_then(|v| v.as_str()).map(String::from),
-            limit: input.get("limit").and_then(|v| v.as_i64()),
-            namespace: input
+            mode: env
+                .payload
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            limit: env.payload.get("limit").and_then(|v| v.as_i64()),
+            namespace: env
+                .payload
                 .get("namespace")
                 .and_then(|v| v.as_str())
                 .map(String::from),
-            node_type: input
+            node_type: env
+                .payload
                 .get("node_type")
                 .and_then(|v| v.as_str())
                 .map(String::from),
-            edge_type: input
+            edge_type: env
+                .payload
                 .get("edge_type")
                 .and_then(|v| v.as_str())
                 .map(String::from),
-            metadata_filter: input.get("metadata_filter").cloned(),
-            min_similarity: input.get("min_similarity").and_then(|v| v.as_f64()),
+            metadata_filter: env.payload.get("metadata_filter").cloned(),
+            min_similarity: env.payload.get("min_similarity").and_then(|v| v.as_f64()),
         };
-        self.backend.search(params).await.map_err(mem_err)
+        let result = self.backend.search(params).await.map_err(mem_err)?;
+        Ok(env.respond(result))
     }
 }
 
@@ -131,19 +141,22 @@ impl Tool for StoreTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let nodes = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let namespace = env.payload.get("namespace").and_then(|v| v.as_str());
+        let nodes = env
+            .payload
             .get("nodes")
             .and_then(|v| v.as_array())
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "missing 'nodes' array".into(),
                 field: Some("nodes".into()),
             })?;
-        self.backend
+        let result = self
+            .backend
             .add_nodes(nodes, namespace)
             .await
-            .map_err(mem_err)
+            .map_err(mem_err)?;
+        Ok(env.respond(result))
     }
 }
 
@@ -189,33 +202,39 @@ impl Tool for StateSetTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let key =
-            input
-                .get("key")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| ToolError::InvalidInput {
-                    message: "missing 'key'".into(),
-                    field: Some("key".into()),
-                })?;
-        let value = input.get("value").ok_or_else(|| ToolError::InvalidInput {
-            message: "missing 'value'".into(),
-            field: Some("value".into()),
-        })?;
-        let session_id = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let namespace = env.payload.get("namespace").and_then(|v| v.as_str());
+        let key = env
+            .payload
+            .get("key")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'key'".into(),
+                field: Some("key".into()),
+            })?;
+        let value = env
+            .payload
+            .get("value")
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'value'".into(),
+                field: Some("value".into()),
+            })?;
+        let session_id = env
+            .payload
             .get("session_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidInput {
                 message: "missing 'session_id'".into(),
                 field: Some("session_id".into()),
             })?;
-        let ttl = input.get("ttl_seconds").and_then(|v| v.as_i64());
+        let ttl = env.payload.get("ttl_seconds").and_then(|v| v.as_i64());
 
-        self.backend
+        let result = self
+            .backend
             .state_set(key, value, session_id, namespace, ttl)
             .await
-            .map_err(mem_err)
+            .map_err(mem_err)?;
+        Ok(env.respond(result))
     }
 }
 
@@ -260,17 +279,18 @@ impl Tool for StateGetTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let key =
-            input
-                .get("key")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| ToolError::InvalidInput {
-                    message: "missing 'key'".into(),
-                    field: Some("key".into()),
-                })?;
-        let session_id = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let namespace = env.payload.get("namespace").and_then(|v| v.as_str());
+        let key = env
+            .payload
+            .get("key")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'key'".into(),
+                field: Some("key".into()),
+            })?;
+        let session_id = env
+            .payload
             .get("session_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidInput {
@@ -278,10 +298,12 @@ impl Tool for StateGetTool {
                 field: Some("session_id".into()),
             })?;
 
-        self.backend
+        let result = self
+            .backend
             .state_get(key, session_id, namespace)
             .await
-            .map_err(mem_err)
+            .map_err(mem_err)?;
+        Ok(env.respond(result))
     }
 }
 
@@ -325,17 +347,18 @@ impl Tool for StateDeleteTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let key =
-            input
-                .get("key")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| ToolError::InvalidInput {
-                    message: "missing 'key'".into(),
-                    field: Some("key".into()),
-                })?;
-        let session_id = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let namespace = env.payload.get("namespace").and_then(|v| v.as_str());
+        let key = env
+            .payload
+            .get("key")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'key'".into(),
+                field: Some("key".into()),
+            })?;
+        let session_id = env
+            .payload
             .get("session_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidInput {
@@ -343,10 +366,12 @@ impl Tool for StateDeleteTool {
                 field: Some("session_id".into()),
             })?;
 
-        self.backend
+        let result = self
+            .backend
             .state_delete(key, session_id, namespace)
             .await
-            .map_err(mem_err)
+            .map_err(mem_err)?;
+        Ok(env.respond(result))
     }
 }
 
@@ -390,9 +415,10 @@ impl Tool for StateListTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let session_id = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let namespace = env.payload.get("namespace").and_then(|v| v.as_str());
+        let session_id = env
+            .payload
             .get("session_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidInput {
@@ -400,10 +426,12 @@ impl Tool for StateListTool {
                 field: Some("session_id".into()),
             })?;
 
-        self.backend
+        let result = self
+            .backend
             .state_list(session_id, namespace)
             .await
-            .map_err(mem_err)
+            .map_err(mem_err)?;
+        Ok(env.respond(result))
     }
 }
 
@@ -446,9 +474,10 @@ impl Tool for StateClearTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let namespace = input.get("namespace").and_then(|v| v.as_str());
-        let session_id = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let namespace = env.payload.get("namespace").and_then(|v| v.as_str());
+        let session_id = env
+            .payload
             .get("session_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidInput {
@@ -456,9 +485,11 @@ impl Tool for StateClearTool {
                 field: Some("session_id".into()),
             })?;
 
-        self.backend
+        let result = self
+            .backend
             .state_clear(session_id, namespace)
             .await
-            .map_err(mem_err)
+            .map_err(mem_err)?;
+        Ok(env.respond(result))
     }
 }

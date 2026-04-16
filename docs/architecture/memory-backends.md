@@ -121,7 +121,7 @@ impl Tool for SearchTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         let params = SearchParams::from_value(&input)?;
         self.backend.search(params).await.map_err(|e| ToolError::ExecutionFailed {
             message: e.to_string(),
@@ -145,46 +145,14 @@ Multi-tenancy is enforced at the tool level, not the backend level:
 4. The LLM cannot override the injected namespace — bindings overwrite any existing keys
 
 Backends handle namespace isolation internally:
-- **Postgres (smrti):** WHERE clause on namespace column, optionally RLS
 - **SurrealDB:** Native namespace/database isolation
-- **SQLite:** WHERE clause on namespace column
+- Other backends use WHERE clauses on namespace columns
 
 ---
 
-## Backend Implementations
+## Backend Implementation
 
-> **Backend implementations live in EXTERNAL repos, not in this monorepo.**
-> - `konf-tool-memory-smrti` lives in the [konf-dev/smrti](https://github.com/konf-dev/smrti) repo.
-> - SurrealDB and SQLite backends are **planned, not yet implemented**.
-
-### konf-tool-memory-smrti (Postgres + pgvector)
-
-Wraps the existing `smrti::Memory` crate.
-
-```rust
-pub struct SmrtiBackend {
-    memory: Arc<smrti_core::Memory>,
-}
-
-impl MemoryBackend for SmrtiBackend {
-    async fn search(&self, params: SearchParams) -> Result<Value, MemoryError> {
-        self.memory.search(/* map params */).await.map_err(Into::into)
-    }
-    // ... delegate all methods
-}
-
-pub async fn connect(config: &Value) -> Result<Arc<dyn MemoryBackend>, anyhow::Error> {
-    let smrti_config: SmrtiConfig = serde_json::from_value(config.clone())?;
-    let memory = smrti_core::Memory::connect(smrti_config).await?;
-    Ok(Arc::new(SmrtiBackend { memory: Arc::new(memory) }))
-}
-```
-
-**Supports:** hybrid/vector/text search, graph traversal, aggregation, event sourcing, full-text search, session state with TTL
-**Best for:** Server deployments with existing Postgres infrastructure
-**Requires:** PostgreSQL with pgvector extension
-
-### konf-tool-memory-surrealdb (Edge + Cloud universal)
+### konf-tool-memory-surreal (Default — Edge + Cloud universal)
 
 Single codebase, runs everywhere. Connection string determines deployment tier.
 
@@ -249,7 +217,7 @@ memory:
 #     config: { ... }
 ```
 
-Currently, all memory tools use the same backend. Multi-backend overrides are a planned extension point.
+Currently, all memory tools use the same backend. The `MemoryBackend` trait supports a single backend per deployment.
 
 ---
 

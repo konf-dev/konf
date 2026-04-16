@@ -24,13 +24,12 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tracing::{info, warn};
 
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolContext, ToolInfo};
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolInfo};
 
 use konf_runtime::scope::{Actor, ActorRole};
-use konf_runtime::{
-    JobId, Runtime, TimerRecord, MAX_FIXED_DELAY_MS, MIN_FIXED_DELAY_MS,
-};
+use konf_runtime::{JobId, Runtime, TimerRecord, MAX_FIXED_DELAY_MS, MIN_FIXED_DELAY_MS};
 
 /// `schedule:create` — create a durable timer.
 pub struct ScheduleTool {
@@ -86,11 +85,16 @@ impl Tool for ScheduleTool {
         }
     }
 
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
-        let scheduler = self.runtime.scheduler().ok_or_else(|| ToolError::ExecutionFailed {
-            message: "scheduler not available (no persistent storage configured)".into(),
-            retryable: false,
-        })?;
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let scheduler = self
+            .runtime
+            .scheduler()
+            .ok_or_else(|| ToolError::ExecutionFailed {
+                message: "scheduler not available (no persistent storage configured)".into(),
+                retryable: false,
+            })?;
+
+        let input = &env.payload;
 
         let workflow_id = input
             .get("workflow")
@@ -107,28 +111,25 @@ impl Tool for ScheduleTool {
         }
 
         let workflow_input = input.get("input").cloned().unwrap_or_else(|| json!({}));
-        let cron_expr = input.get("cron").and_then(|v| v.as_str()).map(str::to_string);
-        let delay_ms = input
-            .get("delay_ms")
-            .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())));
-        let repeat = input.get("repeat").and_then(|v| v.as_bool()).unwrap_or(false);
-
-        // Build the record. Namespace and actor come from the ToolContext's
-        // metadata when available; fall back to defaults otherwise. The
-        // namespace binding should have been injected by VirtualizedTool.
-        let namespace = ctx
-            .metadata
-            .get("namespace")
+        let cron_expr = input
+            .get("cron")
             .and_then(|v| v.as_str())
-            .unwrap_or("konf:schedule:anonymous")
-            .to_string();
+            .map(str::to_string);
+        let delay_ms = input.get("delay_ms").and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        });
+        let repeat = input
+            .get("repeat")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Build the record. Namespace and actor come from the typed
+        // envelope fields. The namespace binding should have been
+        // injected by VirtualizedTool into the payload.
+        let namespace = env.namespace.0.clone();
         let actor = Actor {
-            id: ctx
-                .metadata
-                .get("actor_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("schedule-tool")
-                .to_string(),
+            id: env.actor_id.0.clone(),
             role: ActorRole::User,
         };
 
@@ -137,7 +138,7 @@ impl Tool for ScheduleTool {
             workflow: workflow_id.to_string(),
             input: workflow_input,
             namespace,
-            capabilities: ctx.capabilities.clone(),
+            capabilities: env.capabilities.to_patterns(),
             actor,
             mode: konf_runtime::TimerMode::Once, // overridden by schedule_* methods
             created_at: chrono::Utc::now(),
@@ -162,8 +163,7 @@ impl Tool for ScheduleTool {
                         retryable: false,
                     });
                 }
-                let run_at =
-                    chrono::Utc::now() + chrono::Duration::milliseconds(ms as i64);
+                let run_at = chrono::Utc::now() + chrono::Duration::milliseconds(ms as i64);
                 scheduler
                     .schedule_once(record, run_at)
                     .await
@@ -178,11 +178,11 @@ impl Tool for ScheduleTool {
         };
 
         info!(workflow = %workflow_id, schedule_id = %id, "schedule created");
-        Ok(json!({
+        Ok(env.respond(json!({
             "scheduled": true,
             "workflow": workflow_id,
             "schedule_id": id.to_string(),
-        }))
+        })))
     }
 }
 
@@ -222,23 +222,29 @@ impl Tool for CancelScheduleTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let scheduler = self.runtime.scheduler().ok_or_else(|| ToolError::ExecutionFailed {
-            message: "scheduler not available (no persistent storage configured)".into(),
-            retryable: false,
-        })?;
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let scheduler = self
+            .runtime
+            .scheduler()
+            .ok_or_else(|| ToolError::ExecutionFailed {
+                message: "scheduler not available (no persistent storage configured)".into(),
+                retryable: false,
+            })?;
 
-        let id_str = input
+        let id_str = env
+            .payload
             .get("schedule_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::ExecutionFailed {
                 message: "missing required field: schedule_id".into(),
                 retryable: false,
             })?;
-        let id: JobId = id_str.parse().map_err(|e: uuid::Error| ToolError::ExecutionFailed {
-            message: format!("invalid schedule_id (expected UUID): {e}"),
-            retryable: false,
-        })?;
+        let id: JobId = id_str
+            .parse()
+            .map_err(|e: uuid::Error| ToolError::ExecutionFailed {
+                message: format!("invalid schedule_id (expected UUID): {e}"),
+                retryable: false,
+            })?;
 
         let cancelled = scheduler.cancel(id).await.map_err(scheduler_err)?;
         if !cancelled {
@@ -248,7 +254,7 @@ impl Tool for CancelScheduleTool {
                 retryable: false,
             });
         }
-        Ok(json!({ "cancelled": true, "schedule_id": id.to_string() }))
+        Ok(env.respond(json!({ "cancelled": true, "schedule_id": id.to_string() })))
     }
 }
 

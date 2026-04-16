@@ -27,9 +27,9 @@ Rust code provides mechanisms: dispatch, isolation, resource limits, streaming. 
 
 ### 4. Backend-agnostic storage
 
-The `MemoryBackend` trait (in `konf-tool-memory/src/lib.rs`) abstracts storage behind a standard interface. Agent logic is identical whether backed by Postgres, SQLite, or SurrealDB. Switching backends is a config change, not a code change.
+The `MemoryBackend` trait (in `konf-tool-memory/src/lib.rs`) abstracts storage behind a standard interface. Agent logic is identical whether backed by SurrealDB or Postgres. Switching backends is a config change, not a code change.
 
-**Status:** Implemented with one backend (Postgres via smrti). The abstraction exists but is not yet proven with a second backend.
+**Status:** Implemented with SurrealDB (default, embedded) and optional Postgres backend.
 
 ### 5. Deterministic control of non-deterministic models
 

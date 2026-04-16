@@ -2,65 +2,24 @@
 //!
 //! The ProcessTable is an in-memory concurrent hashmap (papaya).
 //! It is ephemeral — lost on restart. Completed run history
-//! survives in the runtime_events Postgres table.
+//! survives in the journal.
+//!
+//! `RunStatus`, `NodeStatus`, and `ActiveNode` are defined in
+//! `konflux_substrate::process` and re-exported here.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::RunId;
 use crate::scope::Actor;
 
-/// Status of a workflow run.
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum RunStatus {
-    Pending,
-    Running,
-    Completed {
-        duration_ms: u64,
-        output: serde_json::Value,
-    },
-    Failed {
-        error: String,
-        duration_ms: u64,
-    },
-    Cancelled {
-        reason: String,
-        duration_ms: u64,
-    },
-}
-
-impl RunStatus {
-    pub fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::Completed { .. } | Self::Failed { .. } | Self::Cancelled { .. }
-        )
-    }
-}
-
-/// A node currently executing within a workflow run.
-#[derive(Debug, Clone, Serialize)]
-pub struct ActiveNode {
-    pub node_id: String,
-    pub tool_name: String,
-    pub started_at: DateTime<Utc>,
-    pub status: NodeStatus,
-}
-
-/// Status of an active node.
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum NodeStatus {
-    Running,
-    Retrying { attempt: u32, max: u32 },
-}
+// Re-export substrate-defined types so existing imports still work.
+pub use konflux_substrate::process::{ActiveNode, NodeStatus, RunStatus};
 
 /// A tracked workflow execution.
 /// Fields that are updated after creation use interior mutability (Mutex).

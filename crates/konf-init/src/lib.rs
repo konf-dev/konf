@@ -17,12 +17,14 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use tracing::{debug, info};
 
-use konf_runtime::{KonfStorage, RedbScheduler, Retention, Runtime};
-use konflux::engine::Engine;
+use konf_runtime::{
+    FanoutJournalStore, JournalStore, KonfStorage, RedbScheduler, Retention, Runtime,
+};
+use konflux_substrate::engine::Engine;
 
 pub use config::{
-    AuthConfig, PlatformConfig, ProductConfig, RoleConfig, ServerConfig, ShellConfig,
-    ToolGuardConfig, ToolsConfig,
+    AuthConfig, JournalConfig, PlatformConfig, ProductConfig, RoleConfig, ServerConfig,
+    ShellConfig, ToolGuardConfig, ToolsConfig,
 };
 
 /// A fully booted Konf instance, ready for transport shells to serve.
@@ -41,6 +43,10 @@ pub struct KonfInstance {
     /// Persistent-storage handle (journal + future scheduler + runner
     /// intents). `None` on edge deployments that opt out of persistence.
     pub storage: Option<Arc<KonfStorage>>,
+
+    /// Background TTL sweeper for expired journal entries. Dropped on
+    /// instance shutdown (abort-on-drop).
+    _sweeper: Option<konf_runtime::journal::sweep::TtlSweeper>,
 }
 
 /// Boot the Konf platform from a config directory.
@@ -94,7 +100,7 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     let engine = Engine::with_config(config.engine.clone());
 
     // 5. Register builtins
-    konflux::builtin::register_builtins(&engine);
+    konflux_substrate::builtin::register_builtins(&engine);
 
     // 6. Register tools from config
     register_tools(&engine, &product_config.tools).await?;
@@ -135,9 +141,9 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
             let retention = Retention {
                 days: db.retention_days,
             };
-            let storage = KonfStorage::open(&path, retention)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to open storage at {}: {e}", path.display()))?;
+            let storage = KonfStorage::open(&path, retention).await.map_err(|e| {
+                anyhow::anyhow!("Failed to open storage at {}: {e}", path.display())
+            })?;
             info!(path = %path.display(), "Storage opened (redb)");
             Some(Arc::new(storage))
         }
@@ -148,13 +154,77 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     };
 
     // 9. Create runtime
-    let journal = storage.as_ref().map(|s| s.journal_arc());
+    //
+    // Journal wiring: if both a redb primary (short-retention audit) AND a
+    // surreal memory backend are configured, wrap them in a FanoutJournalStore
+    // so every journal entry lands in both stores. This is the Stigmergic
+    // Engine's fan-out pattern (see docs/architecture/durability.md §fanout
+    // and konf-genesis/docs/STIGMERGIC_ENGINE.md).
+    //
+    // The fanout is opinionated-on: if a surreal memory backend is mounted
+    // we assume the user wants the long-term interaction graph populated.
+    // Users can disable by removing the memory backend or by not configuring
+    // redb. Failure isolation is guaranteed by FanoutJournalStore — secondary
+    // outages never compromise primary audit integrity.
+    let primary_journal: Option<Arc<dyn JournalStore>> = storage.as_ref().map(|s| s.journal_arc());
+
+    let journal: Option<Arc<dyn JournalStore>> = match (
+        &primary_journal,
+        &product_config.tools.memory,
+    ) {
+        (Some(primary), Some(mem_config)) if mem_config.backend == "surreal" => {
+            #[cfg(feature = "memory-surreal")]
+            {
+                match konf_tool_memory_surreal::connect_journal(&mem_config.config).await {
+                    Ok(secondary) => {
+                        info!("Journal fan-out enabled: redb primary + surreal secondary");
+                        let fanout: Arc<dyn JournalStore> =
+                            Arc::new(FanoutJournalStore::new(primary.clone(), vec![secondary]));
+                        Some(fanout)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "Failed to open surreal journal secondary; continuing with primary-only"
+                        );
+                        Some(primary.clone())
+                    }
+                }
+            }
+            #[cfg(not(feature = "memory-surreal"))]
+            {
+                Some(primary.clone())
+            }
+        }
+        _ => primary_journal.clone(),
+    };
+
     let runtime = Arc::new(
         Runtime::new(engine.clone(), journal)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to initialize runtime: {e}"))?,
     );
     info!("Runtime initialized");
+
+    // 9-sweep. Spawn TTL sweeper if journal exists and sweep is enabled.
+    let sweeper = if config.journal.sweep_interval_secs > 0 {
+        // Clone the journal Arc used by the runtime (the fanout-wrapped one).
+        // `primary_journal` is the raw redb journal; `journal` may be a fanout.
+        // We use `primary_journal` here — sweep only needs the durable store.
+        primary_journal.as_ref().map(|j| {
+            let s = konf_runtime::journal::sweep::TtlSweeper::spawn(
+                j.clone(),
+                std::time::Duration::from_secs(config.journal.sweep_interval_secs),
+            );
+            info!(
+                interval_secs = config.journal.sweep_interval_secs,
+                "TTL sweeper started"
+            );
+            s
+        })
+    } else {
+        None
+    };
 
     // 9a. Install durable scheduler (if storage is configured).
     if let Some(ref storage) = storage {
@@ -223,7 +293,10 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
         let intents = s.runner_intents();
         match intents.list_unterminated().await {
             Ok(unterminated) if !unterminated.is_empty() => {
-                info!(count = unterminated.len(), "replaying unterminated runner intents");
+                info!(
+                    count = unterminated.len(),
+                    "replaying unterminated runner intents"
+                );
                 for intent in unterminated {
                     let run_id = intent.run_id.clone();
                     let workflow = intent.workflow.clone();
@@ -231,11 +304,13 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
                     match inline_concrete.replay(intent).await {
                         Ok(_) => {
                             info!(run_id = %run_id, "replayed intent");
-                            runtime.event_bus().emit(konf_runtime::RunEvent::IntentReplayed {
-                                run_id: run_id.clone(),
-                                workflow,
-                                replay_count,
-                            });
+                            runtime
+                                .event_bus()
+                                .emit(konf_runtime::RunEvent::IntentReplayed {
+                                    run_id: run_id.clone(),
+                                    workflow,
+                                    replay_count,
+                                });
                         }
                         Err(e) => tracing::warn!(run_id = %run_id, error = %e, "replay failed"),
                     }
@@ -284,6 +359,7 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
         config,
         product_config,
         storage,
+        _sweeper: sweeper,
     })
 }
 
@@ -340,21 +416,26 @@ async fn register_schedules(
 
     // Build an index of existing timers keyed by (workflow, cron, namespace)
     // so we don't re-register duplicates on config:reload or restart.
-    let existing = scheduler.list(None).await.map_err(|e| anyhow::anyhow!("scheduler list: {e}"))?;
+    let existing = scheduler
+        .list(None)
+        .await
+        .map_err(|e| anyhow::anyhow!("scheduler list: {e}"))?;
     let existing_keys: std::collections::HashSet<(String, String, String)> = existing
         .iter()
         .filter_map(|s| match &s.mode {
-            konf_runtime::TimerMode::Cron { expr } => Some((
-                s.workflow.clone(),
-                expr.clone(),
-                s.namespace.clone(),
-            )),
+            konf_runtime::TimerMode::Cron { expr } => {
+                Some((s.workflow.clone(), expr.clone(), s.namespace.clone()))
+            }
             _ => None,
         })
         .collect();
 
     for entry in entries {
-        let key = (entry.workflow.clone(), entry.cron.clone(), entry.namespace.clone());
+        let key = (
+            entry.workflow.clone(),
+            entry.cron.clone(),
+            entry.namespace.clone(),
+        );
         if existing_keys.contains(&key) {
             tracing::debug!(workflow = %entry.workflow, cron = %entry.cron, "schedules.yaml entry already registered, skipping");
             continue;
@@ -582,9 +663,9 @@ struct FileResource {
 }
 
 #[async_trait::async_trait]
-impl konflux::Resource for FileResource {
-    fn info(&self) -> konflux::ResourceInfo {
-        konflux::ResourceInfo {
+impl konflux_substrate::Resource for FileResource {
+    fn info(&self) -> konflux_substrate::ResourceInfo {
+        konflux_substrate::ResourceInfo {
             uri: self.uri.clone(),
             name: self.name.clone(),
             description: self.description.clone(),
@@ -592,9 +673,9 @@ impl konflux::Resource for FileResource {
         }
     }
 
-    async fn read(&self) -> Result<serde_json::Value, konflux::ResourceError> {
+    async fn read(&self) -> Result<serde_json::Value, konflux_substrate::ResourceError> {
         let content = std::fs::read_to_string(&self.path).map_err(|e| {
-            konflux::ResourceError::ReadFailed(format!("{}: {e}", self.path.display()))
+            konflux_substrate::ResourceError::ReadFailed(format!("{}: {e}", self.path.display()))
         })?;
         Ok(serde_json::Value::String(content))
     }
@@ -626,9 +707,9 @@ impl ConfigReloadTool {
 }
 
 #[async_trait::async_trait]
-impl konflux::tool::Tool for ConfigReloadTool {
-    fn info(&self) -> konflux::tool::ToolInfo {
-        konflux::tool::ToolInfo {
+impl konflux_substrate::tool::Tool for ConfigReloadTool {
+    fn info(&self) -> konflux_substrate::tool::ToolInfo {
+        konflux_substrate::tool::ToolInfo {
             name: "config:reload".into(),
             description: "Reload product configuration (workflows, prompts, tools) from disk. Re-parses all workflow YAML files and re-registers them as tools.".into(),
             input_schema: serde_json::json!({
@@ -638,23 +719,25 @@ impl konflux::tool::Tool for ConfigReloadTool {
             capabilities: vec!["config:reload".into()],
             supports_streaming: false,
             output_schema: None,
-            annotations: konflux::tool::ToolAnnotations::default(),
+            annotations: konflux_substrate::tool::ToolAnnotations::default(),
         }
     }
 
     async fn invoke(
         &self,
-        _input: serde_json::Value,
-        _ctx: &konflux::tool::ToolContext,
-    ) -> Result<serde_json::Value, konflux::error::ToolError> {
+        env: konflux_substrate::envelope::Envelope<serde_json::Value>,
+    ) -> Result<
+        konflux_substrate::envelope::Envelope<serde_json::Value>,
+        konflux_substrate::error::ToolError,
+    > {
         let workflows_dir = self.config_dir.join("workflows");
 
         if !workflows_dir.is_dir() {
-            return Ok(serde_json::json!({
+            return Ok(env.respond(serde_json::json!({
                 "reloaded": true,
                 "workflows_loaded": 0,
                 "message": "No workflows directory found"
-            }));
+            })));
         }
 
         // Remove existing workflow_* tools before re-registering
@@ -721,14 +804,14 @@ impl konflux::tool::Tool for ConfigReloadTool {
                     "Config reloaded"
                 );
 
-                Ok(serde_json::json!({
+                Ok(env.respond(serde_json::json!({
                     "reloaded": true,
                     "workflows_removed": workflow_tool_names.len(),
                     "workflows_registered": new_workflow_count,
                     "total_tools": total_tools,
-                }))
+                })))
             }
-            Err(e) => Err(konflux::error::ToolError::ExecutionFailed {
+            Err(e) => Err(konflux_substrate::error::ToolError::ExecutionFailed {
                 message: format!("Config reload failed: {e}"),
                 retryable: true,
             }),
@@ -809,22 +892,7 @@ fn register_workflows(
 
         // Register as a tool if flagged
         if workflow.register_as_tool {
-            let scope = konf_runtime::scope::ExecutionScope {
-                namespace: "konf:system".into(),
-                capabilities: workflow
-                    .capabilities
-                    .iter()
-                    .map(|c| konf_runtime::scope::CapabilityGrant::new(c.as_str()))
-                    .collect(),
-                limits: konf_runtime::scope::ResourceLimits::default(),
-                actor: konf_runtime::scope::Actor {
-                    id: "system".into(),
-                    role: konf_runtime::scope::ActorRole::System,
-                },
-                depth: 0,
-            };
-
-            let tool = konf_runtime::WorkflowTool::new(workflow.clone(), runtime.clone(), scope);
+            let tool = konf_runtime::WorkflowTool::new(workflow.clone(), runtime.clone());
 
             engine.register_tool(Arc::new(tool));
             info!(workflow = %workflow.id, "Registered workflow as tool: workflow:{}", workflow.id);
@@ -837,7 +905,7 @@ fn register_workflows(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use konflux::Resource;
+    use konflux_substrate::Resource;
 
     #[test]
     fn test_default_boot_config() {
@@ -936,7 +1004,7 @@ nodes:
         .unwrap();
 
         let engine = Engine::new();
-        konflux::builtin::register_builtins(&engine);
+        konflux_substrate::builtin::register_builtins(&engine);
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let runtime =

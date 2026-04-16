@@ -1,7 +1,16 @@
 //! Execution scope — capabilities, resource limits, and actor identity.
 //!
-//! Every workflow run is scoped to a namespace with specific capability grants.
-//! The capability lattice ensures children can only attenuate, never amplify.
+//! Every workflow run is scoped to a namespace with specific capability
+//! grants. The capability lattice ensures children can only attenuate,
+//! never amplify.
+//!
+//! `ExecutionScope` carries **configuration**: who the actor is, what
+//! they're allowed to do, and within what bounds. It does NOT carry
+//! runtime state — for that see [`crate::ExecutionContext`], which
+//! holds the per-dispatch `trace_id`, `parent_interaction_id`, and
+//! `session_id`. This split is deliberate (Phase F2.R2 of the
+//! Stigmergic Engine plan): `ExecutionScope` is immutable once
+//! constructed; `ExecutionContext` mutates as dispatches nest.
 
 use std::collections::HashMap;
 
@@ -60,26 +69,12 @@ impl CapabilityGrant {
 
     /// Check if this grant matches a tool name. Returns bindings if matched.
     pub fn matches(&self, tool_name: &str) -> Option<&HashMap<String, Value>> {
-        if matches_capability_pattern(&self.pattern, tool_name) {
+        if konflux_substrate::envelope::Capability::new(&self.pattern).matches(tool_name) {
             Some(&self.bindings)
         } else {
             None
         }
     }
-}
-
-/// Check if a capability pattern matches a tool name.
-/// Uses the same logic as konflux::capability::matches_capability.
-fn matches_capability_pattern(pattern: &str, tool_name: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if let Some(prefix) = pattern.strip_suffix(":*") {
-        // "memory:*" matches "memory:search" but not "memorysearch"
-        return tool_name.starts_with(prefix)
-            && tool_name.get(prefix.len()..prefix.len() + 1) == Some(":");
-    }
-    pattern == tool_name
 }
 
 impl ExecutionScope {
@@ -123,10 +118,8 @@ impl ExecutionScope {
                 if let Some(parent_prefix) = parent_grant.pattern.strip_suffix(":*") {
                     // Child is a specific tool under the parent prefix
                     if !child_grant.pattern.ends_with(":*") {
-                        return matches_capability_pattern(
-                            &parent_grant.pattern,
-                            &child_grant.pattern,
-                        );
+                        return konflux_substrate::envelope::Capability::new(&parent_grant.pattern)
+                            .matches(&child_grant.pattern);
                     }
                     // Child is also a prefix — must be equal or more specific
                     if let Some(child_prefix) = child_grant.pattern.strip_suffix(":*") {
@@ -175,12 +168,85 @@ impl ExecutionScope {
         Ok(())
     }
 
+    /// Reconstruct an ExecutionScope from a substrate Envelope.
+    ///
+    /// Used by WorkflowDispatchTool: when a workflow-as-tool is invoked,
+    /// the caller's scope is carried in the Envelope's typed fields and
+    /// reconstructed here so the inner workflow inherits the caller's
+    /// namespace, actor, and capabilities.
+    pub fn from_envelope(env: &konflux_substrate::envelope::Envelope<serde_json::Value>) -> Self {
+        let capabilities = env
+            .capabilities
+            .patterns()
+            .into_iter()
+            .map(CapabilityGrant::new)
+            .collect();
+
+        let actor_role = env
+            .metadata
+            .0
+            .get("actor_role")
+            .and_then(|v| v.as_str())
+            .map(|s| match s {
+                "infra_admin" => ActorRole::InfraAdmin,
+                "product_admin" => ActorRole::ProductAdmin,
+                "user" => ActorRole::User,
+                "infra_agent" => ActorRole::InfraAgent,
+                "product_agent" => ActorRole::ProductAgent,
+                "user_agent" => ActorRole::UserAgent,
+                "system" => ActorRole::System,
+                _ => ActorRole::User,
+            })
+            .unwrap_or(ActorRole::System);
+
+        let depth = env
+            .metadata
+            .0
+            .get("depth")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        ExecutionScope {
+            namespace: env.namespace.0.clone(),
+            capabilities,
+            limits: ResourceLimits::default(),
+            actor: Actor {
+                id: env.actor_id.0.clone(),
+                role: actor_role,
+            },
+            depth,
+        }
+    }
+
     /// Get the list of capability patterns (for passing to konflux engine).
     pub fn capability_patterns(&self) -> Vec<String> {
         self.capabilities
             .iter()
             .map(|g| g.pattern.clone())
             .collect()
+    }
+
+    /// Build an `Envelope` from this scope's identity fields.
+    ///
+    /// This is the composition relationship: the runtime's scope provides
+    /// the identity (namespace, actor, capabilities) and the substrate's
+    /// Envelope carries it across dispatch boundaries.
+    pub fn to_envelope(
+        &self,
+        target: &str,
+        payload: serde_json::Value,
+        trace_id: uuid::Uuid,
+        stream_id: &str,
+    ) -> konflux_substrate::envelope::Envelope<serde_json::Value> {
+        konflux_substrate::envelope::Envelope::for_tool_dispatch(
+            target,
+            payload,
+            &self.capability_patterns(),
+            trace_id,
+            &self.namespace,
+            &self.actor.id,
+            stream_id,
+        )
     }
 }
 
@@ -197,6 +263,8 @@ pub struct ResourceLimits {
     pub max_child_depth: usize,
     /// Maximum concurrent runs per namespace (default: 20).
     pub max_active_runs_per_namespace: usize,
+    /// Event bus broadcast channel capacity.
+    pub event_bus_capacity: usize,
 }
 
 impl Default for ResourceLimits {
@@ -207,6 +275,7 @@ impl Default for ResourceLimits {
             max_concurrent_nodes: 50,
             max_child_depth: 10,
             max_active_runs_per_namespace: 20,
+            event_bus_capacity: 1024,
         }
     }
 }
@@ -228,6 +297,9 @@ impl ResourceLimits {
         }
         if self.max_active_runs_per_namespace == 0 {
             return Err("max_active_runs_per_namespace must be > 0".into());
+        }
+        if self.event_bus_capacity == 0 {
+            return Err("event_bus_capacity must be > 0".into());
         }
         Ok(())
     }
@@ -480,6 +552,44 @@ mod tests {
         // Specific tool under prefix is allowed
         let child = parent.child_scope(vec![CapabilityGrant::new("memory:search")], None);
         assert!(child.is_ok());
+    }
+
+    #[test]
+    fn test_max_depth_prevents_deep_nesting() {
+        let scope = ExecutionScope {
+            namespace: "konf:test".into(),
+            capabilities: vec![CapabilityGrant::new("*")],
+            limits: ResourceLimits {
+                max_child_depth: 3,
+                ..ResourceLimits::default()
+            },
+            actor: Actor {
+                id: "test".into(),
+                role: ActorRole::System,
+            },
+            depth: 0,
+        };
+
+        // Depth 0 → 1 → 2: OK
+        let child1 = scope
+            .child_scope(vec![CapabilityGrant::new("*")], None)
+            .unwrap();
+        assert_eq!(child1.depth, 1);
+        let child2 = child1
+            .child_scope(vec![CapabilityGrant::new("*")], None)
+            .unwrap();
+        assert_eq!(child2.depth, 2);
+
+        // Depth 2 → validate_start should still pass (depth < max_child_depth=3)
+        let table = crate::ProcessTable::new();
+        assert!(child2.validate_start(&table).is_ok());
+
+        // Depth 3 → validate_start rejects
+        let child3 = child2
+            .child_scope(vec![CapabilityGrant::new("*")], None)
+            .unwrap();
+        assert_eq!(child3.depth, 3);
+        assert!(child3.validate_start(&table).is_err());
     }
 
     #[test]

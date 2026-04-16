@@ -29,17 +29,31 @@
 //! // then: konf_tool_memory::register(engine, backend).await?;
 //! # Ok(()) }
 //! ```
+//!
+//! ## Journal secondary for the Stigmergic Engine
+//!
+//! In addition to the `MemoryBackend`, this crate exposes
+//! [`SurrealJournalStore`] — an implementation of
+//! [`konf_runtime::JournalStore`] over the SurrealDB `event` table. When a
+//! deployment configures both a redb primary (short-retention audit) and a
+//! SurrealDB memory backend, `konf-init` wires them into a
+//! `FanoutJournalStore` so every interaction lands in both the local
+//! audit log and the long-term queryable graph. Call
+//! [`connect_journal`] to build one directly; see
+//! `konf-genesis/docs/STIGMERGIC_ENGINE.md` for the broader design.
 #![warn(missing_docs)]
 
 mod backend;
 mod config;
 mod connect;
 mod error;
+mod journal_store;
 mod schema;
 mod search;
 mod session;
 
 pub use backend::SurrealBackend;
 pub use config::{SurrealConfig, SurrealMode};
-pub use connect::connect;
+pub use connect::{connect, connect_journal};
 pub use error::map_db_error;
+pub use journal_store::SurrealJournalStore;

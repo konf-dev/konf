@@ -10,7 +10,7 @@ description = "HTTP server for the Konf agentic AI platform — a thin transport
 # Platform (bootstrap + runtime)
 konf-init = { path = "../konf-init", default-features = false, features = ["memory-surreal"] }
 konf-runtime = { path = "../konf-runtime" }
-konflux-core = { path = "../konflux-core" }
+konflux-substrate = { path = "../konflux-substrate" }
 
 # MCP server (optional)
 konf-mcp = { path = "../konf-mcp", optional = true }

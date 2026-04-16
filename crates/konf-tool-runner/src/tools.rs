@@ -13,9 +13,10 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tracing::info;
 
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
-use konflux::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
+use konflux_substrate::Engine;
 
 use crate::runner::{Runner, WorkflowSpec};
 
@@ -73,8 +74,9 @@ impl Tool for SpawnTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let workflow = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let workflow = env
+            .payload
             .get("workflow")
             .and_then(Value::as_str)
             .ok_or_else(|| ToolError::ExecutionFailed {
@@ -82,20 +84,36 @@ impl Tool for SpawnTool {
                 retryable: false,
             })?
             .to_string();
-        let wf_input = input.get("input").cloned().unwrap_or_else(|| json!({}));
+        let wf_input = env
+            .payload
+            .get("input")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+
+        // R1: reconstruct the parent scope + context from the caller's
+        // Envelope. Capabilities are in `env.capabilities`; namespace,
+        // actor, trace, and session come from the typed envelope fields
+        // and metadata. This is how the substrate transmits the parent
+        // scope through the Envelope without the spawn tool having to
+        // know the full `ExecutionScope` shape.
+        let parent_scope = reconstruct_parent_scope(&env)?;
+        let parent_ctx = reconstruct_parent_context(&env)?;
+
         let id = self
             .runner
             .spawn(WorkflowSpec {
                 workflow: workflow.clone(),
                 input: wf_input,
+                parent_scope,
+                parent_ctx,
             })
             .await
             .map_err(runner_err)?;
-        Ok(json!({
+        Ok(env.respond(json!({
             "run_id": id,
             "workflow": workflow,
             "backend": self.runner.name(),
-        }))
+        })))
     }
 }
 
@@ -139,8 +157,8 @@ impl Tool for StatusTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let run_id = require_run_id(&input, "runner:status")?;
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let run_id = require_run_id(&env.payload, "runner:status")?;
         let record = self
             .runner
             .registry()
@@ -150,7 +168,7 @@ impl Tool for StatusTool {
                 message: format!("run_id {run_id} not found"),
                 retryable: false,
             })?;
-        Ok(serde_json::to_value(&record).unwrap_or(Value::Null))
+        Ok(env.respond(serde_json::to_value(&record).unwrap_or(Value::Null)))
     }
 }
 
@@ -197,9 +215,10 @@ impl Tool for WaitTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let run_id = require_run_id(&input, "runner:wait")?;
-        let timeout = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let run_id = require_run_id(&env.payload, "runner:wait")?;
+        let timeout = env
+            .payload
             .get("timeout_secs")
             .and_then(Value::as_u64)
             .unwrap_or(300);
@@ -214,7 +233,7 @@ impl Tool for WaitTool {
                 message: format!("run_id {run_id} not found"),
                 retryable: false,
             })?;
-        Ok(serde_json::to_value(&record).unwrap_or(Value::Null))
+        Ok(env.respond(serde_json::to_value(&record).unwrap_or(Value::Null)))
     }
 }
 
@@ -257,10 +276,10 @@ impl Tool for CancelTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let run_id = require_run_id(&input, "runner:cancel")?;
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let run_id = require_run_id(&env.payload, "runner:cancel")?;
         let cancelled = self.runner.cancel(&run_id).await.map_err(runner_err)?;
-        Ok(json!({ "run_id": run_id, "cancelled": cancelled }))
+        Ok(env.respond(json!({ "run_id": run_id, "cancelled": cancelled })))
     }
 }
 
@@ -284,4 +303,65 @@ fn runner_err(err: crate::error::RunnerError) -> ToolError {
         message: err.to_string(),
         retryable: false,
     }
+}
+
+/// R1: reconstruct the parent `ExecutionScope` from the typed Envelope.
+/// The envelope carries capabilities, namespace, and actor_id as typed
+/// fields. Actor role comes from metadata (the runtime stamps it there
+/// at dispatch). Returns a scope suitable as the attenuation parent for
+/// the spawn.
+fn reconstruct_parent_scope(
+    env: &Envelope<Value>,
+) -> Result<konf_runtime::scope::ExecutionScope, ToolError> {
+    let namespace = env.namespace.0.clone();
+    let actor_id = env.actor_id.0.clone();
+    let actor_role = env
+        .metadata
+        .0
+        .get("actor_role")
+        .and_then(Value::as_str)
+        .and_then(|s| match s {
+            "infra_admin" => Some(konf_runtime::scope::ActorRole::InfraAdmin),
+            "product_admin" => Some(konf_runtime::scope::ActorRole::ProductAdmin),
+            "user" => Some(konf_runtime::scope::ActorRole::User),
+            "infra_agent" => Some(konf_runtime::scope::ActorRole::InfraAgent),
+            "product_agent" => Some(konf_runtime::scope::ActorRole::ProductAgent),
+            "user_agent" => Some(konf_runtime::scope::ActorRole::UserAgent),
+            "system" => Some(konf_runtime::scope::ActorRole::System),
+            _ => None,
+        })
+        .unwrap_or(konf_runtime::scope::ActorRole::System);
+
+    let capability_patterns = env.capabilities.to_patterns();
+
+    Ok(konf_runtime::scope::ExecutionScope {
+        namespace,
+        capabilities: capability_patterns
+            .iter()
+            .map(|p| konf_runtime::scope::CapabilityGrant::new(p.clone()))
+            .collect(),
+        limits: konf_runtime::scope::ResourceLimits::default(),
+        actor: konf_runtime::scope::Actor {
+            id: actor_id,
+            role: actor_role,
+        },
+        depth: 0,
+    })
+}
+
+fn reconstruct_parent_context(
+    env: &Envelope<Value>,
+) -> Result<konf_runtime::ExecutionContext, ToolError> {
+    let session_id = env
+        .metadata
+        .0
+        .get("session_id")
+        .and_then(Value::as_str)
+        .unwrap_or("runner")
+        .to_string();
+    let trace_id = env.trace_id.0;
+
+    Ok(konf_runtime::ExecutionContext::with_trace(
+        trace_id, session_id,
+    ))
 }

@@ -22,9 +22,10 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use konflux::error::ToolError;
-use konflux::stream::StreamSender;
-use konflux::tool::{Tool, ToolContext, ToolInfo};
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::stream::StreamSender;
+use konflux_substrate::tool::{Tool, ToolInfo};
 
 /// A tool wrapper that evaluates deny/allow rules before delegating to the inner tool.
 ///
@@ -85,19 +86,22 @@ impl Tool for GuardedTool {
         self.inner.info()
     }
 
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
-        self.evaluate(&input)?;
-        self.inner.invoke(input, ctx).await
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        self.evaluate(&env.payload)?;
+        self.inner.invoke(env).await
+    }
+
+    fn projection(&self) -> Option<&dyn konflux_substrate::projection::StateProjection> {
+        self.inner.projection()
     }
 
     async fn invoke_streaming(
         &self,
-        input: Value,
-        ctx: &ToolContext,
+        env: Envelope<Value>,
         sender: StreamSender,
-    ) -> Result<Value, ToolError> {
-        self.evaluate(&input)?;
-        self.inner.invoke_streaming(input, ctx, sender).await
+    ) -> Result<Envelope<Value>, ToolError> {
+        self.evaluate(&env.payload)?;
+        self.inner.invoke_streaming(env, sender).await
     }
 }
 
@@ -266,8 +270,6 @@ fn glob_matches(pattern: &str, text: &str) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::collections::HashMap;
-
     // -- Predicate tests --
 
     #[test]
@@ -475,19 +477,12 @@ mod tests {
                 annotations: Default::default(),
             }
         }
-        async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-            Ok(input)
+        async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+            Ok(env.respond(env.payload.clone()))
         }
     }
 
-    fn test_ctx() -> ToolContext {
-        ToolContext {
-            capabilities: vec![],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: HashMap::new(),
-        }
-    }
+    use konflux_substrate::envelope::Envelope;
 
     #[tokio::test]
     async fn deny_rule_blocks_matching_input() {
@@ -504,7 +499,7 @@ mod tests {
         );
 
         let result = tool
-            .invoke(json!({"command": "sudo rm -rf /"}), &test_ctx())
+            .invoke(Envelope::test(json!({"command": "sudo rm -rf /"})))
             .await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -526,7 +521,7 @@ mod tests {
         );
 
         let result = tool
-            .invoke(json!({"command": "ls /tmp"}), &test_ctx())
+            .invoke(Envelope::test(json!({"command": "ls /tmp"})))
             .await;
         assert!(result.is_ok());
     }
@@ -553,11 +548,11 @@ mod tests {
         );
 
         // "ls" matches the Allow rule first → passes
-        let result = tool.invoke(json!({"command": "ls"}), &test_ctx()).await;
+        let result = tool.invoke(Envelope::test(json!({"command": "ls"}))).await;
         assert!(result.is_ok());
 
         // "rm" doesn't match Allow, hits Deny → blocked
-        let result = tool.invoke(json!({"command": "rm"}), &test_ctx()).await;
+        let result = tool.invoke(Envelope::test(json!({"command": "rm"}))).await;
         assert!(result.is_err());
     }
 
@@ -575,7 +570,7 @@ mod tests {
         );
 
         let result = tool
-            .invoke(json!({"command": "cat /etc/passwd"}), &test_ctx())
+            .invoke(Envelope::test(json!({"command": "cat /etc/passwd"})))
             .await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -596,21 +591,21 @@ mod tests {
             DefaultAction::Allow,
         );
 
-        let result = tool.invoke(json!({"command": "ls"}), &test_ctx()).await;
+        let result = tool.invoke(Envelope::test(json!({"command": "ls"}))).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn no_rules_with_default_allow() {
         let tool = GuardedTool::new(Arc::new(MockTool), vec![], DefaultAction::Allow);
-        let result = tool.invoke(json!({"anything": true}), &test_ctx()).await;
+        let result = tool.invoke(Envelope::test(json!({"anything": true}))).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn no_rules_with_default_deny() {
         let tool = GuardedTool::new(Arc::new(MockTool), vec![], DefaultAction::Deny);
-        let result = tool.invoke(json!({"anything": true}), &test_ctx()).await;
+        let result = tool.invoke(Envelope::test(json!({"anything": true}))).await;
         assert!(result.is_err());
     }
 

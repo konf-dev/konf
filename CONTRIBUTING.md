@@ -13,15 +13,16 @@ Thank you for your interest in contributing to Konf!
 
 ## Terminology
 
-See [`docs/MENTAL_MODEL.md`](docs/MENTAL_MODEL.md) for the full vocabulary and
-banned-words kill list. The core term is:
+See [`docs/MENTAL_MODEL.md`](docs/MENTAL_MODEL.md) for the full vocabulary, and
+[`docs/DEPRECATED_TERMS.md`](docs/DEPRECATED_TERMS.md) for renamed / retired
+concepts. The core term is:
 
 - **`product`** — a directory of YAML + markdown defining one konf agent. The
   Rust type is `ProductConfig` (in `crates/konf-init/src/config.rs`).
 
 Any new analogy, metaphor, or vocabulary term introduced to the docs must
-cash out to code or an experimentally verified finding. If it doesn't, it goes
-on the kill list.
+cash out to code or an experimentally verified finding. If it doesn't, it
+doesn't belong in the docs.
 
 ## Reporting Bugs
 

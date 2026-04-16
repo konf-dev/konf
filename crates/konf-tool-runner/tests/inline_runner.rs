@@ -14,9 +14,10 @@ use serde_json::{json, Value};
 use konf_tool_runner::{InlineRunner, RunRegistry, RunState, Runner, WorkflowSpec};
 
 use konf_runtime::Runtime;
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolContext, ToolInfo};
-use konflux::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolInfo};
+use konflux_substrate::Engine;
 
 // ------------------------------------------------------------------
 // test doubles
@@ -38,8 +39,9 @@ impl Tool for EchoWorkflow {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        Ok(json!({ "echo_of": input }))
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let input = env.payload.clone();
+        Ok(env.respond(json!({ "echo_of": input })))
     }
 }
 
@@ -59,7 +61,7 @@ impl Tool for FailingWorkflow {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, _env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         Err(ToolError::ExecutionFailed {
             message: "intentional failure".into(),
             retryable: false,
@@ -87,12 +89,12 @@ impl Tool for SleepyWorkflow {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         self.started.fetch_add(1, Ordering::SeqCst);
         // Far longer than any reasonable test deadline; the test aborts
         // this via runner:cancel before it can return.
         tokio::time::sleep(Duration::from_secs(3600)).await;
-        Ok(json!({}))
+        Ok(env.respond(json!({})))
     }
 }
 
@@ -272,8 +274,25 @@ async fn registry_tracks_runs() {
 // ------------------------------------------------------------------
 
 fn spec(workflow: &str, input: Value) -> WorkflowSpec {
+    // R1: tests supply a permissive parent scope ("*") because these tests
+    // exercise runner mechanics, not attenuation. Attenuation itself is
+    // covered in `konf-runtime/tests/scope_tests.rs` and the new
+    // `runner_attenuates_parent_scope` test below (if added).
+    let parent_scope = konf_runtime::scope::ExecutionScope {
+        namespace: "konf:test:runner".into(),
+        capabilities: vec![konf_runtime::scope::CapabilityGrant::new("*")],
+        limits: konf_runtime::scope::ResourceLimits::default(),
+        actor: konf_runtime::scope::Actor {
+            id: "test".into(),
+            role: konf_runtime::scope::ActorRole::System,
+        },
+        depth: 0,
+    };
+    let parent_ctx = konf_runtime::ExecutionContext::new_root("test-session");
     WorkflowSpec {
         workflow: workflow.to_string(),
         input,
+        parent_scope,
+        parent_ctx,
     }
 }

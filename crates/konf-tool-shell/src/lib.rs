@@ -8,11 +8,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tracing::info;
+use tracing::{debug, info};
 
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
-use konflux::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
+use konflux_substrate::Engine;
 
 /// Configuration for the shell tool, deserialized from the engine config.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -87,8 +88,9 @@ impl Tool for ShellExecTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let command = input
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let command = env
+            .payload
             .get("command")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidInput {
@@ -96,12 +98,13 @@ impl Tool for ShellExecTool {
                 field: Some("command".into()),
             })?;
 
-        let timeout_ms = input
+        let timeout_ms = env
+            .payload
             .get("timeout_ms")
             .and_then(|v| v.as_u64())
             .unwrap_or(self.default_timeout_ms);
 
-        info!(
+        debug!(
             container = %self.container_name,
             command = %command,
             timeout_ms,
@@ -163,11 +166,11 @@ impl Tool for ShellExecTool {
             "shell_exec completed"
         );
 
-        Ok(json!({
+        Ok(env.respond(json!({
             "stdout": stdout,
             "stderr": stderr,
             "exit_code": exit_code,
-        }))
+        })))
     }
 }
 

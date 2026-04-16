@@ -18,12 +18,16 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 tokio = { workspace = true }
+konf-runtime = { path = "../konf-runtime" }
 konf-tool-memory = { path = "../konf-tool-memory" }
 surrealdb = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
+konf-runtime = { path = "../konf-runtime" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+uuid = { workspace = true }
 
 [[example]]
 name = "experiment"

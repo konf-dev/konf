@@ -5,7 +5,7 @@
 ## Prerequisites
 
 - Konf binary built or running via Docker
-- A Postgres instance with pgvector (for memory tools)
+- SurrealDB (embedded mode works out of the box; no external server required)
 
 ## 1. Copy the Template
 
@@ -37,9 +37,9 @@ Enable the tools your agent needs:
 ```yaml
 tools:
   memory:
-    backend: smrti
+    backend: surreal
     config:
-      dsn: "${DATABASE_URL:-postgresql://postgres:konf@localhost/konf}"
+      dsn: "rocksdb://data/memory.db"
   llm:
     provider: openai
     model: "${KONF_MODEL:-qwen3:8b}"

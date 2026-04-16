@@ -23,7 +23,7 @@ konf-backend is a thin HTTP server. It serves the REST API, handles authenticati
 ## What konf-backend is NOT
 
 - Contains zero tool implementations — all tools live in konf-tools crates
-- Does not import smrti or any memory backend directly
+- Does not import any memory backend directly
 - Does not contain MCP protocol logic — delegates to konf-mcp crate
 - Does not contain config loading or tool registration — delegates to konf-init
 
@@ -208,7 +208,7 @@ mcp = ["konf-mcp"]
 scheduling = ["sqlx"]
 ```
 
-Note: konf-backend does NOT depend on any konf-tool-* crates or smrti. All tool dependencies are in konf-init.
+Note: konf-backend does NOT depend on any konf-tool-* crates or memory backends. All tool dependencies are in konf-init.
 
 ---
 

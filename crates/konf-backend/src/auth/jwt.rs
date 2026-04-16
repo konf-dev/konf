@@ -67,7 +67,7 @@ impl JwtVerifier {
             jwks_url,
             audience: config.jwt_audience.clone(),
             cache: Arc::new(RwLock::new(None)),
-            cache_ttl: Duration::from_secs(600), // 10 minutes
+            cache_ttl: Duration::from_secs(config.jwks_cache_ttl_secs),
             http_client: reqwest::Client::new(),
         }
     }
@@ -138,6 +138,10 @@ impl JwtVerifier {
             .await
             .map_err(|e| AuthError::JwksFetchFailed(e.to_string()))?;
 
+        let response = response
+            .error_for_status()
+            .map_err(|e| AuthError::JwksFetchFailed(e.to_string()))?;
+
         let jwks: jsonwebtoken::jwk::JwkSet = response
             .json()
             .await
@@ -185,6 +189,7 @@ mod tests {
         let config = AuthConfig {
             supabase_url: "http://localhost:9999".into(),
             jwt_audience: "authenticated".into(),
+            jwks_cache_ttl_secs: 600,
         };
         let verifier = JwtVerifier::new(&config);
         assert_eq!(

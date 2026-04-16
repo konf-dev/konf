@@ -10,20 +10,37 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
-use konflux::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
+use konflux_substrate::Engine;
 
-/// Maximum timeout for HTTP requests (5 minutes) to prevent resource exhaustion.
-const MAX_TIMEOUT_SECS: u64 = 300;
+/// Default maximum timeout for HTTP requests (5 minutes).
+const DEFAULT_MAX_TIMEOUT_SECS: u64 = 300;
 
-/// Maximum response body size (10 MB) to prevent memory exhaustion.
-const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
+/// Default maximum response body size (10 MB).
+const DEFAULT_MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Register http_get and http_post tools in the engine.
-pub async fn register(engine: &Engine, _config: &Value) -> anyhow::Result<()> {
-    engine.register_tool(Arc::new(HttpGetTool::new()));
-    engine.register_tool(Arc::new(HttpPostTool::new()));
+pub async fn register(engine: &Engine, config: &Value) -> anyhow::Result<()> {
+    let max_timeout_secs = config
+        .get("max_timeout_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(DEFAULT_MAX_TIMEOUT_SECS);
+    let max_response_bytes = config
+        .get("max_response_bytes")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .unwrap_or(DEFAULT_MAX_RESPONSE_BYTES);
+
+    engine.register_tool(Arc::new(HttpGetTool::with_limits(
+        max_timeout_secs,
+        max_response_bytes,
+    )));
+    engine.register_tool(Arc::new(HttpPostTool::with_limits(
+        max_timeout_secs,
+        max_response_bytes,
+    )));
     Ok(())
 }
 
@@ -82,21 +99,24 @@ fn validate_url(url: &str) -> Result<(), ToolError> {
 }
 
 /// Read response body with size limit to prevent memory exhaustion.
-async fn read_body_limited(resp: reqwest::Response) -> Result<String, ToolError> {
+async fn read_body_limited(
+    resp: reqwest::Response,
+    max_response_bytes: usize,
+) -> Result<String, ToolError> {
     let content_length = resp.content_length().unwrap_or(0) as usize;
-    if content_length > MAX_RESPONSE_BYTES {
+    if content_length > max_response_bytes {
         return Err(ToolError::ExecutionFailed {
             message: format!(
-                "Response too large: {content_length} bytes (max {MAX_RESPONSE_BYTES})"
+                "Response too large: {content_length} bytes (max {max_response_bytes})"
             ),
             retryable: false,
         });
     }
     let bytes = resp.bytes().await.map_err(tool_err)?;
-    if bytes.len() > MAX_RESPONSE_BYTES {
+    if bytes.len() > max_response_bytes {
         return Err(ToolError::ExecutionFailed {
             message: format!(
-                "Response too large: {} bytes (max {MAX_RESPONSE_BYTES})",
+                "Response too large: {} bytes (max {max_response_bytes})",
                 bytes.len()
             ),
             retryable: false,
@@ -122,20 +142,33 @@ fn tool_err(e: impl std::fmt::Display) -> ToolError {
 /// HTTP GET tool — makes a GET request and returns status, headers, body.
 pub struct HttpGetTool {
     client: reqwest::Client,
+    max_timeout_secs: u64,
+    max_response_bytes: usize,
 }
 
 impl Default for HttpGetTool {
     fn default() -> Self {
         Self {
             client: reqwest::Client::new(),
+            max_timeout_secs: DEFAULT_MAX_TIMEOUT_SECS,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         }
     }
 }
 
 impl HttpGetTool {
-    /// Create a new HttpGetTool with a default reqwest client.
+    /// Create a new HttpGetTool with default limits.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a new HttpGetTool with custom limits.
+    pub fn with_limits(max_timeout_secs: u64, max_response_bytes: usize) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            max_timeout_secs,
+            max_response_bytes,
+        }
     }
 }
 
@@ -165,29 +198,30 @@ impl Tool for HttpGetTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let url =
-            input
-                .get("url")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| ToolError::InvalidInput {
-                    message: "missing 'url'".into(),
-                    field: Some("url".into()),
-                })?;
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let url = env
+            .payload
+            .get("url")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'url'".into(),
+                field: Some("url".into()),
+            })?;
         validate_url(url)?;
 
-        let timeout_secs = input
+        let timeout_secs = env
+            .payload
             .get("timeout")
             .and_then(|v| v.as_u64())
             .unwrap_or(30)
-            .min(MAX_TIMEOUT_SECS);
+            .min(self.max_timeout_secs);
 
         let mut req = self
             .client
             .get(url)
             .timeout(std::time::Duration::from_secs(timeout_secs));
 
-        if let Some(headers) = input.get("headers").and_then(|v| v.as_object()) {
+        if let Some(headers) = env.payload.get("headers").and_then(|v| v.as_object()) {
             for (k, v) in headers {
                 if let Some(val) = v.as_str() {
                     req = req.header(k.as_str(), val);
@@ -212,13 +246,13 @@ impl Tool for HttpGetTool {
             })
             .collect();
 
-        let body = read_body_limited(resp).await?;
+        let body = read_body_limited(resp, self.max_response_bytes).await?;
         let duration_ms = start.elapsed().as_millis() as u64;
         debug!(url = %url, status, duration_ms, "HTTP GET completed");
 
         let body_value = serde_json::from_str::<Value>(&body).unwrap_or(Value::String(body));
 
-        Ok(json!({
+        Ok(env.respond(json!({
             "status": status,
             "headers": headers,
             "body": body_value,
@@ -226,7 +260,7 @@ impl Tool for HttpGetTool {
                 "tool": "http:get",
                 "duration_ms": duration_ms,
             }
-        }))
+        })))
     }
 }
 
@@ -237,20 +271,33 @@ impl Tool for HttpGetTool {
 /// HTTP POST tool — makes a POST request with a JSON body.
 pub struct HttpPostTool {
     client: reqwest::Client,
+    max_timeout_secs: u64,
+    max_response_bytes: usize,
 }
 
 impl Default for HttpPostTool {
     fn default() -> Self {
         Self {
             client: reqwest::Client::new(),
+            max_timeout_secs: DEFAULT_MAX_TIMEOUT_SECS,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         }
     }
 }
 
 impl HttpPostTool {
-    /// Create a new HttpPostTool with a default reqwest client.
+    /// Create a new HttpPostTool with default limits.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create a new HttpPostTool with custom limits.
+    pub fn with_limits(max_timeout_secs: u64, max_response_bytes: usize) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            max_timeout_secs,
+            max_response_bytes,
+        }
     }
 }
 
@@ -280,23 +327,24 @@ impl Tool for HttpPostTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        let url =
-            input
-                .get("url")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| ToolError::InvalidInput {
-                    message: "missing 'url'".into(),
-                    field: Some("url".into()),
-                })?;
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let url = env
+            .payload
+            .get("url")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "missing 'url'".into(),
+                field: Some("url".into()),
+            })?;
         validate_url(url)?;
 
-        let timeout_secs = input
+        let timeout_secs = env
+            .payload
             .get("timeout")
             .and_then(|v| v.as_u64())
             .unwrap_or(30)
-            .min(MAX_TIMEOUT_SECS);
-        let body = input.get("body").cloned().unwrap_or(Value::Null);
+            .min(self.max_timeout_secs);
+        let body = env.payload.get("body").cloned().unwrap_or(Value::Null);
 
         let mut req = self
             .client
@@ -304,7 +352,7 @@ impl Tool for HttpPostTool {
             .json(&body)
             .timeout(std::time::Duration::from_secs(timeout_secs));
 
-        if let Some(headers) = input.get("headers").and_then(|v| v.as_object()) {
+        if let Some(headers) = env.payload.get("headers").and_then(|v| v.as_object()) {
             for (k, v) in headers {
                 if let Some(val) = v.as_str() {
                     req = req.header(k.as_str(), val);
@@ -319,21 +367,21 @@ impl Tool for HttpPostTool {
         })?;
 
         let status = resp.status().as_u16();
-        let resp_body = read_body_limited(resp).await?;
+        let resp_body = read_body_limited(resp, self.max_response_bytes).await?;
         let duration_ms = start.elapsed().as_millis() as u64;
         debug!(url = %url, status, duration_ms, "HTTP POST completed");
 
         let body_value =
             serde_json::from_str::<Value>(&resp_body).unwrap_or(Value::String(resp_body));
 
-        Ok(json!({
+        Ok(env.respond(json!({
             "status": status,
             "body": body_value,
             "_meta": {
                 "tool": "http:post",
                 "duration_ms": duration_ms,
             }
-        }))
+        })))
     }
 }
 
@@ -427,13 +475,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_invoke_missing_url() {
         let tool = HttpGetTool::new();
-        let ctx = ToolContext {
-            capabilities: vec![],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: std::collections::HashMap::new(),
-        };
-        let result = tool.invoke(json!({}), &ctx).await;
+        let result = tool.invoke(Envelope::test(json!({}))).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             ToolError::InvalidInput { field, .. } => assert_eq!(field, Some("url".into())),
@@ -444,17 +486,10 @@ mod tests {
     #[tokio::test]
     async fn test_get_invoke_ssrf_blocked() {
         let tool = HttpGetTool::new();
-        let ctx = ToolContext {
-            capabilities: vec![],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: std::collections::HashMap::new(),
-        };
         let result = tool
-            .invoke(
+            .invoke(Envelope::test(
                 json!({"url": "http://169.254.169.254/latest/meta-data/"}),
-                &ctx,
-            )
+            ))
             .await;
         assert!(result.is_err());
     }
@@ -462,13 +497,9 @@ mod tests {
     #[tokio::test]
     async fn test_post_invoke_missing_url() {
         let tool = HttpPostTool::new();
-        let ctx = ToolContext {
-            capabilities: vec![],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: std::collections::HashMap::new(),
-        };
-        let result = tool.invoke(json!({"body": {"key": "value"}}), &ctx).await;
+        let result = tool
+            .invoke(Envelope::test(json!({"body": {"key": "value"}})))
+            .await;
         assert!(result.is_err());
     }
 }

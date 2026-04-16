@@ -81,6 +81,7 @@ DEFINE TABLE IF NOT EXISTS event SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS namespace  ON event TYPE string;
 DEFINE FIELD IF NOT EXISTS event_type ON event TYPE string;
 DEFINE FIELD IF NOT EXISTS payload    ON event TYPE object FLEXIBLE DEFAULT {{}};
+DEFINE FIELD IF NOT EXISTS valid_to   ON event TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS created_at ON event TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX IF NOT EXISTS event_namespace_created

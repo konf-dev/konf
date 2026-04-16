@@ -16,13 +16,12 @@ registries, namespaces, and a capability lattice. Each role is a Rust crate.
 
 | Crate | Role | Entry point |
 |---|---|---|
-| `konflux-core` | Workflow execution engine. Three registries: tools, resources, prompts. Parses YAML workflows, executes them as DAGs, enforces capabilities at dispatch. Zero I/O. | `Engine` in `crates/konflux-core/src/engine.rs` |
+| `konflux-substrate` | Workflow execution engine. Three registries: tools, resources, prompts. Parses YAML workflows, executes them as DAGs, enforces capabilities at dispatch. Zero I/O. | `Engine` in `crates/konflux-substrate/src/engine.rs` |
 | `konf-runtime` | Process manager. Wraps the engine with `ExecutionScope` (namespace, capabilities, limits, actor), process table, `VirtualizedTool` for namespace injection, `GuardedTool` for deny/allow rules, attenuation-only capability lattice. | `Runtime` in `crates/konf-runtime/src/runtime.rs` |
-| `konf-init` | Bootstrap. Reads platform config (`konf.toml`) and product config (`tools.yaml`, `workflows/`, `prompts/`), interpolates env vars in YAML, registers built-in and configured tools, connects to Postgres if configured, creates the runtime, registers workflows as tools, applies tool guards. See `docs/architecture/init.md` for the full boot sequence. | `boot(config_dir)` in `crates/konf-init/src/lib.rs` |
+| `konf-init` | Bootstrap. Reads platform config (`konf.toml`) and product config (`tools.yaml`, `workflows/`, `prompts/`), interpolates env vars in YAML, registers built-in and configured tools, opens redb storage if configured, creates the runtime, registers workflows as tools, applies tool guards. See `docs/architecture/init.md` for the full boot sequence. | `boot(config_dir)` in `crates/konf-init/src/lib.rs` |
 | `konf-backend` | HTTP transport. `POST /v1/chat` with SSE streaming. Optional scheduler backed by Postgres. | `crates/konf-backend/src/main.rs` |
 | `konf-mcp` | MCP transport. Exposes workflows as MCP tools over stdio or SSE. Translates tool names at the wire: kernel `foo:bar` → MCP `foo_bar` (required by MCP spec SEP-986). | `crates/konf-mcp/src/main.rs` |
-| `konf-tool-*` | Plugin crates registering built-in tools: `http`, `llm`, `embed`, `memory`, `mcp` (client), `shell`, `secret`, `runner`. | `crates/konf-tool-*/src/lib.rs` |
-| `konf-init-kell` | CLI that scaffolds a new product directory. Binary name is vestigial; the term it refers to ("kell") is deprecated. | `crates/konf-init-kell/src/main.rs` |
+| `konf-tool-*` | Plugin crates registering tools: `http` (`http:get`, `http:post`), `llm` (`ai:complete`, `system:introspect`, `yaml:validate_workflow`), `embed` (`ai:embed`), `memory` (`memory:search`, `memory:store`, `state:set/get/delete/list/clear`), `mcp` (client, dynamic), `shell` (`shell:exec`), `secret` (`secret:get`, `secret:list`), `runner` (`runner:spawn/status/wait/cancel`). Additionally, `konf-init` registers `config:reload`, `schedule:create`, and `cancel:schedule`. | `crates/konf-tool-*/src/lib.rs` |
 
 Memory is pluggable via the `MemoryBackend` trait in `konf-tool-memory`
 (`crates/konf-tool-memory/src/lib.rs:71-125`). Two backends ship today:
@@ -35,12 +34,7 @@ Memory is pluggable via the `MemoryBackend` trait in `konf-tool-memory`
   Fusion hybrid search. Implementation at
   `crates/konf-tool-memory-surreal/src/lib.rs`; schema at
   `crates/konf-tool-memory-surreal/src/schema.rs`.
-- **`konf-tool-memory-smrti`** is opt-in behind the `memory-smrti` feature.
-  Backed by [smrti](https://github.com/konf-dev/smrti), a separate Rust crate
-  storing nodes, edges, and embeddings in Postgres + pgvector. Requires SSH
-  access to the private smrti repository at build time.
-
-Both backends are dumb storage layers: they do not call LLMs or generate
+The memory backend is a dumb storage layer: it does not call LLMs or generate
 embeddings. Products pass pre-computed embeddings when they need semantic
 search — for SurrealDB via the `metadata_filter.query_vector` escape hatch
 inside `SearchParams`.
@@ -83,10 +77,6 @@ retention_days = 7
 
 Memory backends are independent: the default `konf-tool-memory-surreal`
 uses an embedded SurrealDB (RocksDB) or a remote Surreal server. The
-older `konf-tool-memory-smrti` (Postgres + pgvector) is still available
-behind the `memory-smrti` feature for existing Postgres deployments,
-but it has no relationship to the runtime's redb storage.
-
 Edge deployments can omit the `[database]` section entirely: workflows
 still run, but nothing survives a restart. See
 [`architecture/storage.md`](architecture/storage.md) for the full
@@ -98,17 +88,18 @@ for the doctrine.
 ## Vocabulary
 
 If a doc uses a term not in this table, the term is either a typo, a code-level
-detail not exposed to users, or jargon that belongs in the kill list below.
+detail not exposed to users, or jargon that should be replaced with a concrete
+reference to code or a verified finding per the "Referencing code" rule below.
 
 | Term | What it is | Definition lives at |
 |---|---|---|
 | **Product** | A directory of YAML + markdown defining one konf agent. Rust type: `ProductConfig`. | `konf-init/src/config.rs` |
-| **Workflow** | A DAG of nodes in YAML. Runs to completion. Optionally registered as a callable tool via `register_as_tool: true`. | `konflux-core/src/parser/` |
+| **Workflow** | A DAG of nodes in YAML. Runs to completion. Optionally registered as a callable tool via `register_as_tool: true`. | `konflux-substrate/src/parser/` |
 | **Node** | One step inside a workflow. Has `id`, `do`, `with`, `then`, `return`. | Workflow YAML schema |
-| **Tool** | A dispatchable action. Implements the `Tool` trait. Tool names use **colons** at the kernel layer (`memory:search`, `ai:complete`, `http:get`). In workflow `do:` fields, write colons. MCP clients see underscore-translated names (`memory_search`). | `konflux-core/src/tool.rs` |
-| **Resource** | Read-only context exposed to workflows and MCP clients. URIs like `konf://config/tools.yaml`. | `konflux-core/src/resource.rs` |
-| **Prompt** | A parameterized template that expands into messages for an LLM call. Registered with the engine. | `konflux-core/src/prompt.rs` |
-| **Registry** | An in-memory map keyed by name. The engine has three: tools, resources, prompts. | `konflux-core/src/engine.rs` |
+| **Tool** | A dispatchable action. Implements the `Tool` trait. Tool names use **colons** at the kernel layer (`memory:search`, `ai:complete`, `http:get`). In workflow `do:` fields, write colons. MCP clients see underscore-translated names (`memory_search`). | `konflux-substrate/src/tool.rs` |
+| **Resource** | Read-only context exposed to workflows and MCP clients. URIs like `konf://config/tools.yaml`. | `konflux-substrate/src/resource.rs` |
+| **Prompt** | A parameterized template that expands into messages for an LLM call. Registered with the engine. | `konflux-substrate/src/prompt.rs` |
+| **Registry** | An in-memory map keyed by name. The engine has three: tools, resources, prompts. | `konflux-substrate/src/engine.rs` |
 | **ExecutionScope** (or just "scope") | What a workflow runs under: namespace, capabilities, resource limits, actor identity. Attenuates at workflow→child boundaries; never amplifies. | `konf-runtime/src/scope.rs` |
 | **Namespace** | A hierarchical string identifying a tenant scope. E.g. `konf:myproduct:user_123`. Injected into memory operations by `VirtualizedTool`. | `konf-runtime/src/scope.rs` |
 | **Capability** | A tool-name pattern a scope is allowed to call. E.g. `memory:*`, `ai:complete`, `*`. Checked at dispatch. | `konf-runtime/src/scope.rs` |
@@ -120,6 +111,9 @@ detail not exposed to users, or jargon that belongs in the kill list below.
 | **Scheduler** | Durable timer store backed by redb. Supports `Once`, `Fixed { delay_ms }`, and `Cron { expr }` modes. Replaces the v1 tokio-timer `schedule:create` and the dead Postgres scheduling module. | `konf-runtime/src/scheduler.rs` |
 | **Runner intent** | Persisted record of a `runner:spawn` call: input, scope, session id. Written before the tokio task starts, marked terminal on completion. Replayed on boot if `terminal: None`. | `konf-runtime/src/runner_intents.rs` |
 | **Event bus** | `tokio::sync::broadcast` channel owned by `Runtime`. Emits `RunEvent`s for every workflow lifecycle transition, tool invocation, schedule fire, and journal append. Consumed by `/v1/monitor/stream`. | `konf-runtime/src/event_bus.rs` |
+| **Interaction** | Typed envelope recording one edge-traversal in the system — a tool dispatch, workflow node lifecycle event, run lifecycle event, error, user input, or LLM response. Serialized into `JournalEntry.payload` with `event_type = "interaction"`. OpenTelemetry-aligned field naming (`id` ↔ span_id, `parent_id` ↔ parent_span_id, `trace_id` ↔ trace_id). Multi-tenant invariant: `namespace`, `actor`, and `edge_rules_fired` are inline on every record for per-row self-auditability. | `konf-runtime/src/interaction.rs` |
+| **Trace id** | Required `Uuid` on `ExecutionContext` that groups related interactions across dispatch and `runner:spawn` boundaries. Minted exactly once at the transport boundary (HTTP, MCP, runner spawn) via `ExecutionContext::new_root()`. Propagated to children via `ExecutionContext::child()`. OTel `trace_id` analog. | `konf-runtime/src/execution_context.rs` |
+| **FanoutJournalStore** | Journal middleware that writes each `JournalEntry` to one primary store (redb for durable audit) plus zero or more secondary stores (e.g. SurrealDB's `event` table for long-term queryable graph). Primary-succeeds-only acknowledgment; secondary failures are logged + counted, never propagated. Wired automatically by `konf-init` when both backends are configured. | `konf-runtime/src/journal/fanout.rs` |
 
 ---
 
@@ -148,29 +142,11 @@ Three rules. Each cashes out to code or a verified finding.
 
 ---
 
-## Banned words (docs-lint kill list)
+## Deprecated terms
 
-If any of these appear in any doc or config file in the konf repos, the
-docs-lint hook fails. Replace with a concrete description that points at code
-or an experimentally verified finding.
+For a short informational list of dead-name renames (e.g. `kell` → `product`, `cell` → `product`) and retired framings, see `DEPRECATED_TERMS.md` in this directory. That file is informational, not linted.
 
-- **"The Grand Experiment"** — mantra with no operational cash-out
-- **"autonomous agent civilization"** — aspirational framing, no code
-- **"civilization primitives"** — undefined
-- **"honeycomb primitives"** — referenced, never defined
-- **"PID 1"** — analogy; konf is not a Unix kernel with a process table at boot
-- **"Hovercraft", "Construct", "Zion", "Operator", "Operatives"** — Matrix metaphor; replace with the actual term (product, runtime, namespace, etc.)
-- **"cell"** — concept dropped; use "product"
-- **"kell"** — deprecated term; use "product" (may be reintroduced later if it earns its keep)
-- **"Second-in-Command"** — marketing framing with no operational definition
-- **"self-modification"**, **"self-healing bureaucracy"** — no code implements this
-- **"operational honesty"** (as emotional LLM error messages) — no code; the real principle is "errors propagate loudly; runtime events are journaled in `runtime_events`"
-- **"smart bubble"** — metaphor without purpose
-- **"Building Box"** — vague brainstorm
-- **"proper abstractions"**, **"first principles"** — slogans without cash-out; replace with the concrete thing
-- **"production-grade"**, **"best industry practices"** — vague; replace with: tests pass, clippy clean, no `.unwrap()` in production code, errors propagated via `?`
-- **"Broker"** as a doctrine term — not a concept; may still appear as a persona prompt file inside one specific product (e.g. `products/my-product/prompts/broker.md`)
-- **"curiosity"**, **"freedom"**, **"quality"** as a doctrine triplet — founder's orientation, not technical doctrine
+The previous "banned words / docs-lint kill list" has been removed. The real load-bearing discipline is the "Referencing code" rule below — claims cite code, findings, or explicit TBD. Mechanical word-banning proxied for that rule and caught noise rather than substance.
 
 ---
 
@@ -195,4 +171,4 @@ other doc is wrong.
 Maintained in this repo. Updated only when the code structure changes
 (new crate, removed crate, changed primitive) or when an experimentally verified
 finding demands it. Slogans, marketing, and speculative framing do not belong
-here — they belong in the kill list above.
+here — they belong nowhere in the repo's public-facing docs.

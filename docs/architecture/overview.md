@@ -45,7 +45,7 @@ Workflows call tools. Workflows ARE tools (callable from other workflows). Tools
 
 ### Everything is configurable
 
-Products define their tools, memory backends, capabilities, and workflows through YAML. Switching memory backends (e.g. from `surreal` to `smrti`) is a config change, not a code change. Adding a new MCP server is one line in tools.yaml. The runtime's own persistent state is always in a single embedded redb file — configured via `konf.toml::[database]` or omitted entirely for edge deployments.
+Products define their tools, memory backends, capabilities, and workflows through YAML. Switching memory backends is a config change, not a code change. Adding a new MCP server is one line in tools.yaml. The runtime's own persistent state is always in a single embedded redb file — configured via `konf.toml::[database]` or omitted entirely for edge deployments.
 
 ### MCP-native
 
@@ -215,7 +215,7 @@ host = "0.0.0.0"
 port = 8000
 
 [database]
-url = "postgresql://localhost/konf"
+url = "redb:///var/lib/konf/konf.redb"
 
 [auth]
 supabase_url = "http://localhost:9999"
@@ -282,7 +282,7 @@ nodes:
 - **Not a framework.** You don't extend Konf with code. You configure it with YAML. Tools are plugins, not subclasses.
 - **Not cloud-only.** The same engine runs on a phone (embedded redb + local LLM) or a cloud cluster (embedded redb + remote SurrealDB + gateway LLMs). The runtime's persistent state (journal, scheduler, runner intents) always lives in one redb file; what varies is the memory backend, not the plumbing.
 - **Not LLM-specific.** Works with any model from any provider, including local models via ollama/llama.cpp.
-- **Not Postgres-specific.** Memory backends are pluggable (`konf-tool-memory-surreal` by default, `konf-tool-memory-smrti` for legacy Postgres). The runtime's own durability is redb-backed in all deployments; memory is a separate concern.
+- **Not tied to any database.** Memory backends are pluggable (`konf-tool-memory-surreal` by default). The runtime's own durability is redb-backed in all deployments; memory is a separate concern.
 - **Not a wrapper around LangChain.** Konf is infrastructure written in Rust. No Python on the hot path. Single binary deployment.
 
 ---
@@ -296,7 +296,7 @@ nodes:
 | [mcp](mcp.md) | MCP server (konf-mcp) and MCP client (konf-tool-mcp) |
 | [init](init.md) | Init system: config loading, boot sequence, KonfInstance |
 | [backend](backend.md) | HTTP server shell: REST API, auth, scheduling |
-| [memory-backends](memory-backends.md) | MemoryBackend trait, implementations (smrti, SurrealDB, SQLite) |
+| [memory-backends](memory-backends.md) | MemoryBackend trait, SurrealDB default |
 | [runtime](runtime.md) | Process management, ExecutionScope, namespace injection, capability lattice, streaming |
 | [workflow-reference](../product-guide/workflow-reference.md) | YAML format for defining workflows (nodes, edges, conditions, retries) |
 | [MENTAL_MODEL](../MENTAL_MODEL.md) | Single source of truth for architecture, vocabulary, and doctrine |

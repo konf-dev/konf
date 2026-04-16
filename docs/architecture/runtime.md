@@ -58,6 +58,7 @@ impl Runtime {
         tool_name: &str,
         input: Value,
         scope: &ExecutionScope,
+        exec_ctx: &ExecutionContext,
     ) -> Result<Value, RuntimeError>;
 
     /// Access the real-time event bus (`RunEventBus`) for subscribers
@@ -146,6 +147,9 @@ pub struct ExecutionScope {
 
     /// Identity of the agent or human initiating this execution.
     pub actor: Actor,
+
+    /// Current nesting depth (0 = root workflow, incremented for child workflows).
+    pub depth: usize,
 }
 
 /// A capability grant with optional parameter bindings.
@@ -165,6 +169,7 @@ pub struct ResourceLimits {
     pub max_concurrent_nodes: usize,         // default: 50
     pub max_child_depth: usize,              // default: 10
     pub max_active_runs_per_namespace: usize, // default: 20
+    pub event_bus_capacity: usize,           // default: 1024
 }
 
 /// Who is executing this workflow.
@@ -186,6 +191,110 @@ pub enum ActorRole {
     System,
 }
 ```
+
+### ExecutionContext
+
+`ExecutionContext` carries **runtime state** for a dispatch — the per-call mutable counterpart to `ExecutionScope` (which is immutable config). This split (Phase F2.R2) fixes a correctness bug where `trace_id` was on `ExecutionScope` but could not be threaded through nested dispatches.
+
+Source: `crates/konf-runtime/src/execution_context.rs`
+
+```rust
+pub struct ExecutionContext {
+    /// Groups related interactions across dispatch + spawn boundaries.
+    /// OTel trace_id analog. Required — minted at the transport boundary.
+    pub trace_id: Uuid,
+
+    /// Direct causation ancestor's Interaction id. None only at root of a turn.
+    pub parent_interaction_id: Option<Uuid>,
+
+    /// Session identifier (HTTP session cookie or MCP session id).
+    pub session_id: String,
+
+    /// Absolute wall-clock deadline for this dispatch chain.
+    pub deadline: Option<DateTime<Utc>>,
+
+    /// Idempotency key for dedup. When set, the dispatcher checks the
+    /// journal for a cached result before invoking.
+    pub idempotency_key: Option<IdempotencyKey>,
+}
+```
+
+**Lifecycle:**
+1. `ExecutionContext::new_root(session_id)` — mints a fresh `trace_id` at a transport boundary (HTTP handler, MCP session, runner spawn).
+2. `ExecutionContext::with_trace(trace_id, session_id)` — preserves an externally-provided trace id (e.g. from an upstream HTTP header).
+3. `ExecutionContext::child(parent_interaction_id, session_id)` — derives a child context for nested dispatch. Inherits `trace_id` and `deadline`; `idempotency_key` is per-dispatch (not inherited).
+4. `ExecutionContext::from_envelope(env)` — reconstructs from a substrate Envelope (used by WorkflowDispatchTool).
+
+**Key distinction:** `ExecutionScope` = who you are and what you can do (immutable). `ExecutionContext` = what the current dispatch is doing (mutable per-call).
+
+---
+
+### Interaction
+
+An `Interaction` is the uniform storage primitive of the Stigmergic Engine. Every edge-traversal in the system produces one Interaction record appended to the journal.
+
+Source: `crates/konf-runtime/src/interaction.rs`
+
+```rust
+pub struct Interaction {
+    pub id: Uuid,                        // OTel span_id
+    pub parent_id: Option<Uuid>,         // OTel parent_span_id
+    pub trace_id: Uuid,                  // OTel trace_id
+    pub run_id: Option<RunId>,
+    pub node_id: Option<String>,
+    pub actor: Actor,                    // inline for multi-tenant audit
+    pub namespace: String,               // inline for multi-tenant audit
+    pub target: String,                  // prefix convention: tool:, node:, run:, etc.
+    pub kind: InteractionKind,
+    pub attributes: Value,               // kind-specific structured data
+    pub edge_rules_fired: Vec<String>,   // capability/guard checks that ran
+    pub status: InteractionStatus,
+    pub summary: Option<String>,
+    pub timestamp: DateTime<Utc>,
+    pub step_index: u64,
+    pub stream_id: String,
+    pub state_before_hash: Option<[u8; 32]>,
+    pub state_after_hash: Option<[u8; 32]>,
+    pub references: Vec<Uuid>,           // non-parent semantic antecedents
+    pub in_reply_to: Option<Uuid>,       // request/reply correlation
+}
+```
+
+**InteractionKind variants:**
+
+| Variant | Emitted by | Description |
+|---------|-----------|-------------|
+| `ToolDispatch` | Substrate recorder | A single tool dispatch via `Runtime::invoke_tool` |
+| `NodeLifecycle` | Substrate recorder | Workflow node start/end/failed (discriminate by `status`) |
+| `RunLifecycle` | Substrate recorder | Workflow run started/completed/failed/cancelled |
+| `Error` | Substrate recorder | Uncaught error (e.g. panic caught by `tokio::JoinError`) |
+| `UserInput` | Substrate recorder | Human or external-system input crossing the tenant boundary |
+| `LlmResponse` | Substrate recorder | LLM completion (distinct from ToolDispatch for cheap filtering) |
+| `ProductDefined { name }` | Product code | Escape hatch for product-level kinds via memory tools |
+
+**InteractionStatus variants:**
+
+| Variant | OTel mapping | Description |
+|---------|-------------|-------------|
+| `Pending` | `UNSET` | Emitted at start; not yet terminal |
+| `Ok` | `OK` | Terminal success |
+| `Failed { error }` | `ERROR` | Terminal failure with reason |
+| `Observed` | `OK` | Inherently terminal at emit time (UserInput, LlmResponse) |
+
+**OTel field mapping:**
+
+| Interaction field | OTel span field |
+|-------------------|-----------------|
+| `id` | `span_id` |
+| `parent_id` | `parent_span_id` |
+| `trace_id` | `trace_id` |
+| `target` | `name` |
+| `timestamp` | `start_time` |
+| `status` | `status.code` |
+
+**Multi-tenant invariants:** `actor`, `namespace`, and `edge_rules_fired` are always set by the substrate (not actor input) and are inline on every record for per-row self-auditability.
+
+---
 
 ### Process types
 
@@ -230,6 +339,8 @@ pub struct ActiveNode {
 pub enum NodeStatus {
     Running,
     Retrying { attempt: u32, max: u32 },
+    Completed { duration_ms: u64 },
+    Failed { error: String },
 }
 
 pub struct ProcessTree {
@@ -249,12 +360,9 @@ pub struct RuntimeMetrics {
 
 ### Event journal
 
-The EventJournal is optional. On server deployments with a database, it writes to Postgres. On edge/phone deployments without a database, the journal is disabled — events exist only in the in-memory process table.
+The EventJournal is optional. On server deployments with a database configured, it writes to redb. On edge/phone deployments without a database, the journal is disabled — events exist only in the in-memory process table.
 
-When enabled, the runtime writes to TWO Postgres tables:
-
-1. **`runtime_events`** — operational journal. Every workflow start/complete/fail, node execution, tool invocation. For monitoring, debugging, and billing.
-2. **`audit_log`** — security audit. Every cross-scope data access (admin reading user data, config changes, GDPR deletions). For compliance.
+When enabled, the runtime writes journal entries to the `JournalStore` trait implementation (redb primary, with optional fan-out to secondary stores like SurrealDB via `FanoutJournalStore`).
 
 ```rust
 pub struct JournalEntry {
@@ -332,7 +440,6 @@ pub enum RuntimeError {
     CapabilityDenied(String),
     Engine(KonfluxError),
     JoinFailed(String),
-    Database(sqlx::Error),
 }
 ```
 
@@ -384,7 +491,6 @@ Any workflow with `register_as_tool: true` in its YAML header can be registered 
 pub struct WorkflowTool {
     workflow: Workflow,
     runtime: Arc<Runtime>,
-    default_scope: ExecutionScope,
 }
 
 impl Tool for WorkflowTool {
@@ -392,13 +498,19 @@ impl Tool for WorkflowTool {
         // name, description, input_schema from workflow YAML header
     }
 
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        // Reconstruct scope from the Envelope's typed fields
+        // (namespace, actor_id, capabilities, trace_id, deadline, etc.)
         // Create child scope (attenuated from parent)
         // Run workflow via self.runtime.run()
-        // Return workflow output
+        // Return workflow output wrapped in an Envelope
     }
 }
 ```
+
+`WorkflowTool` no longer stores a `default_scope`. The execution scope is reconstructed from the incoming `Envelope` at invocation time, which carries namespace, actor, capabilities (`CapSet`), trace_id, deadline, and other context. This ensures the scope always reflects the caller's actual grant, not a stale default.
+
+The `Dispatcher` struct in `konf-runtime` handles single-tool dispatch outside of workflow execution (e.g. direct `tools/call` from MCP or HTTP), applying `VirtualizedTool` namespace injection and `GuardedTool` deny/allow rules.
 
 konf-init creates `WorkflowTool` instances for each eligible workflow and registers them in the engine.
 
@@ -406,48 +518,7 @@ See [engine.md](engine.md) for workflow-as-tool composition details.
 
 ---
 
-> **Note:** Python bindings are not yet implemented in this monorepo. The API below is aspirational.
-
-## Python API (opt-in via PyO3)
-
-```python
-from konf_runtime import Runtime, ExecutionScope, CapabilityGrant, ResourceLimits, Actor
-
-# Create
-runtime = await Runtime.connect("postgresql://localhost/konf")
-
-# Register tools
-runtime.register_tool("echo", echo_func, {"description": "Echo input"})
-
-# Parse workflow
-workflow = runtime.parse_yaml(yaml_str)
-
-# Run
-scope = ExecutionScope(
-    namespace="konf:unspool:user_123",
-    capabilities=[
-        CapabilityGrant(pattern="memory:*", bindings={"namespace": "konf:unspool:user_123"}),
-        CapabilityGrant(pattern="ai:complete"),
-    ],
-    limits=ResourceLimits(max_steps=500),
-    actor=Actor(id="user_123", role="user"),
-)
-
-result = await runtime.run(workflow, {"message": "hello"}, scope)
-
-# Or streaming
-run_id, stream = await runtime.start_streaming(workflow, input, scope)
-async for event in stream:
-    print(event)
-
-# Monitor
-runs = runtime.list_runs(namespace_prefix="konf:unspool")
-tree = runtime.get_tree(run_id)
-metrics = runtime.metrics()
-
-# Control
-await runtime.cancel(run_id, "user requested")
-```
+> **Note:** Python bindings (PyO3) do not exist in this monorepo. The runtime is Rust-only. Products interact with the runtime via HTTP (`konf-backend`) or MCP (`konf-mcp`).
 
 ---
 

@@ -5,9 +5,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use konflux::engine::Engine;
-use konflux::error::ToolError as KonfluxToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
+use konflux_substrate::engine::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError as KonfluxToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
 
 /// Validates a workflow YAML string against the Konf kernel.
 ///
@@ -23,18 +24,7 @@ impl ValidateWorkflowTool {
     }
 }
 
-/// Check if a capability pattern matches a required capability.
-/// Uses the same logic as `konf_runtime::scope::matches_capability_pattern`.
-fn matches_capability_pattern(pattern: &str, capability: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if let Some(prefix) = pattern.strip_suffix(":*") {
-        return capability.starts_with(prefix)
-            && capability.get(prefix.len()..prefix.len() + 1) == Some(":");
-    }
-    pattern == capability
-}
+use konflux_substrate::envelope::Capability;
 
 #[async_trait]
 impl Tool for ValidateWorkflowTool {
@@ -63,27 +53,30 @@ impl Tool for ValidateWorkflowTool {
         }
     }
 
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, KonfluxToolError> {
-        let yaml = input.get("yaml").and_then(|v| v.as_str()).ok_or_else(|| {
-            KonfluxToolError::InvalidInput {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, KonfluxToolError> {
+        let yaml = env
+            .payload
+            .get("yaml")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| KonfluxToolError::InvalidInput {
                 message: "Missing required field 'yaml' (string)".into(),
                 field: Some("yaml".into()),
-            }
-        })?;
+            })?;
 
         // Step 1: Parse the YAML into a Workflow
         let workflow = match self.engine.parse_yaml(yaml) {
             Ok(wf) => wf,
             Err(e) => {
-                return Ok(json!({
+                return Ok(env.respond(json!({
                     "valid": false,
                     "errors": [format!("Parse error: {e}")]
-                }));
+                })));
             }
         };
 
         let mut errors: Vec<String> = Vec::new();
         let registry = self.engine.registry();
+        let capability_patterns = env.capabilities.to_patterns();
 
         // Step 2: Check that each step's tool is registered
         for step in &workflow.steps {
@@ -98,10 +91,9 @@ impl Tool for ValidateWorkflowTool {
 
         // Step 3: Check capability attenuation — caller must cover workflow capabilities
         for cap in &workflow.capabilities {
-            let covered = ctx
-                .capabilities
+            let covered = capability_patterns
                 .iter()
-                .any(|grant| matches_capability_pattern(grant, cap));
+                .any(|grant| Capability::new(grant.as_str()).matches(cap));
             if !covered {
                 errors.push(format!(
                     "Workflow requires '{}' but caller does not have a matching grant",
@@ -114,17 +106,17 @@ impl Tool for ValidateWorkflowTool {
             let capabilities_required: Vec<&str> =
                 workflow.capabilities.iter().map(|s| s.as_str()).collect();
 
-            Ok(json!({
+            Ok(env.respond(json!({
                 "valid": true,
                 "workflow_id": workflow.id.as_str(),
                 "node_count": workflow.steps.len(),
                 "capabilities_required": capabilities_required,
-            }))
+            })))
         } else {
-            Ok(json!({
+            Ok(env.respond(json!({
                 "valid": false,
                 "errors": errors,
-            }))
+            })))
         }
     }
 }
@@ -152,20 +144,20 @@ mod tests {
 
     #[test]
     fn test_matches_capability_pattern_exact() {
-        assert!(matches_capability_pattern("ai:complete", "ai:complete"));
-        assert!(!matches_capability_pattern("ai:complete", "ai:other"));
+        assert!(Capability::new("ai:complete").matches("ai:complete"));
+        assert!(!Capability::new("ai:complete").matches("ai:other"));
     }
 
     #[test]
     fn test_matches_capability_pattern_glob() {
-        assert!(matches_capability_pattern("ai:*", "ai:complete"));
-        assert!(matches_capability_pattern("ai:*", "ai:other"));
-        assert!(!matches_capability_pattern("ai:*", "memory:search"));
+        assert!(Capability::new("ai:*").matches("ai:complete"));
+        assert!(Capability::new("ai:*").matches("ai:other"));
+        assert!(!Capability::new("ai:*").matches("memory:search"));
     }
 
     #[test]
     fn test_matches_capability_pattern_wildcard() {
-        assert!(matches_capability_pattern("*", "anything"));
-        assert!(matches_capability_pattern("*", "ai:complete"));
+        assert!(Capability::new("*").matches("anything"));
+        assert!(Capability::new("*").matches("ai:complete"));
     }
 }

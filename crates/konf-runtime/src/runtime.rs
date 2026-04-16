@@ -13,12 +13,13 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use konflux::engine::{Engine, EngineConfig};
-use konflux::Workflow;
+use konflux_substrate::engine::{Engine, EngineConfig};
+use konflux_substrate::Workflow;
 
 use crate::context::VirtualizedTool;
 use crate::error::{RunId, RuntimeError};
 use crate::event_bus::{RunEvent, RunEventBus};
+use crate::execution_context::ExecutionContext;
 use crate::guard::{DefaultAction, GuardedTool, Rule};
 use crate::hooks::RuntimeHooks;
 use crate::journal::{JournalEntry, JournalStore};
@@ -54,7 +55,11 @@ pub struct Runtime {
     _default_limits: ResourceLimits,
     started_at: Instant,
     /// Tool guards from product config, applied during registry construction.
-    tool_guards: std::sync::RwLock<HashMap<String, ToolGuardEntry>>,
+    tool_guards: Arc<std::sync::RwLock<HashMap<String, ToolGuardEntry>>>,
+    /// Single-tool dispatcher (capability check + wrapping + journaling).
+    dispatcher: crate::dispatcher::Dispatcher,
+    /// Per-trace budget cells. In-memory only. See [`crate::budget::BudgetTable`].
+    budget_table: Arc<crate::budget::BudgetTable>,
     // Counters for metrics (Arc-wrapped for sharing with spawned tasks)
     total_completed: Arc<std::sync::atomic::AtomicU64>,
     total_failed: Arc<std::sync::atomic::AtomicU64>,
@@ -93,15 +98,28 @@ impl Runtime {
             debug!("No journal backend — event journal disabled");
         }
 
+        let event_bus = Arc::new(RunEventBus::with_capacity(
+            default_limits.event_bus_capacity,
+        ));
+        let tool_guards = Arc::new(std::sync::RwLock::new(HashMap::new()));
+
+        let dispatcher = crate::dispatcher::Dispatcher {
+            tool_guards: tool_guards.clone(),
+            journal: journal.clone(),
+            event_bus: event_bus.clone(),
+        };
+
         Ok(Self {
             engine,
             table: Arc::new(ProcessTable::new()),
             journal,
             scheduler: OnceLock::new(),
-            event_bus: Arc::new(RunEventBus::default()),
+            event_bus,
             _default_limits: default_limits,
             started_at: Instant::now(),
-            tool_guards: std::sync::RwLock::new(HashMap::new()),
+            tool_guards,
+            dispatcher,
+            budget_table: Arc::new(crate::budget::BudgetTable::new()),
             total_completed: Arc::new(0.into()),
             total_failed: Arc::new(0.into()),
             total_cancelled: Arc::new(0.into()),
@@ -113,6 +131,12 @@ impl Runtime {
     /// [`RunEvent`] values emitted by the runtime.
     pub fn event_bus(&self) -> Arc<RunEventBus> {
         self.event_bus.clone()
+    }
+
+    /// Access the per-trace budget table for minting and decrementing
+    /// budget cells.
+    pub fn budget_table(&self) -> Arc<crate::budget::BudgetTable> {
+        self.budget_table.clone()
     }
 
     /// Install the durable scheduler backed by [`crate::storage::KonfStorage`].
@@ -195,7 +219,8 @@ impl Runtime {
                 match scope.check_tool(tool_name) {
                     Ok(bindings) => {
                         // Layer 1: VirtualizedTool (namespace injection)
-                        let wrapped: Arc<dyn konflux::tool::Tool> = if bindings.is_empty() {
+                        let wrapped: Arc<dyn konflux_substrate::tool::Tool> = if bindings.is_empty()
+                        {
                             tool
                         } else {
                             Arc::new(VirtualizedTool::new(tool, bindings))
@@ -233,6 +258,35 @@ impl Runtime {
         engine
     }
 
+    /// Build the execution metadata that the substrate executor uses to
+    /// populate Envelope fields (trace_id, namespace, actor_id, session_id).
+    /// Without this, the executor falls back to "unknown" for all of these.
+    fn build_execution_metadata(
+        scope: &ExecutionScope,
+        ctx: &ExecutionContext,
+    ) -> HashMap<String, Value> {
+        let mut m = HashMap::with_capacity(5);
+        m.insert("trace_id".into(), Value::String(ctx.trace_id.to_string()));
+        m.insert("namespace".into(), Value::String(scope.namespace.clone()));
+        m.insert("actor_id".into(), Value::String(scope.actor.id.clone()));
+        m.insert("session_id".into(), Value::String(ctx.session_id.clone()));
+        let actor_role_str = match scope.actor.role {
+            crate::scope::ActorRole::InfraAdmin => "infra_admin",
+            crate::scope::ActorRole::ProductAdmin => "product_admin",
+            crate::scope::ActorRole::User => "user",
+            crate::scope::ActorRole::InfraAgent => "infra_agent",
+            crate::scope::ActorRole::ProductAgent => "product_agent",
+            crate::scope::ActorRole::UserAgent => "user_agent",
+            crate::scope::ActorRole::System => "system",
+        };
+        m.insert("actor_role".into(), Value::String(actor_role_str.into()));
+        m.insert(
+            "depth".into(),
+            Value::Number(serde_json::Number::from(scope.depth as u64)),
+        );
+        m
+    }
+
     /// Parse a YAML workflow.
     pub fn parse_yaml(&self, yaml: &str) -> Result<Workflow, RuntimeError> {
         self.engine.parse_yaml(yaml).map_err(RuntimeError::Engine)
@@ -259,91 +313,12 @@ impl Runtime {
         tool_name: &str,
         input: Value,
         scope: &ExecutionScope,
+        ctx: &ExecutionContext,
     ) -> Result<Value, RuntimeError> {
-        // 1. Capability check — returns the bindings (for namespace
-        //    injection) if the scope grants this tool.
-        let bindings = scope.check_tool(tool_name)?;
-
-        // 2. Resolve the raw tool from the engine registry.
-        let raw_tool = self
-            .engine
-            .registry()
-            .get(tool_name)
-            .ok_or_else(|| {
-                RuntimeError::CapabilityDenied(format!(
-                    "tool '{tool_name}' not found in engine registry"
-                ))
-            })?;
-
-        // 3. Layer 1: VirtualizedTool wraps the raw tool to inject the
-        //    scope's parameter bindings (e.g. namespace) before the tool
-        //    sees the input. Skipped when there are no bindings to save
-        //    an Arc allocation.
-        let wrapped: Arc<dyn konflux::tool::Tool> = if bindings.is_empty() {
-            raw_tool
-        } else {
-            Arc::new(VirtualizedTool::new(raw_tool, bindings))
-        };
-
-        // 4. Layer 2: GuardedTool applies deny/allow rules from
-        //    tools.yaml::tool_guards. If no guard is configured for this
-        //    tool, we skip the wrapper entirely.
-        let wrapped = {
-            let guards = self
-                .tool_guards
-                .read()
-                .expect("tool_guards lock poisoned");
-            if let Some(guard_entry) = guards.get(tool_name) {
-                if guard_entry.rules.is_empty() {
-                    wrapped
-                } else {
-                    debug!(
-                        tool = %tool_name,
-                        rule_count = guard_entry.rules.len(),
-                        "invoke_tool: applying guards"
-                    );
-                    Arc::new(GuardedTool::new(
-                        wrapped,
-                        guard_entry.rules.clone(),
-                        guard_entry.default_action,
-                    ))
-                }
-            } else {
-                wrapped
-            }
-        };
-
-        // 5. Build the tool context and invoke. The context carries the
-        //    scope's capability patterns so any nested capability checks
-        //    inside the tool (if it happens to call into the engine)
-        //    behave consistently with the rest of the runtime.
-        let ctx = konflux::tool::ToolContext {
-            capabilities: scope.capability_patterns(),
-            workflow_id: "runtime_invoke".into(),
-            node_id: format!("invoke_{tool_name}"),
-            metadata: HashMap::from_iter([
-                (
-                    "namespace".into(),
-                    Value::String(scope.namespace.clone()),
-                ),
-                (
-                    "actor_id".into(),
-                    Value::String(scope.actor.id.clone()),
-                ),
-            ]),
-        };
-
-        let result = wrapped.invoke(input, &ctx).await;
-        self.event_bus.emit(RunEvent::ToolInvoked {
-            tool: tool_name.to_string(),
-            namespace: scope.namespace.clone(),
-            at: Utc::now(),
-            success: result.is_ok(),
-        });
-        result.map_err(|e| RuntimeError::Tool {
-            tool: tool_name.to_string(),
-            message: e.to_string(),
-        })
+        let registry = self.engine.registry();
+        self.dispatcher
+            .dispatch_tool(tool_name, input, scope, ctx, &registry)
+            .await
     }
 
     // ---- Execution ----
@@ -354,8 +329,10 @@ impl Runtime {
         workflow: &Workflow,
         input: Value,
         scope: ExecutionScope,
-        session_id: String,
+        ctx: ExecutionContext,
     ) -> Result<RunId, RuntimeError> {
+        let session_id = ctx.session_id.clone();
+        let trace_id = ctx.trace_id;
         info!(
             workflow_id = %workflow.id,
             namespace = %scope.namespace,
@@ -403,7 +380,7 @@ impl Runtime {
         if let Some(ref journal) = self.journal {
             if let Err(e) = journal
                 .append(JournalEntry {
-                    run_id,
+                    run_id: Some(run_id),
                     session_id: session_id.clone(),
                     namespace: scope.namespace.clone(),
                     event_type: "workflow_started".into(),
@@ -413,6 +390,8 @@ impl Runtime {
                         "actor_id": &scope.actor.id,
                         "actor_role": &scope.actor.role,
                     }),
+                    valid_to: None,
+                    idempotency_key: None,
                 })
                 .await
             {
@@ -423,14 +402,19 @@ impl Runtime {
         // Build scoped engine with VirtualizedTool + GuardedTool wrapping
         let engine = self.build_scoped_engine(&scope);
         let capability_patterns = scope.capability_patterns();
+        let execution_metadata = Self::build_execution_metadata(&scope, &ctx);
 
-        // Create hooks for process table updates
+        // Create hooks for process table updates + event bus emission +
+        // F1 Interaction-shaped journal append.
         let hooks = Arc::new(RuntimeHooks {
             run_id,
             namespace: scope.namespace.clone(),
             session_id: session_id.clone(),
             table: self.table.clone(),
             journal: self.journal.clone(),
+            event_bus: self.event_bus.clone(),
+            actor: scope.actor.clone(),
+            trace_id,
         });
 
         // Spawn execution
@@ -449,7 +433,7 @@ impl Runtime {
                     &workflow,
                     input,
                     &capability_patterns,
-                    HashMap::new(),
+                    execution_metadata,
                     Some(cancel_token),
                     Some(hooks),
                 )
@@ -461,17 +445,15 @@ impl Runtime {
                 Ok(_) => false,
                 Err(e) => matches!(
                     e,
-                    konflux::KonfluxError::Execution(
-                        konflux::error::ExecutionError::Cancelled { .. }
+                    konflux_substrate::KonfluxError::Execution(
+                        konflux_substrate::error::ExecutionError::Cancelled { .. }
                     )
                 ),
             };
 
             // Compute duration once and reuse it for status + metrics + events.
             let duration_ms = {
-                let started_at = table
-                    .get(&run_id, |run| run.started_at)
-                    .unwrap_or(now);
+                let started_at = table.get(&run_id, |run| run.started_at).unwrap_or(now);
                 (now - started_at).num_milliseconds().max(0) as u64
             };
 
@@ -535,11 +517,13 @@ impl Runtime {
             if let Some(ref journal) = journal {
                 if let Err(e) = journal
                     .append(JournalEntry {
-                        run_id,
+                        run_id: Some(run_id),
                         session_id,
                         namespace,
                         event_type: event_type.into(),
                         payload,
+                        valid_to: None,
+                        idempotency_key: None,
                     })
                     .await
                 {
@@ -564,20 +548,24 @@ impl Runtime {
             match status {
                 Some(RunStatus::Completed { output, .. }) => return Ok(output),
                 Some(RunStatus::Failed { error, .. }) => {
-                    return Err(RuntimeError::Engine(konflux::KonfluxError::Execution(
-                        konflux::error::ExecutionError::NodeFailed {
-                            workflow_id: "runtime".into(),
-                            node: "wait".into(),
-                            message: error,
-                        },
-                    )));
+                    return Err(RuntimeError::Engine(
+                        konflux_substrate::KonfluxError::Execution(
+                            konflux_substrate::error::ExecutionError::NodeFailed {
+                                workflow_id: "runtime".into(),
+                                node: "wait".into(),
+                                message: error,
+                            },
+                        ),
+                    ));
                 }
                 Some(RunStatus::Cancelled { reason, .. }) => {
-                    return Err(RuntimeError::Engine(konflux::KonfluxError::Execution(
-                        konflux::error::ExecutionError::Cancelled {
-                            workflow_id: reason,
-                        },
-                    )));
+                    return Err(RuntimeError::Engine(
+                        konflux_substrate::KonfluxError::Execution(
+                            konflux_substrate::error::ExecutionError::Cancelled {
+                                workflow_id: reason,
+                            },
+                        ),
+                    ));
                 }
                 None => return Err(RuntimeError::NotFound(run_id)),
                 _ => {
@@ -594,9 +582,9 @@ impl Runtime {
         workflow: &Workflow,
         input: Value,
         scope: ExecutionScope,
-        session_id: String,
+        ctx: ExecutionContext,
     ) -> Result<Value, RuntimeError> {
-        let run_id = self.start(workflow, input, scope, session_id).await?;
+        let run_id = self.start(workflow, input, scope, ctx).await?;
         self.wait(run_id).await
     }
 
@@ -614,8 +602,10 @@ impl Runtime {
         workflow: &Workflow,
         input: Value,
         scope: ExecutionScope,
-        session_id: String,
-    ) -> Result<(RunId, konflux::StreamReceiver), RuntimeError> {
+        ctx: ExecutionContext,
+    ) -> Result<(RunId, konflux_substrate::StreamReceiver), RuntimeError> {
+        let session_id = ctx.session_id.clone();
+        let trace_id = ctx.trace_id;
         info!(
             workflow_id = %workflow.id,
             namespace = %scope.namespace,
@@ -661,7 +651,7 @@ impl Runtime {
         if let Some(ref journal) = self.journal {
             if let Err(e) = journal
                 .append(JournalEntry {
-                    run_id,
+                    run_id: Some(run_id),
                     session_id: session_id.clone(),
                     namespace: scope.namespace.clone(),
                     event_type: "workflow_started".into(),
@@ -671,6 +661,8 @@ impl Runtime {
                         "actor_id": &scope.actor.id,
                         "streaming": true,
                     }),
+                    valid_to: None,
+                    idempotency_key: None,
                 })
                 .await
             {
@@ -681,14 +673,19 @@ impl Runtime {
         // Build scoped engine with VirtualizedTool + GuardedTool wrapping
         let engine = self.build_scoped_engine(&scope);
         let capability_patterns = scope.capability_patterns();
+        let execution_metadata = Self::build_execution_metadata(&scope, &ctx);
 
-        // Create hooks for process table updates
+        // Create hooks for process table updates + event bus emission +
+        // F1 Interaction-shaped journal append.
         let hooks = Arc::new(RuntimeHooks {
             run_id,
             namespace: scope.namespace.clone(),
             session_id: session_id.clone(),
             table: self.table.clone(),
             journal: self.journal.clone(),
+            event_bus: self.event_bus.clone(),
+            actor: scope.actor.clone(),
+            trace_id,
         });
 
         // Call engine.run_streaming() — returns a StreamReceiver immediately
@@ -697,7 +694,7 @@ impl Runtime {
                 workflow,
                 input,
                 &capability_patterns,
-                HashMap::new(),
+                execution_metadata,
                 Some(cancel_token),
                 Some(hooks),
             )
@@ -706,7 +703,7 @@ impl Runtime {
 
         // Create a forwarding channel: engine_rx → (caller_rx + process table update)
         let (caller_tx, caller_rx) =
-            konflux::stream::stream_channel(self.engine.config().stream_buffer);
+            konflux_substrate::stream::stream_channel(self.engine.config().stream_buffer);
 
         let table = self.table.clone();
         let journal = self.journal.clone();
@@ -723,15 +720,15 @@ impl Runtime {
             while let Some(event) = engine_rx.recv().await {
                 let is_terminal = matches!(
                     event,
-                    konflux::stream::StreamEvent::Done { .. }
-                        | konflux::stream::StreamEvent::Error { .. }
+                    konflux_substrate::stream::StreamEvent::Done { .. }
+                        | konflux_substrate::stream::StreamEvent::Error { .. }
                 );
 
                 match &event {
-                    konflux::stream::StreamEvent::Done { .. } => {
+                    konflux_substrate::stream::StreamEvent::Done { .. } => {
                         final_status = Some(("workflow_completed", serde_json::json!({}), true));
                     }
-                    konflux::stream::StreamEvent::Error { code, message, .. } => {
+                    konflux_substrate::stream::StreamEvent::Error { code, message, .. } => {
                         let is_cancel = code == "cancelled" || message.contains("cancelled");
                         if is_cancel {
                             final_status = Some((
@@ -839,11 +836,13 @@ impl Runtime {
                 if let Some(ref journal) = journal {
                     if let Err(e) = journal
                         .append(JournalEntry {
-                            run_id,
+                            run_id: Some(run_id),
                             session_id,
                             namespace,
                             event_type: event_type.into(),
                             payload,
+                            valid_to: None,
+                            idempotency_key: None,
                         })
                         .await
                     {

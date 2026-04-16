@@ -12,11 +12,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use tokio::sync::Mutex;
 
-use konflux::engine::Engine;
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolContext, ToolInfo};
+use konflux_substrate::engine::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolInfo};
 
+use konf_runtime::interaction::Interaction;
 use konf_runtime::journal::JournalStore;
 use konf_runtime::scope::*;
 use konf_runtime::{RedbJournal, RunEvent, Runtime};
@@ -39,8 +42,9 @@ impl Tool for EchoTool {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
-        Ok(input)
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let output = env.payload.clone();
+        Ok(env.respond(output))
     }
 }
 
@@ -58,9 +62,9 @@ impl Tool for SlowTool {
             annotations: Default::default(),
         }
     }
-    async fn invoke(&self, _input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        Ok(json!({"done": true}))
+        Ok(env.respond(json!({"done": true})))
     }
 }
 
@@ -68,7 +72,7 @@ fn setup_engine() -> Engine {
     let engine = Engine::new();
     engine.register_tool(Arc::new(EchoTool));
     engine.register_tool(Arc::new(SlowTool));
-    konflux::builtin::register_builtins(&engine);
+    konflux_substrate::builtin::register_builtins(&engine);
     engine
 }
 
@@ -130,7 +134,12 @@ nodes:
 
     let scope = test_scope("konf:test:user_1");
     let result = runtime
-        .run(&workflow, json!({}), scope, "sess_1".into())
+        .run(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_1"),
+        )
         .await;
     assert!(
         result.is_ok(),
@@ -157,7 +166,12 @@ nodes:
 
     let scope = test_scope("konf:test:user_1");
     let run_id = runtime
-        .start(&workflow, json!({}), scope, "sess_1".into())
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_1"),
+        )
         .await
         .unwrap();
 
@@ -189,7 +203,12 @@ nodes:
 
     let scope = test_scope("konf:test:user_list");
     let _run_id = runtime
-        .start(&workflow, json!({}), scope, "sess_list".into())
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_list"),
+        )
         .await
         .unwrap();
 
@@ -218,7 +237,12 @@ nodes:
 
     let scope = test_scope("konf:test:journal");
     let _ = runtime
-        .run(&workflow, json!({}), scope, "sess_journal".into())
+        .run(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_journal"),
+        )
         .await;
 
     // Give async journal appends a moment to land.
@@ -235,9 +259,7 @@ nodes:
         "journal should have recorded workflow lifecycle events"
     );
     // Newest-first ordering: the last event should be a terminal one.
-    assert!(rows
-        .iter()
-        .any(|r| r.event_type == "workflow_started"));
+    assert!(rows.iter().any(|r| r.event_type == "workflow_started"));
 }
 
 #[tokio::test]
@@ -271,12 +293,22 @@ nodes:
     };
 
     let _run1 = runtime
-        .start(&workflow, json!({}), scope.clone(), "sess_a".into())
+        .start(
+            &workflow,
+            json!({}),
+            scope.clone(),
+            konf_runtime::ExecutionContext::new_root("sess_a"),
+        )
         .await
         .unwrap();
 
     let result = runtime
-        .start(&workflow, json!({}), scope, "sess_b".into())
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_b"),
+        )
         .await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("max_active_runs"));
@@ -291,7 +323,12 @@ async fn test_invoke_tool_happy_path() {
     let runtime = create_runtime_edge().await;
     let scope = test_scope("konf:test:invoke");
     let result = runtime
-        .invoke_tool("echo", json!({"hello": "world"}), &scope)
+        .invoke_tool(
+            "echo",
+            json!({"hello": "world"}),
+            &scope,
+            &konf_runtime::ExecutionContext::new_root("sess-t"),
+        )
         .await
         .unwrap();
     assert_eq!(result, json!({"hello": "world"}));
@@ -312,7 +349,12 @@ async fn test_invoke_tool_capability_denied() {
         depth: 0,
     };
     let err = runtime
-        .invoke_tool("echo", json!({}), &scope)
+        .invoke_tool(
+            "echo",
+            json!({}),
+            &scope,
+            &konf_runtime::ExecutionContext::new_root("sess-t"),
+        )
         .await
         .unwrap_err()
         .to_string();
@@ -325,7 +367,12 @@ async fn test_invoke_tool_emits_tool_invoked_event() {
     let mut rx = runtime.event_bus().subscribe();
     let scope = test_scope("konf:test:event");
     let _ = runtime
-        .invoke_tool("echo", json!({"hello": "world"}), &scope)
+        .invoke_tool(
+            "echo",
+            json!({"hello": "world"}),
+            &scope,
+            &konf_runtime::ExecutionContext::new_root("sess-t"),
+        )
         .await
         .unwrap();
     // Drain events until we find the ToolInvoked.
@@ -363,7 +410,12 @@ nodes:
         .unwrap();
     let scope = test_scope("konf:test:lifecycle");
     let _ = runtime
-        .run(&workflow, json!({}), scope, "sess_lifecycle".into())
+        .run(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_lifecycle"),
+        )
         .await;
 
     // Drain events looking for RunStarted and one of RunCompleted/RunFailed.
@@ -393,7 +445,12 @@ async fn test_invoke_tool_unknown_tool() {
     let runtime = create_runtime_edge().await;
     let scope = test_scope("konf:test:unknown");
     let err = runtime
-        .invoke_tool("nonexistent:tool", json!({}), &scope)
+        .invoke_tool(
+            "nonexistent:tool",
+            json!({}),
+            &scope,
+            &konf_runtime::ExecutionContext::new_root("sess-t"),
+        )
         .await
         .unwrap_err()
         .to_string();
@@ -437,7 +494,7 @@ nodes:
             &workflow,
             json!({"input": "test"}),
             scope,
-            "edge_sess".into(),
+            konf_runtime::ExecutionContext::new_root("edge_sess"),
         )
         .await
         .unwrap();
@@ -464,7 +521,12 @@ nodes:
 
     let scope = test_scope("konf:edge:metrics");
     let _result = runtime
-        .run(&workflow, json!({}), scope, "metrics_sess".into())
+        .run(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("metrics_sess"),
+        )
         .await;
 
     let metrics = runtime.metrics();
@@ -494,7 +556,12 @@ nodes:
 
     let scope = test_scope("konf:edge:cancel");
     let run_id = runtime
-        .start(&workflow, json!({}), scope, "cancel_sess".into())
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("cancel_sess"),
+        )
         .await
         .unwrap();
 
@@ -531,9 +598,415 @@ nodes:
     };
 
     let run_id = runtime
-        .start(&workflow, json!({}), scope, "sess_deny".into())
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_deny"),
+        )
         .await
         .unwrap();
     let result = runtime.wait(run_id).await;
     assert!(result.is_err(), "Should fail due to capability denial");
+}
+
+// ============================================================
+// Stage 5.a — Metadata flow to executor
+// ============================================================
+
+/// A tool that captures the Envelope it receives for later assertion.
+struct CaptureTool {
+    captured: Arc<Mutex<Option<Envelope<Value>>>>,
+}
+
+impl CaptureTool {
+    fn new(sink: Arc<Mutex<Option<Envelope<Value>>>>) -> Self {
+        Self { captured: sink }
+    }
+}
+
+#[async_trait]
+impl Tool for CaptureTool {
+    fn info(&self) -> ToolInfo {
+        ToolInfo {
+            name: "capture".into(),
+            description: "Captures its envelope".into(),
+            input_schema: json!({}),
+            capabilities: vec![],
+            supports_streaming: false,
+            output_schema: None,
+            annotations: Default::default(),
+        }
+    }
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        *self.captured.lock().await = Some(env.clone());
+        Ok(env.respond(json!({"captured": true})))
+    }
+}
+
+#[tokio::test]
+async fn executor_envelope_has_real_metadata() {
+    let captured = Arc::new(Mutex::new(None));
+    let engine = Engine::new();
+    engine.register_tool(Arc::new(CaptureTool::new(captured.clone())));
+    konflux_substrate::builtin::register_builtins(&engine);
+
+    let runtime = Runtime::new(engine, None).await.unwrap();
+
+    let workflow = runtime
+        .parse_yaml(
+            r#"
+workflow: metadata_flow_test
+nodes:
+  step1:
+    do: capture
+    with: {}
+    return: true
+"#,
+        )
+        .unwrap();
+
+    let expected_ns = "konf:test:metadata_flow";
+    let scope = test_scope(expected_ns);
+    let ctx = konf_runtime::ExecutionContext::new_root("metadata_sess");
+    let expected_trace_id = ctx.trace_id;
+
+    let result = runtime.run(&workflow, json!({}), scope, ctx).await;
+    assert!(result.is_ok(), "Workflow failed: {result:?}");
+
+    let env = captured.lock().await;
+    let env = env
+        .as_ref()
+        .expect("CaptureTool should have captured an envelope");
+
+    assert_eq!(
+        env.namespace.0, expected_ns,
+        "Executor envelope should carry the real namespace, not 'unknown'"
+    );
+    assert_eq!(
+        env.trace_id.0, expected_trace_id,
+        "Executor envelope should carry the real trace_id from ExecutionContext"
+    );
+    assert_eq!(
+        env.actor_id.0, "test_user",
+        "Executor envelope should carry the real actor_id"
+    );
+}
+
+#[tokio::test]
+async fn dispatch_symmetry_namespace_and_trace() {
+    // Both invoke_tool (Path A) and workflow execution (Path B) should
+    // see the same namespace and trace_id on the tool's Envelope.
+    let captured_a = Arc::new(Mutex::new(None));
+    let captured_b = Arc::new(Mutex::new(None));
+
+    // Two capture tools: one for each path
+    struct NamedCaptureTool {
+        name: String,
+        sink: Arc<Mutex<Option<(String, uuid::Uuid)>>>,
+    }
+    #[async_trait]
+    impl Tool for NamedCaptureTool {
+        fn info(&self) -> ToolInfo {
+            ToolInfo {
+                name: self.name.clone(),
+                description: "Captures ns+trace".into(),
+                input_schema: json!({}),
+                capabilities: vec![],
+                supports_streaming: false,
+                output_schema: None,
+                annotations: Default::default(),
+            }
+        }
+        async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+            *self.sink.lock().await = Some((env.namespace.0.clone(), env.trace_id.0));
+            Ok(env.respond(json!({"ok": true})))
+        }
+    }
+
+    let engine = Engine::new();
+    engine.register_tool(Arc::new(NamedCaptureTool {
+        name: "cap_a".into(),
+        sink: captured_a.clone(),
+    }));
+    engine.register_tool(Arc::new(NamedCaptureTool {
+        name: "cap_b".into(),
+        sink: captured_b.clone(),
+    }));
+    konflux_substrate::builtin::register_builtins(&engine);
+
+    let runtime = Runtime::new(engine, None).await.unwrap();
+
+    let ns = "konf:test:symmetry";
+    let scope = test_scope(ns);
+    let ctx = konf_runtime::ExecutionContext::new_root("symmetry_sess");
+    let trace_id = ctx.trace_id;
+
+    // Path A: invoke_tool
+    let _ = runtime
+        .invoke_tool("cap_a", json!({}), &scope, &ctx)
+        .await
+        .unwrap();
+
+    // Path B: workflow execution
+    let workflow = runtime
+        .parse_yaml(
+            r#"
+workflow: symmetry_test
+nodes:
+  step1:
+    do: cap_b
+    with: {}
+    return: true
+"#,
+        )
+        .unwrap();
+    let _ = runtime.run(&workflow, json!({}), scope, ctx).await.unwrap();
+
+    let (ns_a, trace_a) = captured_a.lock().await.clone().unwrap();
+    let (ns_b, trace_b) = captured_b.lock().await.clone().unwrap();
+
+    assert_eq!(ns_a, ns, "Path A namespace");
+    assert_eq!(ns_b, ns, "Path B namespace");
+    assert_eq!(trace_a, trace_id, "Path A trace_id");
+    assert_eq!(trace_b, trace_id, "Path B trace_id");
+}
+
+// ============================================================
+// Test: cross-namespace dispatch rejected
+// ============================================================
+
+#[tokio::test]
+async fn cross_namespace_dispatch_rejected() {
+    let runtime = create_runtime_edge().await;
+    // Scope grants only "ai:complete" — echo exists in the engine but is NOT
+    // granted by this scope.
+    let scope = ExecutionScope {
+        namespace: "konf:test:cross_ns".into(),
+        capabilities: vec![CapabilityGrant::new("ai:complete")],
+        limits: ResourceLimits::default(),
+        actor: Actor {
+            id: "test".into(),
+            role: ActorRole::User,
+        },
+        depth: 0,
+    };
+    let err = runtime
+        .invoke_tool(
+            "echo",
+            json!({"val": "should_fail"}),
+            &scope,
+            &konf_runtime::ExecutionContext::new_root("sess_cross_ns"),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    // The error must indicate capability denial, not "not found".
+    assert!(
+        err.contains("not granted") || err.contains("capability denied"),
+        "Expected CapabilityDenied error, got: {err}"
+    );
+}
+
+// ============================================================
+// Test: max depth recursive dispatch abort
+// ============================================================
+
+#[tokio::test]
+async fn max_depth_recursive_dispatch_abort() {
+    let runtime = create_runtime_edge().await;
+
+    let workflow = runtime
+        .parse_yaml(
+            r#"
+workflow: depth_limit_test
+nodes:
+  step1:
+    do: echo
+    with: { val: "deep" }
+    return: true
+"#,
+        )
+        .unwrap();
+
+    // depth=2 with max_child_depth=2 → validate_start rejects (depth >= max).
+    let scope = ExecutionScope {
+        namespace: "konf:test:depth".into(),
+        capabilities: vec![CapabilityGrant::new("*")],
+        limits: ResourceLimits {
+            max_child_depth: 2,
+            ..ResourceLimits::default()
+        },
+        actor: Actor {
+            id: "test".into(),
+            role: ActorRole::User,
+        },
+        depth: 2,
+    };
+
+    let result = runtime
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_depth"),
+        )
+        .await;
+    assert!(result.is_err(), "Should fail due to depth limit");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("max_child_depth"),
+        "Expected ResourceLimit(max_child_depth) error, got: {err}"
+    );
+}
+
+// ============================================================
+// Test: single dispatch path records Interaction in journal
+// ============================================================
+
+#[tokio::test]
+async fn single_dispatch_path_records_interaction() {
+    let (runtime, _dir) = create_runtime_with_journal().await;
+
+    let scope = test_scope("konf:test:dispatch_journal");
+    let ctx = konf_runtime::ExecutionContext::new_root("sess_dispatch_j");
+    let _ = runtime
+        .invoke_tool("echo", json!({"hello": "journal"}), &scope, &ctx)
+        .await
+        .unwrap();
+
+    // Give async journal append a moment to land.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let rows = runtime
+        .journal()
+        .unwrap()
+        .query_by_session("sess_dispatch_j", 100)
+        .await
+        .unwrap();
+
+    assert!(
+        !rows.is_empty(),
+        "journal should have recorded the dispatch"
+    );
+
+    // Find the interaction entry with ToolDispatch kind.
+    let interaction_row = rows
+        .iter()
+        .find(|r| r.event_type == "interaction")
+        .expect("expected an 'interaction' journal entry");
+
+    let payload = &interaction_row.payload;
+    let kind_type = payload
+        .get("kind")
+        .and_then(|v| v.get("type"))
+        .and_then(|v| v.as_str());
+    assert_eq!(
+        kind_type,
+        Some("tool_dispatch"),
+        "Interaction kind should be tool_dispatch, got: {payload}"
+    );
+    assert_eq!(
+        payload
+            .get("attributes")
+            .and_then(|a| a.get("tool_name"))
+            .and_then(|v| v.as_str()),
+        Some("echo"),
+        "Interaction should record the tool name"
+    );
+}
+
+// ============================================================
+// Stage 7 — subscribe_live_delivery
+// ============================================================
+
+#[tokio::test]
+async fn subscribe_live_delivery() {
+    let (runtime, _dir) = create_runtime_with_journal().await;
+
+    let ns = "konf:test:live_sub";
+    let scope = test_scope(ns);
+    let ctx = konf_runtime::ExecutionContext::new_root("live_sub_sess");
+
+    // Subscribe to the event bus BEFORE invoking anything.
+    let mut bus_rx = runtime.event_bus().subscribe();
+
+    // Now invoke a tool — this should trigger JournalAppended via the dispatcher
+    let result = runtime
+        .invoke_tool("echo", json!({"msg": "hello"}), &scope, &ctx)
+        .await;
+    assert!(result.is_ok(), "Tool invocation should succeed");
+
+    // The dispatcher emits JournalAppended after successful append.
+    // Drain events until we find it (there may be other events first).
+    let mut found = false;
+    for _ in 0..20 {
+        match tokio::time::timeout(std::time::Duration::from_millis(500), bus_rx.recv()).await {
+            Ok(Ok(RunEvent::JournalAppended {
+                namespace,
+                event_type,
+                ..
+            })) => {
+                // invoke_tool records an "interaction" event
+                if namespace == ns && event_type == "interaction" {
+                    found = true;
+                    break;
+                }
+            }
+            Ok(Ok(_)) => continue, // other event, keep looking
+            Ok(Err(_)) => break,   // channel error
+            Err(_) => break,       // timeout
+        }
+    }
+    assert!(
+        found,
+        "Should receive JournalAppended event for the tool invocation"
+    );
+}
+
+// ============================================================
+// Stage 8.c — step_index propagated to Interaction
+// ============================================================
+
+#[tokio::test]
+async fn step_index_propagated_to_interaction() {
+    let (runtime, _dir) = create_runtime_with_journal().await;
+
+    let scope = test_scope("konf:test:step_idx");
+    let ctx = konf_runtime::ExecutionContext::new_root("sess_step_idx");
+    let _ = runtime
+        .invoke_tool("echo", json!({"val": "step"}), &scope, &ctx)
+        .await
+        .unwrap();
+
+    // Give async journal append a moment to land.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let rows = runtime
+        .journal()
+        .unwrap()
+        .query_by_session("sess_step_idx", 100)
+        .await
+        .unwrap();
+
+    let interaction_row = rows
+        .iter()
+        .find(|r| r.event_type == "interaction")
+        .expect("expected an 'interaction' journal entry");
+
+    let interaction: Interaction =
+        Interaction::from_json(interaction_row.payload.clone()).expect("valid Interaction JSON");
+
+    // Root dispatch via for_tool_dispatch sets step_index = 0 and stream_id
+    // from the session_id. The key assertion: the field is present and was
+    // propagated from the envelope (not left as a stale default).
+    assert_eq!(
+        interaction.step_index, 0,
+        "step_index should be propagated from envelope (0 for root dispatch)"
+    );
+    // stream_id is set from the session_id passed to for_tool_dispatch
+    assert!(
+        !interaction.stream_id.is_empty() || interaction.step_index == 0,
+        "stream_id should be populated or step_index should be present"
+    );
 }

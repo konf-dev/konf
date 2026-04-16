@@ -20,7 +20,7 @@ use serde_json::json;
 use tracing::info;
 
 use konf_runtime::scope::{Actor, ActorRole, CapabilityGrant, ExecutionScope, ResourceLimits};
-use konflux::stream::{ProgressType, StreamEvent};
+use konflux_substrate::stream::{ProgressType, StreamEvent};
 
 use crate::auth::middleware::AuthUser;
 use crate::error::AppError;
@@ -99,10 +99,15 @@ pub async fn chat(
         "session_id": req.session_id,
     });
 
+    // R2: construct an ExecutionContext at the HTTP boundary. Each chat
+    // turn is a fresh root trace. Downstream dispatches inherit via
+    // ExecutionContext::child.
+    let exec_ctx = konf_runtime::ExecutionContext::new_root(req.session_id.clone());
+
     // Start streaming execution
     let (run_id, mut rx) = state
         .runtime
-        .start_streaming(&workflow, input, scope, req.session_id.clone())
+        .start_streaming(&workflow, input, scope, exec_ctx)
         .await
         .map_err(|e| AppError::Internal(format!("Failed to start workflow: {e}")))?;
 

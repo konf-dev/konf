@@ -1,7 +1,7 @@
 # Konf Engine Specification (konflux)
 
 **Status:** Authoritative
-**Crate:** `konflux` (konflux-core)
+**Crate:** `konflux` (konflux-substrate)
 **Role:** Kernel — all tool dispatch, workflow execution, and registry management routes through the engine
 
 ---
@@ -32,17 +32,11 @@ Tools are actions the LLM decides to call. They are the primary primitive.
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn info(&self) -> ToolInfo;
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError>;
-
-    /// Optional streaming invocation. Default delegates to invoke().
-    async fn invoke_streaming(
-        &self,
-        input: Value,
-        ctx: &ToolContext,
-        sender: StreamSender,
-    ) -> Result<Value, ToolError> {
-        self.invoke(input, ctx).await
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError>;
+    async fn invoke_streaming(&self, env: Envelope<Value>, sender: StreamSender) -> Result<Envelope<Value>, ToolError> {
+        self.invoke(env).await
     }
+    fn projection(&self) -> Option<&dyn StateProjection> { None }
 }
 ```
 
@@ -102,25 +96,9 @@ impl Default for ToolAnnotations {
 }
 ```
 
-#### ToolContext
+#### Envelope
 
-Passed to every tool invocation with execution metadata:
-
-```rust
-pub struct ToolContext {
-    /// Capabilities granted to the current execution scope
-    pub capabilities: Vec<String>,
-
-    /// Workflow that initiated this tool call
-    pub workflow_id: String,
-
-    /// Node within the workflow
-    pub node_id: String,
-
-    /// Arbitrary metadata (session_id, user_id, config_version, etc.)
-    pub metadata: HashMap<String, Value>,
-}
-```
+All execution context is carried via the `Envelope<T>` wrapper that holds the tool input alongside typed fields: `namespace`, `actor_id`, `capabilities` (as `CapSet`), `trace_id`, `deadline`, `idempotency_key`, `qos_class`, and extensible metadata. Tools receive `Envelope<Value>` and return `Envelope<Value>`. See `konflux-substrate/src/envelope.rs` for the full definition.
 
 #### ToolError
 

@@ -20,14 +20,12 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{TimeZone, Utc};
-use redb::{
-    Database, MultimapTableDefinition, ReadableDatabase, ReadableTable, TableDefinition,
-};
+use redb::{Database, MultimapTableDefinition, ReadableDatabase, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{JournalEntry, JournalError, JournalRow, JournalStore};
-use crate::error::RunId;
+use super::{JournalEntry, JournalError, JournalFilter, JournalRow, JournalStore};
+use crate::journal::RunId;
 
 // ---------------------------------------------------------------------------
 // Table definitions
@@ -46,6 +44,16 @@ const BY_RUN: MultimapTableDefinition<&[u8], u64> = MultimapTableDefinition::new
 const BY_SESSION: MultimapTableDefinition<&str, u64> =
     MultimapTableDefinition::new("journal_by_session");
 
+/// Multimap index: valid_to (micros) → set of sequence ids that expire at that time.
+/// Only populated for entries with a non-None valid_to.
+const BY_EXPIRY: MultimapTableDefinition<i64, u64> =
+    MultimapTableDefinition::new("journal_by_expiry");
+
+/// Multimap index: idempotency_key (string) → set of sequence ids.
+/// Only populated for entries with a non-None idempotency_key.
+const BY_IDEMPOTENCY: MultimapTableDefinition<&str, u64> =
+    MultimapTableDefinition::new("journal_by_idempotency");
+
 // ---------------------------------------------------------------------------
 // Stored value shape
 // ---------------------------------------------------------------------------
@@ -53,33 +61,45 @@ const BY_SESSION: MultimapTableDefinition<&str, u64> =
 /// On-disk representation of one journal event. Stored as postcard bytes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredEntry {
-    run_id_bytes: [u8; 16],
+    run_id_bytes: Option<[u8; 16]>,
     session_id: String,
     namespace: String,
     event_type: String,
     payload_json: String, // serde_json::Value serialized to its canonical string form
     created_at_micros: i64,
+    /// Expiry timestamp in microseconds. None = never expires.
+    /// Added in Stage 7.b; postcard decodes missing trailing Option as None.
+    valid_to_micros: Option<i64>,
+    /// Idempotency key for dedupe. Added in Stage 9; postcard trailing Option.
+    idempotency_key: Option<String>,
 }
 
 impl StoredEntry {
     fn from_entry(entry: &JournalEntry) -> Result<Self, JournalError> {
         Ok(Self {
-            run_id_bytes: *entry.run_id.as_bytes(),
+            run_id_bytes: entry.run_id.map(|id| *id.as_bytes()),
             session_id: entry.session_id.clone(),
             namespace: entry.namespace.clone(),
             event_type: entry.event_type.clone(),
-            payload_json: serde_json::to_string(&entry.payload).map_err(JournalError::serialization)?,
+            payload_json: serde_json::to_string(&entry.payload)
+                .map_err(JournalError::serialization)?,
             created_at_micros: Utc::now().timestamp_micros(),
+            valid_to_micros: entry.valid_to.map(|dt| dt.timestamp_micros()),
+            idempotency_key: entry.idempotency_key.clone(),
         })
     }
 
     fn into_row(self, id: u64) -> Result<JournalRow, JournalError> {
-        let run_id = Uuid::from_bytes(self.run_id_bytes);
-        let payload = serde_json::from_str(&self.payload_json).map_err(JournalError::serialization)?;
+        let run_id = self.run_id_bytes.map(Uuid::from_bytes);
+        let payload =
+            serde_json::from_str(&self.payload_json).map_err(JournalError::serialization)?;
         let created_at = Utc
             .timestamp_micros(self.created_at_micros)
             .single()
             .unwrap_or_else(Utc::now);
+        let valid_to = self
+            .valid_to_micros
+            .and_then(|micros| Utc.timestamp_micros(micros).single());
         Ok(JournalRow {
             id,
             run_id,
@@ -88,6 +108,8 @@ impl StoredEntry {
             event_type: self.event_type,
             payload,
             created_at,
+            valid_to,
+            idempotency_key: self.idempotency_key,
         })
     }
 }
@@ -139,6 +161,12 @@ impl RedbJournal {
             let _ = write
                 .open_multimap_table(BY_SESSION)
                 .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let _ = write
+                .open_multimap_table(BY_EXPIRY)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let _ = write
+                .open_multimap_table(BY_IDEMPOTENCY)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
         }
         write
             .commit()
@@ -151,6 +179,11 @@ impl RedbJournal {
     pub fn database(&self) -> Arc<Database> {
         self.db.clone()
     }
+}
+
+/// Returns true if this row is expired (valid_to in the past).
+fn is_expired(row: &JournalRow) -> bool {
+    row.valid_to.map(|vt| vt < Utc::now()).unwrap_or(false)
 }
 
 #[async_trait::async_trait]
@@ -181,12 +214,12 @@ impl JournalStore for RedbJournal {
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
                 next_id
             };
-            {
+            if let Some(ref run_id_bytes) = stored.run_id_bytes {
                 let mut by_run = write
                     .open_multimap_table(BY_RUN)
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
                 by_run
-                    .insert(stored.run_id_bytes.as_slice(), next_id)
+                    .insert(run_id_bytes.as_slice(), next_id)
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
             }
             {
@@ -195,6 +228,22 @@ impl JournalStore for RedbJournal {
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
                 by_session
                     .insert(stored.session_id.as_str(), next_id)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            }
+            if let Some(valid_to_micros) = stored.valid_to_micros {
+                let mut by_expiry = write
+                    .open_multimap_table(BY_EXPIRY)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                by_expiry
+                    .insert(valid_to_micros, next_id)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            }
+            if let Some(ref idem_key) = stored.idempotency_key {
+                let mut by_idem = write
+                    .open_multimap_table(BY_IDEMPOTENCY)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                by_idem
+                    .insert(idem_key.as_str(), next_id)
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
             }
             write
@@ -238,6 +287,7 @@ impl JournalStore for RedbJournal {
                 }
             }
             rows.sort_by_key(|r| r.id);
+            rows.retain(|r| !is_expired(r));
             Ok(rows)
         })
         .await
@@ -262,9 +312,10 @@ impl JournalStore for RedbJournal {
                 .open_table(EVENTS)
                 .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
 
-            // Collect all sequences for this session, then pick the most
-            // recent `limit` (sequences are monotonic by time so last N is
-            // newest N).
+            // Collect all sequences for this session sorted descending
+            // (newest first). We resolve each row and filter expired
+            // entries BEFORE applying the limit so that expired rows
+            // don't consume limit slots.
             let ids_iter = by_session
                 .get(session_id.as_str())
                 .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
@@ -277,23 +328,25 @@ impl JournalStore for RedbJournal {
                 );
             }
             ids.sort_unstable();
-            if ids.len() > limit {
-                let start = ids.len() - limit;
-                ids.drain(..start);
-            }
             // Return newest first to match the old Postgres
             // `ORDER BY created_at DESC LIMIT N` semantics.
             ids.reverse();
 
-            let mut rows = Vec::with_capacity(ids.len());
+            let mut rows = Vec::with_capacity(limit.min(ids.len()));
             for id in ids {
+                if rows.len() >= limit {
+                    break;
+                }
                 if let Some(stored_bytes) = events
                     .get(id)
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?
                 {
                     let stored: StoredEntry = postcard::from_bytes(stored_bytes.value())
                         .map_err(JournalError::serialization)?;
-                    rows.push(stored.into_row(id)?);
+                    let row = stored.into_row(id)?;
+                    if !is_expired(&row) {
+                        rows.push(row);
+                    }
                 }
             }
             Ok(rows)
@@ -323,6 +376,7 @@ impl JournalStore for RedbJournal {
                     postcard::from_bytes(val_guard.value()).map_err(JournalError::serialization)?;
                 rows.push(stored.into_row(id)?);
             }
+            rows.retain(|r| !is_expired(r));
             Ok(rows)
         })
         .await
@@ -338,8 +392,8 @@ impl JournalStore for RedbJournal {
         let db = self.db.clone();
 
         // Phase 1: scan under spawn_blocking
-        let zombies: Vec<JournalEntry> = tokio::task::spawn_blocking(
-            move || -> Result<Vec<JournalEntry>, JournalError> {
+        let zombies: Vec<JournalEntry> =
+            tokio::task::spawn_blocking(move || -> Result<Vec<JournalEntry>, JournalError> {
                 use std::collections::{HashMap, HashSet};
                 let read = db
                     .begin_read()
@@ -359,23 +413,25 @@ impl JournalStore for RedbJournal {
                         .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
                     let stored: StoredEntry = postcard::from_bytes(val_guard.value())
                         .map_err(JournalError::serialization)?;
-                    match stored.event_type.as_str() {
-                        "workflow_started" => {
-                            started
-                                .entry(stored.run_id_bytes)
-                                .or_insert((stored.session_id, stored.namespace));
+                    if let Some(run_id_bytes) = stored.run_id_bytes {
+                        match stored.event_type.as_str() {
+                            "workflow_started" => {
+                                started
+                                    .entry(run_id_bytes)
+                                    .or_insert((stored.session_id, stored.namespace));
+                            }
+                            "workflow_completed" | "workflow_failed" | "workflow_cancelled" => {
+                                terminal.insert(run_id_bytes);
+                            }
+                            _ => {}
                         }
-                        "workflow_completed" | "workflow_failed" | "workflow_cancelled" => {
-                            terminal.insert(stored.run_id_bytes);
-                        }
-                        _ => {}
                     }
                 }
                 let mut result = Vec::new();
                 for (run_id_bytes, (session_id, namespace)) in started {
                     if !terminal.contains(&run_id_bytes) {
                         result.push(JournalEntry {
-                            run_id: Uuid::from_bytes(run_id_bytes),
+                            run_id: Some(Uuid::from_bytes(run_id_bytes)),
                             session_id,
                             namespace,
                             event_type: "workflow_failed".into(),
@@ -383,14 +439,15 @@ impl JournalStore for RedbJournal {
                                 "error": "System restart — workflow was interrupted",
                                 "reconciled": true,
                             }),
+                            valid_to: None,
+                            idempotency_key: None,
                         });
                     }
                 }
                 Ok(result)
-            },
-        )
-        .await
-        .map_err(|e| JournalError::storage(std::io::Error::other(e)))??;
+            })
+            .await
+            .map_err(|e| JournalError::storage(std::io::Error::other(e)))??;
 
         // Phase 2: append the reconciliation events via the normal path.
         let count = zombies.len() as u64;
@@ -398,6 +455,250 @@ impl JournalStore for RedbJournal {
             self.append(entry).await?;
         }
         Ok(count)
+    }
+
+    async fn query(
+        &self,
+        filter: &JournalFilter,
+        limit: usize,
+    ) -> Result<Vec<JournalRow>, JournalError> {
+        let db = self.db.clone();
+        let filter = filter.clone();
+        tokio::task::spawn_blocking(move || -> Result<Vec<JournalRow>, JournalError> {
+            let read = db
+                .begin_read()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let events = read
+                .open_table(EVENTS)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let mut rows = Vec::with_capacity(limit.min(1024));
+            // Scan in reverse (newest first), filter, collect up to limit.
+            for pair in events
+                .iter()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?
+                .rev()
+            {
+                if rows.len() >= limit {
+                    break;
+                }
+                let (id_guard, val_guard) =
+                    pair.map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let id = id_guard.value();
+                let stored: StoredEntry =
+                    postcard::from_bytes(val_guard.value()).map_err(JournalError::serialization)?;
+                let row = stored.into_row(id)?;
+                if filter.matches(&row) {
+                    rows.push(row);
+                }
+            }
+            Ok(rows)
+        })
+        .await
+        .map_err(|e| JournalError::storage(std::io::Error::other(e)))?
+    }
+
+    async fn aggregate(
+        &self,
+        filter: &JournalFilter,
+        agg_query: &super::AggregateQuery,
+    ) -> Result<super::AggregateResult, JournalError> {
+        use super::{AggregateQuery, AggregateResult};
+        let db = self.db.clone();
+        let filter = filter.clone();
+        let agg_query = agg_query.clone();
+
+        tokio::task::spawn_blocking(move || -> Result<AggregateResult, JournalError> {
+            let read = db
+                .begin_read()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let events = read
+                .open_table(EVENTS)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+
+            let mut count = 0u64;
+            let mut most_recent: Option<chrono::DateTime<Utc>> = None;
+
+            for pair in events
+                .iter()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?
+            {
+                let (id_guard, val_guard) =
+                    pair.map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let id = id_guard.value();
+                let stored: StoredEntry =
+                    postcard::from_bytes(val_guard.value()).map_err(JournalError::serialization)?;
+                let row = stored.into_row(id)?;
+                if !filter.matches(&row) {
+                    continue;
+                }
+                count += 1;
+                match most_recent {
+                    None => most_recent = Some(row.created_at),
+                    Some(prev) if row.created_at > prev => most_recent = Some(row.created_at),
+                    _ => {}
+                }
+            }
+
+            match agg_query {
+                AggregateQuery::Count => Ok(AggregateResult::Count(count)),
+                AggregateQuery::MostRecent => Ok(AggregateResult::MostRecent(most_recent)),
+                AggregateQuery::WindowSum { .. } => Err(JournalError::Storage(Box::from(
+                    "WindowSum not yet implemented",
+                ))),
+            }
+        })
+        .await
+        .map_err(|e| JournalError::storage(std::io::Error::other(e)))?
+    }
+
+    async fn get_by_idempotency_key(&self, key: &str) -> Result<Option<JournalRow>, JournalError> {
+        let db = self.db.clone();
+        let key = key.to_string();
+        tokio::task::spawn_blocking(move || -> Result<Option<JournalRow>, JournalError> {
+            let read = db
+                .begin_read()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let by_idem = read
+                .open_multimap_table(BY_IDEMPOTENCY)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let events = read
+                .open_table(EVENTS)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+
+            // Find the most recent (highest sequence id) entry for this key.
+            let mut best: Option<(u64, StoredEntry)> = None;
+            let iter = by_idem
+                .get(key.as_str())
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            for id_res in iter {
+                let id = id_res
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?
+                    .value();
+                match &best {
+                    Some((prev_id, _)) if id <= *prev_id => {}
+                    _ => {
+                        if let Some(stored_bytes) = events.get(id).map_err(|e| {
+                            JournalError::storage(std::io::Error::other(e.to_string()))
+                        })? {
+                            let stored: StoredEntry = postcard::from_bytes(stored_bytes.value())
+                                .map_err(JournalError::serialization)?;
+                            best = Some((id, stored));
+                        }
+                    }
+                }
+            }
+            match best {
+                Some((id, stored)) => {
+                    let row = stored.into_row(id)?;
+                    if is_expired(&row) {
+                        Ok(None)
+                    } else {
+                        Ok(Some(row))
+                    }
+                }
+                None => Ok(None),
+            }
+        })
+        .await
+        .map_err(|e| JournalError::storage(std::io::Error::other(e)))?
+    }
+
+    async fn delete_expired(&self) -> Result<u64, JournalError> {
+        let db = self.db.clone();
+        let now_micros = Utc::now().timestamp_micros();
+
+        tokio::task::spawn_blocking(move || -> Result<u64, JournalError> {
+            let write = db
+                .begin_write()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let mut deleted = 0u64;
+
+            // Phase 1: scan EVENTS to collect expired entries with their
+            // index keys. Read-only table opened in its own scope so the
+            // borrow is released before phase 2 mutations.
+            struct ExpiredEntry {
+                seq: u64,
+                run_id_bytes: Option<[u8; 16]>,
+                session_id: String,
+                valid_to_micros: Option<i64>,
+                idempotency_key: Option<String>,
+            }
+            let expired: Vec<ExpiredEntry> = {
+                let events_read = write
+                    .open_table(EVENTS)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let mut entries = Vec::new();
+                for pair in events_read
+                    .iter()
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?
+                {
+                    let (key, val) = pair
+                        .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                    let stored: StoredEntry =
+                        postcard::from_bytes(val.value()).map_err(JournalError::serialization)?;
+                    if let Some(vt) = stored.valid_to_micros {
+                        if vt <= now_micros {
+                            entries.push(ExpiredEntry {
+                                seq: key.value(),
+                                run_id_bytes: stored.run_id_bytes,
+                                session_id: stored.session_id,
+                                valid_to_micros: stored.valid_to_micros,
+                                idempotency_key: stored.idempotency_key,
+                            });
+                        }
+                    }
+                }
+                entries
+            };
+
+            if expired.is_empty() {
+                write
+                    .commit()
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                return Ok(0);
+            }
+
+            // Phase 2: delete from all tables using the collected keys.
+            {
+                let mut events = write
+                    .open_table(EVENTS)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let mut by_run = write
+                    .open_multimap_table(BY_RUN)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let mut by_session = write
+                    .open_multimap_table(BY_SESSION)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let mut by_expiry = write
+                    .open_multimap_table(BY_EXPIRY)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let mut by_idem = write
+                    .open_multimap_table(BY_IDEMPOTENCY)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+
+                for entry in &expired {
+                    if let Some(ref rid) = entry.run_id_bytes {
+                        let _ = by_run.remove(rid.as_slice(), entry.seq);
+                    }
+                    let _ = by_session.remove(entry.session_id.as_str(), entry.seq);
+                    if let Some(vt) = entry.valid_to_micros {
+                        let _ = by_expiry.remove(vt, entry.seq);
+                    }
+                    if let Some(ref idem_key) = entry.idempotency_key {
+                        let _ = by_idem.remove(idem_key.as_str(), entry.seq);
+                    }
+                    let _ = events.remove(entry.seq);
+                    deleted += 1;
+                }
+            }
+
+            write
+                .commit()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            Ok(deleted)
+        })
+        .await
+        .map_err(|e| JournalError::storage(std::io::Error::other(e)))?
     }
 }
 
@@ -415,11 +716,13 @@ mod tests {
 
     fn entry(run_id: Uuid, session: &str, event_type: &str) -> JournalEntry {
         JournalEntry {
-            run_id,
+            run_id: Some(run_id),
             session_id: session.into(),
             namespace: "konf:test:user".into(),
             event_type: event_type.into(),
             payload: serde_json::json!({}),
+            valid_to: None,
+            idempotency_key: None,
         }
     }
 
@@ -427,15 +730,21 @@ mod tests {
     async fn append_and_query_by_run() {
         let (j, _dir) = journal().await;
         let run_id = Uuid::new_v4();
-        let id1 = j.append(entry(run_id, "s1", "workflow_started")).await.unwrap();
-        let id2 = j.append(entry(run_id, "s1", "workflow_completed")).await.unwrap();
+        let id1 = j
+            .append(entry(run_id, "s1", "workflow_started"))
+            .await
+            .unwrap();
+        let id2 = j
+            .append(entry(run_id, "s1", "workflow_completed"))
+            .await
+            .unwrap();
         assert!(id2 > id1);
 
         let rows = j.query_by_run(run_id).await.unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].event_type, "workflow_started");
         assert_eq!(rows[1].event_type, "workflow_completed");
-        assert_eq!(rows[0].run_id, run_id);
+        assert_eq!(rows[0].run_id, Some(run_id));
     }
 
     #[tokio::test]
@@ -443,9 +752,15 @@ mod tests {
         let (j, _dir) = journal().await;
         let run1 = Uuid::new_v4();
         let run2 = Uuid::new_v4();
-        j.append(entry(run1, "sess", "workflow_started")).await.unwrap();
-        j.append(entry(run2, "sess", "workflow_started")).await.unwrap();
-        j.append(entry(run2, "sess", "workflow_completed")).await.unwrap();
+        j.append(entry(run1, "sess", "workflow_started"))
+            .await
+            .unwrap();
+        j.append(entry(run2, "sess", "workflow_started"))
+            .await
+            .unwrap();
+        j.append(entry(run2, "sess", "workflow_completed"))
+            .await
+            .unwrap();
 
         let rows = j.query_by_session("sess", 2).await.unwrap();
         assert_eq!(rows.len(), 2);
@@ -473,9 +788,15 @@ mod tests {
         let (j, _dir) = journal().await;
         let live = Uuid::new_v4();
         let done = Uuid::new_v4();
-        j.append(entry(live, "s1", "workflow_started")).await.unwrap();
-        j.append(entry(done, "s2", "workflow_started")).await.unwrap();
-        j.append(entry(done, "s2", "workflow_completed")).await.unwrap();
+        j.append(entry(live, "s1", "workflow_started"))
+            .await
+            .unwrap();
+        j.append(entry(done, "s2", "workflow_started"))
+            .await
+            .unwrap();
+        j.append(entry(done, "s2", "workflow_completed"))
+            .await
+            .unwrap();
 
         let count = j.reconcile_zombies().await.unwrap();
         assert_eq!(count, 1);

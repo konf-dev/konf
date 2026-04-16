@@ -5,9 +5,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use konflux::engine::Engine;
-use konflux::error::ToolError as KonfluxToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
+use konflux_substrate::engine::Engine;
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError as KonfluxToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
 
 /// Lists all registered tools with their names, descriptions, input schemas, and annotations.
 pub struct IntrospectTool {
@@ -59,8 +60,8 @@ impl Tool for IntrospectTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, KonfluxToolError> {
-        let filter = input.get("filter").and_then(|v| v.as_str());
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, KonfluxToolError> {
+        let filter = env.payload.get("filter").and_then(|v| v.as_str());
 
         let registry = self.engine.registry();
         let all_tools = registry.list();
@@ -91,17 +92,16 @@ impl Tool for IntrospectTool {
             .collect();
 
         let count = tools_json.len();
-        Ok(json!({
+        Ok(env.respond(json!({
             "tools": tools_json,
             "count": count,
-        }))
+        })))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     fn make_engine() -> Arc<Engine> {
         Arc::new(Engine::new())
@@ -141,27 +141,21 @@ mod tests {
             }
             async fn invoke(
                 &self,
-                _input: Value,
-                _ctx: &ToolContext,
-            ) -> Result<Value, KonfluxToolError> {
-                Ok(Value::Null)
+                env: Envelope<Value>,
+            ) -> Result<Envelope<Value>, KonfluxToolError> {
+                Ok(env.respond(Value::Null))
             }
         }
 
         engine.register_tool(Arc::new(DummyTool));
 
         let introspect = IntrospectTool::new(engine);
-        let ctx = ToolContext {
-            capabilities: vec!["*".into()],
-            workflow_id: "test".into(),
-            node_id: "test".into(),
-            metadata: HashMap::new(),
-        };
+        let env = Envelope::test(json!({}));
 
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(introspect.invoke(json!({}), &ctx)).unwrap();
-        assert_eq!(result["count"], 1);
-        assert_eq!(result["tools"][0]["name"], "test_dummy");
+        let result_env = rt.block_on(introspect.invoke(env)).unwrap();
+        assert_eq!(result_env.payload["count"], 1);
+        assert_eq!(result_env.payload["tools"][0]["name"], "test_dummy");
     }
 
     #[test]

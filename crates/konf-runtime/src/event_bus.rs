@@ -76,10 +76,7 @@ pub enum RunEvent {
     },
 
     /// A workflow run reached [`crate::RunStatus::Completed`].
-    RunCompleted {
-        run_id: RunId,
-        duration_ms: u64,
-    },
+    RunCompleted { run_id: RunId, duration_ms: u64 },
 
     /// A workflow run reached [`crate::RunStatus::Failed`].
     RunFailed {
@@ -89,10 +86,7 @@ pub enum RunEvent {
     },
 
     /// A workflow run was cancelled.
-    RunCancelled {
-        run_id: RunId,
-        reason: String,
-    },
+    RunCancelled { run_id: RunId, reason: String },
 
     /// A single tool was invoked via [`crate::Runtime::invoke_tool`]
     /// (outside of a workflow). Used by the MCP HTTP transport so direct

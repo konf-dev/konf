@@ -29,22 +29,21 @@ pub trait Tool: Send + Sync {
     /// Metadata: name, description, schemas, capabilities, annotations
     fn info(&self) -> ToolInfo;
 
-    /// Execute the tool with the given input
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError>;
+    /// Execute the tool. Context (namespace, actor, capabilities, trace_id,
+    /// deadline, etc.) is carried inside the Envelope.
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError>;
 
     /// Optional: execute with streaming output
-    async fn invoke_streaming(
-        &self,
-        input: Value,
-        ctx: &ToolContext,
-        sender: StreamSender,
-    ) -> Result<Value, ToolError> {
-        self.invoke(input, ctx).await
+    async fn invoke_streaming(&self, env: Envelope<Value>, sender: StreamSender) -> Result<Envelope<Value>, ToolError> {
+        self.invoke(env).await
     }
+
+    /// Optional: return a StateProjection for bisimulation testing
+    fn projection(&self) -> Option<&dyn StateProjection> { None }
 }
 ```
 
-See [engine.md](engine.md) for full definitions of `ToolInfo`, `ToolAnnotations`, `ToolContext`, and `ToolError`.
+See [engine.md](engine.md) for full definitions of `ToolInfo`, `ToolAnnotations`, `Envelope`, and `ToolError`.
 
 ---
 
@@ -87,8 +86,7 @@ crates/
     └── src/lib.rs                  # McpManager, McpToolWrapper, register()
 ```
 
-> **Note:** Memory backend implementations (konf-tool-memory-smrti, konf-tool-memory-surrealdb,
-> konf-tool-memory-sqlite) live in **external repos**, not in this monorepo.
+> **Note:** The default memory backend is `konf-tool-memory-surreal` (SurrealDB, embedded).
 > See [memory-backends.md](memory-backends.md) for details.
 
 ---
@@ -114,7 +112,7 @@ Backed by reqwest. Configurable max timeout (default 30s, capped at 300s). Retur
 
 **How it works:**
 1. At invocation, tools are resolved dynamically from the engine's live registry
-2. Only tools that pass the caller's `ToolContext.capabilities` (same lattice as the executor) are exposed to the LLM
+2. Only tools that pass the caller's Envelope capabilities (same lattice as the executor) are exposed to the LLM
 3. An optional `tools` whitelist in `with:` further restricts visibility (AND with capabilities)
 4. The LLM calls tools → kernel dispatches → feeds results back → repeats until text response or `max_iterations`
 5. `ai:complete` itself is excluded from inner tools to prevent unbounded recursion (unless explicitly whitelisted)
@@ -151,6 +149,51 @@ Backed by fastembed (ONNX runtime). Runs locally — no API calls. Model configu
 
 Backed by a MemoryBackend implementation (see [memory-backends.md](memory-backends.md)). Backend selected via tools.yaml.
 
+### konf-tool-shell
+
+| Tool | Description | Annotations |
+|------|-------------|-------------|
+| `shell:exec` | Execute a shell command inside a Docker container sandbox | destructive, open_world |
+
+Requires `tools.shell` config with a `container` name and optional `timeout_ms` (default: 30000). The command runs via `docker exec` against the specified container.
+
+### konf-tool-secret
+
+| Tool | Description | Annotations |
+|------|-------------|-------------|
+| `secret:get` | Read an environment variable by key (restricted to allowed keys) | read_only |
+| `secret:list` | List all allowed secret key names (values not exposed) | read_only, idempotent |
+
+Requires `tools.secret` config with an `allowed_keys` list. Only keys in the allow-list can be read.
+
+### konf-tool-runner
+
+| Tool | Description | Annotations |
+|------|-------------|-------------|
+| `runner:spawn` | Start a workflow as a background run. Returns a `RunId` immediately. | |
+| `runner:status` | Check the status of a background run by `RunId`. | read_only, idempotent |
+| `runner:wait` | Block until a background run completes. Returns the output. | read_only |
+| `runner:cancel` | Cancel a running background workflow. | destructive |
+
+Runs are tracked in-memory by `RunRegistry`. When `KonfStorage` is configured, spawn intents are persisted to redb for at-least-once replay on restart.
+
+### Schedule and config tools (registered by konf-init)
+
+| Tool | Description | Annotations |
+|------|-------------|-------------|
+| `schedule:create` | Create a durable timer (once, fixed-delay, or cron) to fire a workflow. | |
+| `cancel:schedule` | Cancel a scheduled timer by job ID. | destructive |
+| `config:reload` | Hot-reload product config (workflows, prompts, tool guards) from disk. | |
+
+Schedule tools require a configured `[database]` section (redb storage). Without storage, `schedule:create` is still registered but the scheduler is unavailable.
+
+### Architect tools (registered by konf-init, always available)
+
+| Tool | Description | Annotations |
+|------|-------------|-------------|
+| `system:introspect` | Read-only metadata about the engine: lists all registered tools, resources, and prompts. | read_only, idempotent |
+| `yaml:validate_workflow` | Parse and validate a workflow YAML string without executing it. | read_only, idempotent |
+
 ### konf-tool-mcp
 
 Not a fixed tool set — discovers and registers tools from external MCP servers at startup. Each external tool is wrapped as a `McpToolWrapper` implementing the Tool trait.
@@ -173,7 +216,7 @@ pub struct MyTool { /* state */ }
 #[async_trait]
 impl Tool for MyTool {
     fn info(&self) -> ToolInfo { /* ... */ }
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> { /* ... */ }
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> { /* ... */ }
 }
 ```
 
@@ -241,7 +284,7 @@ The agent sees a flat list. It doesn't know which tools are Rust, which are MCP,
 
 ## Related Specs
 
-- [engine](engine.md) — Tool/Resource/Prompt traits, ToolInfo, ToolContext, ToolError
+- [engine](engine.md) — Tool/Resource/Prompt traits, ToolInfo, Envelope, ToolError
 - [overview](overview.md) — platform-wide architecture, crate map
 - [memory-backends](memory-backends.md) — MemoryBackend trait, backend implementations
 - [mcp](mcp.md) — MCP client (konf-tool-mcp) details

@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-konflux-core = { path = "../konflux-core" }
+konflux-substrate = { path = "../konflux-substrate" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }

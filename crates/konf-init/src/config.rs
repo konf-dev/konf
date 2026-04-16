@@ -21,8 +21,9 @@ pub struct PlatformConfig {
     pub database: Option<DatabaseConfig>,
     pub auth: AuthConfig,
     pub server: ServerConfig,
-    pub engine: konflux::EngineConfig,
+    pub engine: konflux_substrate::EngineConfig,
     pub runtime: konf_runtime::scope::ResourceLimits,
+    pub journal: JournalConfig,
     pub mcp_enabled: bool,
     pub config_dir: PathBuf,
 }
@@ -33,8 +34,9 @@ impl Default for PlatformConfig {
             database: None,
             auth: AuthConfig::default(),
             server: ServerConfig::default(),
-            engine: konflux::EngineConfig::default(),
+            engine: konflux_substrate::EngineConfig::default(),
             runtime: konf_runtime::scope::ResourceLimits::default(),
+            journal: JournalConfig::default(),
             mcp_enabled: false,
             config_dir: PathBuf::from("./config"),
         }
@@ -106,12 +108,33 @@ fn default_retention_days() -> u32 {
     7
 }
 
+/// Journal subsystem configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct JournalConfig {
+    /// Interval in seconds between TTL sweep runs. 0 = disabled.
+    pub sweep_interval_secs: u64,
+    /// Subscribe channel buffer size.
+    pub subscribe_buffer: usize,
+}
+
+impl Default for JournalConfig {
+    fn default() -> Self {
+        Self {
+            sweep_interval_secs: 3600,
+            subscribe_buffer: 256,
+        }
+    }
+}
+
 /// Auth settings.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct AuthConfig {
     pub supabase_url: String,
     pub jwt_audience: String,
+    /// JWKS cache TTL in seconds. Defaults to 600 (10 minutes).
+    pub jwks_cache_ttl_secs: u64,
 }
 
 impl Default for AuthConfig {
@@ -119,6 +142,7 @@ impl Default for AuthConfig {
         Self {
             supabase_url: "http://localhost:9999".into(),
             jwt_audience: "authenticated".into(),
+            jwks_cache_ttl_secs: 600,
         }
     }
 }

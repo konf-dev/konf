@@ -8,7 +8,7 @@ description = "Init system for the Konf platform — reads config, boots engine,
 
 [dependencies]
 # Engine + Runtime
-konflux-core = { path = "../konflux-core" }
+konflux-substrate = { path = "../konflux-substrate" }
 konf-runtime = { path = "../konf-runtime" }
 
 # Tool crates

@@ -2,7 +2,7 @@
 //! MCP client manager — connects to MCP servers and registers their tools.
 //!
 //! Uses rmcp for stdio transport. MCP servers are spawned as child processes
-//! and their tools are discovered and wrapped as konflux::Tool implementations.
+//! and their tools are discovered and wrapped as konflux_substrate::Tool implementations.
 
 use std::sync::Arc;
 
@@ -10,8 +10,9 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tracing::{info, warn};
 
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
 
 use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
 use rmcp::ServiceExt;
@@ -66,7 +67,10 @@ impl McpManager {
     }
 
     /// Discover tools from all configured MCP servers and register them.
-    pub async fn discover_and_register(&self, engine: &konflux::Engine) -> anyhow::Result<()> {
+    pub async fn discover_and_register(
+        &self,
+        engine: &konflux_substrate::Engine,
+    ) -> anyhow::Result<()> {
         for config in &self.configs {
             match self.connect_and_register(config, engine).await {
                 Ok(count) => {
@@ -83,7 +87,7 @@ impl McpManager {
     async fn connect_and_register(
         &self,
         config: &McpServerConfig,
-        engine: &konflux::Engine,
+        engine: &konflux_substrate::Engine,
     ) -> anyhow::Result<usize> {
         if config.transport != "stdio" {
             anyhow::bail!(
@@ -170,7 +174,10 @@ impl McpManager {
 ///
 /// Expects `config` to contain an `"mcp_servers"` key with an array of
 /// [`McpServerConfig`] objects.
-pub async fn register(engine: &konflux::Engine, config: &serde_json::Value) -> anyhow::Result<()> {
+pub async fn register(
+    engine: &konflux_substrate::Engine,
+    config: &serde_json::Value,
+) -> anyhow::Result<()> {
     let servers: Vec<McpServerConfig> = serde_json::from_value(
         config
             .get("mcp_servers")
@@ -206,7 +213,7 @@ fn resolve_env_var(value: &str) -> String {
     }
 }
 
-/// Wraps an MCP tool as a [`konflux::Tool`].
+/// Wraps an MCP tool as a [`konflux_substrate::Tool`].
 struct McpToolWrapper {
     name: String,
     description: String,
@@ -231,11 +238,11 @@ impl Tool for McpToolWrapper {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         let start = std::time::Instant::now();
 
         let mut params = rmcp::model::CallToolRequestParams::new(self.tool_name.clone());
-        if let Some(obj) = input.as_object() {
+        if let Some(obj) = env.payload.as_object() {
             if !obj.is_empty() {
                 params = params.with_arguments(obj.clone());
             }
@@ -258,7 +265,7 @@ impl Tool for McpToolWrapper {
             .map(|c| serde_json::to_value(c).unwrap_or(json!({"raw": format!("{c:?}")})))
             .collect();
 
-        Ok(json!({
+        Ok(env.respond(json!({
             "content": content,
             "is_error": result.is_error.unwrap_or(false),
             "_meta": {
@@ -266,7 +273,7 @@ impl Tool for McpToolWrapper {
                 "server": self.server_name,
                 "duration_ms": duration_ms,
             }
-        }))
+        })))
     }
 }
 

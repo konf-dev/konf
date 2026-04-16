@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "crates/konf-init-kell"]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"

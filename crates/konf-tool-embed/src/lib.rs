@@ -9,8 +9,9 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tracing::info;
 
-use konflux::error::ToolError;
-use konflux::tool::{Tool, ToolAnnotations, ToolContext, ToolInfo};
+use konflux_substrate::envelope::Envelope;
+use konflux_substrate::error::ToolError;
+use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
 
 /// The `ai_embed` tool — generates embeddings locally.
 ///
@@ -59,21 +60,22 @@ impl Tool for EmbedTool {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         let start = std::time::Instant::now();
 
-        let texts: Vec<String> = if let Some(text) = input.get("text").and_then(|v| v.as_str()) {
-            vec![text.to_string()]
-        } else if let Some(arr) = input.get("texts").and_then(|v| v.as_array()) {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        } else {
-            return Err(ToolError::InvalidInput {
-                message: "Provide 'text' or 'texts'".into(),
-                field: None,
-            });
-        };
+        let texts: Vec<String> =
+            if let Some(text) = env.payload.get("text").and_then(|v| v.as_str()) {
+                vec![text.to_string()]
+            } else if let Some(arr) = env.payload.get("texts").and_then(|v| v.as_array()) {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            } else {
+                return Err(ToolError::InvalidInput {
+                    message: "Provide 'text' or 'texts'".into(),
+                    field: None,
+                });
+            };
 
         if texts.is_empty() {
             return Err(ToolError::InvalidInput {
@@ -99,17 +101,17 @@ impl Tool for EmbedTool {
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
-        Ok(json!({
+        Ok(env.respond(json!({
             "embeddings": embeddings,
             "dimensions": embeddings.first().map(|e| e.len()).unwrap_or(0),
             "count": embeddings.len(),
             "_meta": { "tool": "ai:embed", "duration_ms": duration_ms }
-        }))
+        })))
     }
 }
 
 /// Register the embedding tool (fails gracefully if model can't load).
-pub fn register_embed_tools(engine: &konflux::Engine) {
+pub fn register_embed_tools(engine: &konflux_substrate::Engine) {
     match EmbedTool::new() {
         Ok(tool) => {
             engine.register_tool(Arc::new(tool));
@@ -126,7 +128,10 @@ pub fn register_embed_tools(engine: &konflux::Engine) {
 /// This is the standalone crate entry point. The `_config` parameter is
 /// reserved for future options (e.g. model selection). Fails gracefully
 /// if the model cannot be loaded.
-pub async fn register(engine: &konflux::Engine, _config: &serde_json::Value) -> anyhow::Result<()> {
+pub async fn register(
+    engine: &konflux_substrate::Engine,
+    _config: &serde_json::Value,
+) -> anyhow::Result<()> {
     register_embed_tools(engine);
     Ok(())
 }
@@ -139,14 +144,14 @@ mod tests {
     fn test_embed_tool_info() {
         // EmbedTool::new() downloads a model (~50MB), so we test info without constructing
         // To test the actual tool, use an integration test with model available
-        let info = konflux::tool::ToolInfo {
+        let info = konflux_substrate::tool::ToolInfo {
             name: "ai:embed".into(),
             description: "Generate text embeddings locally (no API call).".into(),
             input_schema: serde_json::json!({}),
             output_schema: None,
             capabilities: vec!["ai:embed".into()],
             supports_streaming: false,
-            annotations: konflux::tool::ToolAnnotations {
+            annotations: konflux_substrate::tool::ToolAnnotations {
                 read_only: true,
                 idempotent: true,
                 ..Default::default()
@@ -161,7 +166,7 @@ mod tests {
     #[test]
     fn test_register_graceful_failure() {
         // register() should not panic even if model fails to load
-        let engine = konflux::Engine::new();
+        let engine = konflux_substrate::Engine::new();
         let rt = tokio::runtime::Runtime::new().unwrap();
         // This may or may not register the tool depending on model availability
         rt.block_on(register(&engine, &serde_json::json!({})))
