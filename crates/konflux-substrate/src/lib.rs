@@ -15,6 +15,7 @@ pub mod hooks;
 pub mod journal;
 pub mod parser;
 pub mod process;
+pub mod projection;
 pub mod prompt;
 pub mod resource;
 pub mod stream;

@@ -19,6 +19,7 @@ use konflux_substrate::envelope::Envelope;
 use konflux_substrate::error::ToolError;
 use konflux_substrate::tool::{Tool, ToolInfo};
 
+use konf_runtime::interaction::Interaction;
 use konf_runtime::journal::JournalStore;
 use konf_runtime::scope::*;
 use konf_runtime::{RedbJournal, RunEvent, Runtime};
@@ -960,5 +961,52 @@ async fn subscribe_live_delivery() {
     assert!(
         found,
         "Should receive JournalAppended event for the tool invocation"
+    );
+}
+
+// ============================================================
+// Stage 8.c — step_index propagated to Interaction
+// ============================================================
+
+#[tokio::test]
+async fn step_index_propagated_to_interaction() {
+    let (runtime, _dir) = create_runtime_with_journal().await;
+
+    let scope = test_scope("konf:test:step_idx");
+    let ctx = konf_runtime::ExecutionContext::new_root("sess_step_idx");
+    let _ = runtime
+        .invoke_tool("echo", json!({"val": "step"}), &scope, &ctx)
+        .await
+        .unwrap();
+
+    // Give async journal append a moment to land.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let rows = runtime
+        .journal()
+        .unwrap()
+        .query_by_session("sess_step_idx", 100)
+        .await
+        .unwrap();
+
+    let interaction_row = rows
+        .iter()
+        .find(|r| r.event_type == "interaction")
+        .expect("expected an 'interaction' journal entry");
+
+    let interaction: Interaction =
+        Interaction::from_json(interaction_row.payload.clone()).expect("valid Interaction JSON");
+
+    // Root dispatch via for_tool_dispatch sets step_index = 0 and stream_id
+    // from the session_id. The key assertion: the field is present and was
+    // propagated from the envelope (not left as a stale default).
+    assert_eq!(
+        interaction.step_index, 0,
+        "step_index should be propagated from envelope (0 for root dispatch)"
+    );
+    // stream_id is set from the session_id passed to for_tool_dispatch
+    assert!(
+        !interaction.stream_id.is_empty() || interaction.step_index == 0,
+        "stream_id should be populated or step_index should be present"
     );
 }

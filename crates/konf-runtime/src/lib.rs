@@ -35,6 +35,7 @@
 //!   isolation (primary-succeeds-only acknowledgment; secondary drops tracked
 //!   via `FanoutMetrics`).
 
+pub mod bisimulation;
 pub mod context;
 pub(crate) mod dispatcher;
 pub mod error;

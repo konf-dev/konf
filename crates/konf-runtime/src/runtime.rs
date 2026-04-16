@@ -96,7 +96,9 @@ impl Runtime {
             debug!("No journal backend — event journal disabled");
         }
 
-        let event_bus = Arc::new(RunEventBus::with_capacity(default_limits.event_bus_capacity));
+        let event_bus = Arc::new(RunEventBus::with_capacity(
+            default_limits.event_bus_capacity,
+        ));
         let tool_guards = Arc::new(std::sync::RwLock::new(HashMap::new()));
 
         let dispatcher = crate::dispatcher::Dispatcher {

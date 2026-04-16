@@ -60,6 +60,12 @@ impl RuntimeHooks {
             status,
             summary: None,
             timestamp: Utc::now(),
+            step_index: 0,
+            stream_id: String::new(),
+            state_before_hash: None,
+            state_after_hash: None,
+            references: Vec::new(),
+            in_reply_to: None,
         };
 
         JournalEntry {

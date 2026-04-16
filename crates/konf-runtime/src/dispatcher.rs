@@ -120,6 +120,10 @@ impl Dispatcher {
             Value::Number(serde_json::Number::from(scope.depth as u64)),
         );
 
+        // 8.c: Capture step_index and stream_id from the envelope before it is consumed.
+        let env_step_index = env.step_index;
+        let env_stream_id = env.stream_id.0.clone();
+
         let started_at = Utc::now();
         let edge_rules_fired = {
             let mut v = vec![format!("cap_check:{tool_name}")];
@@ -131,7 +135,19 @@ impl Dispatcher {
         let trace_id = ctx.trace_id;
         let interaction_id = uuid::Uuid::new_v4();
 
+        // 8.d: Capture state hash BEFORE invocation.
+        let state_before_hash = wrapped
+            .projection()
+            .and_then(|p| p.project())
+            .map(|proj| proj.hash());
+
         let result = wrapped.invoke(env).await;
+
+        // 8.d: Capture state hash AFTER invocation.
+        let state_after_hash = wrapped
+            .projection()
+            .and_then(|p| p.project())
+            .map(|proj| proj.hash());
         let ended_at = Utc::now();
         let duration_ms = (ended_at - started_at).num_milliseconds().max(0) as u64;
 
@@ -167,6 +183,12 @@ impl Dispatcher {
                 },
                 summary: None,
                 timestamp: started_at,
+                step_index: env_step_index,
+                stream_id: env_stream_id.clone(),
+                state_before_hash,
+                state_after_hash,
+                references: Vec::new(),
+                in_reply_to: None,
             };
             let entry = JournalEntry {
                 run_id: None,

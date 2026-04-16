@@ -30,6 +30,12 @@ pub trait Tool: Send + Sync {
     /// Execute the tool.
     async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError>;
 
+    /// Optional state projection for bisimulation support.
+    /// Tools that implement StateProjection should override this.
+    fn projection(&self) -> Option<&dyn crate::projection::StateProjection> {
+        None
+    }
+
     /// Execute with streaming. Default: non-streaming fallback.
     /// Tools should only push Progress events (e.g., TextDelta) to the sender.
     /// The executor handles ToolStart/ToolEnd wrapping and the final Done event.

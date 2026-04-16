@@ -15,7 +15,11 @@ use crate::workflow::{
 };
 
 /// Compile a validated WorkflowSchema into a Workflow IR.
-pub fn compile(schema: WorkflowSchema, graph: &DependencyGraph, config: &EngineConfig) -> Result<Workflow, ParseError> {
+pub fn compile(
+    schema: WorkflowSchema,
+    graph: &DependencyGraph,
+    config: &EngineConfig,
+) -> Result<Workflow, ParseError> {
     let mut steps = Vec::new();
 
     // Determine entry point: first node in YAML order

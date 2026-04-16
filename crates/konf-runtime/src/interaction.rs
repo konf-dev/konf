@@ -104,6 +104,31 @@ pub struct Interaction {
     /// Emit time (monotonic within a trace on a single host; best-effort
     /// across hosts via system clock).
     pub timestamp: DateTime<Utc>,
+
+    /// Monotonic per-trace ordinal. Propagated from Envelope.step_index.
+    #[serde(default)]
+    pub step_index: u64,
+
+    /// Channel disambiguation for parallel calls. Propagated from Envelope.stream_id.
+    #[serde(default)]
+    pub stream_id: String,
+
+    /// SHA-256 hash of the actor's observable state BEFORE this dispatch.
+    /// None for stateless tools or tools without StateProjection.
+    #[serde(default)]
+    pub state_before_hash: Option<[u8; 32]>,
+
+    /// SHA-256 hash of the actor's observable state AFTER this dispatch.
+    #[serde(default)]
+    pub state_after_hash: Option<[u8; 32]>,
+
+    /// Non-parent semantic antecedents (e.g. "this response was informed by these prior interactions").
+    #[serde(default)]
+    pub references: Vec<Uuid>,
+
+    /// Request/reply correlation. Points to the interaction this is responding to.
+    #[serde(default)]
+    pub in_reply_to: Option<Uuid>,
 }
 
 /// Bounded taxonomy of interaction kinds.

@@ -91,6 +91,10 @@ impl Tool for GuardedTool {
         self.inner.invoke(env).await
     }
 
+    fn projection(&self) -> Option<&dyn konflux_substrate::projection::StateProjection> {
+        self.inner.projection()
+    }
+
     async fn invoke_streaming(
         &self,
         env: Envelope<Value>,

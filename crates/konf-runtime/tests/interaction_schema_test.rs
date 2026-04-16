@@ -38,6 +38,12 @@ fn sample_interaction(kind: InteractionKind, status: InteractionStatus) -> Inter
         status,
         summary: Some("looked up observations".to_string()),
         timestamp: Utc.with_ymd_and_hms(2026, 4, 14, 9, 33, 12).unwrap(),
+        step_index: 0,
+        stream_id: String::new(),
+        state_before_hash: None,
+        state_after_hash: None,
+        references: Vec::new(),
+        in_reply_to: None,
     }
 }
 
