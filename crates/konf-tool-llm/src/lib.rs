@@ -38,7 +38,9 @@ use konflux_substrate::Engine;
 /// Configuration for which LLM provider/model to use.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct LlmConfig {
-    /// LLM provider name (e.g. "openai", "anthropic", "gemini").
+    /// LLM provider name. Supported: "openai", "anthropic", "gemini", "ollama".
+    /// Ollama defaults to `http://localhost:11434` and needs no API key; set
+    /// `OLLAMA_API_BASE_URL` to point at a remote instance.
     pub provider: String,
     /// Model identifier (e.g. "gpt-4o", "claude-sonnet-4-20250514").
     pub model: String,
@@ -631,8 +633,19 @@ async fn call_completion(
             let client = rig::providers::gemini::Client::from_env();
             call_provider!(client)
         }
+        "ollama" => {
+            // Ollama needs no API key. Honor OLLAMA_API_BASE_URL if set,
+            // otherwise default to http://localhost:11434 via from_val(Nothing).
+            use rig::client::Nothing;
+            let client = if std::env::var("OLLAMA_API_BASE_URL").is_ok() {
+                rig::providers::ollama::Client::from_env()
+            } else {
+                rig::providers::ollama::Client::from_val(Nothing)
+            };
+            call_provider!(client)
+        }
         other => Err(rig::completion::CompletionError::ProviderError(format!(
-            "Unknown LLM provider: '{other}'. Supported: openai, anthropic, gemini"
+            "Unknown LLM provider: '{other}'. Supported: openai, anthropic, gemini, ollama"
         ))),
     }
 }

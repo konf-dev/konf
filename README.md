@@ -61,7 +61,7 @@ The same Rust binary runs every product. Switching LLM providers, memory backend
 | `konf-mcp` | MCP server — exposes products to MCP clients (Claude Desktop, Cursor, etc.) |
 | `konf-backend` | HTTP server — REST API with SSE streaming |
 | `konf-tool-http` | HTTP GET/POST tools with SSRF protection |
-| `konf-tool-llm` | LLM completion via rig-core (OpenAI, Anthropic, Google) |
+| `konf-tool-llm` | LLM completion via rig-core (OpenAI, Anthropic, Google, Ollama) |
 | `konf-tool-embed` | Local text embeddings via fastembed (ONNX) |
 | `konf-tool-memory` | `MemoryBackend` trait for pluggable storage |
 | `konf-tool-mcp` | MCP client — consume external MCP servers |
