@@ -914,3 +914,51 @@ async fn single_dispatch_path_records_interaction() {
         "Interaction should record the tool name"
     );
 }
+
+// ============================================================
+// Stage 7 — subscribe_live_delivery
+// ============================================================
+
+#[tokio::test]
+async fn subscribe_live_delivery() {
+    let (runtime, _dir) = create_runtime_with_journal().await;
+
+    let ns = "konf:test:live_sub";
+    let scope = test_scope(ns);
+    let ctx = konf_runtime::ExecutionContext::new_root("live_sub_sess");
+
+    // Subscribe to the event bus BEFORE invoking anything.
+    let mut bus_rx = runtime.event_bus().subscribe();
+
+    // Now invoke a tool — this should trigger JournalAppended via the dispatcher
+    let result = runtime
+        .invoke_tool("echo", json!({"msg": "hello"}), &scope, &ctx)
+        .await;
+    assert!(result.is_ok(), "Tool invocation should succeed");
+
+    // The dispatcher emits JournalAppended after successful append.
+    // Drain events until we find it (there may be other events first).
+    let mut found = false;
+    for _ in 0..20 {
+        match tokio::time::timeout(std::time::Duration::from_millis(500), bus_rx.recv()).await {
+            Ok(Ok(RunEvent::JournalAppended {
+                namespace,
+                event_type,
+                ..
+            })) => {
+                // invoke_tool records an "interaction" event
+                if namespace == ns && event_type == "interaction" {
+                    found = true;
+                    break;
+                }
+            }
+            Ok(Ok(_)) => continue, // other event, keep looking
+            Ok(Err(_)) => break,   // channel error
+            Err(_) => break,       // timeout
+        }
+    }
+    assert!(
+        found,
+        "Should receive JournalAppended event for the tool invocation"
+    );
+}
