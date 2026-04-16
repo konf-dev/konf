@@ -66,6 +66,8 @@ struct RawEventRow {
     created_at: chrono::DateTime<chrono::Utc>,
     #[serde(default)]
     valid_to: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    idempotency_key: Option<String>,
 }
 
 impl RawEventRow {
@@ -102,6 +104,7 @@ impl RawEventRow {
             payload: data,
             created_at: self.created_at,
             valid_to: self.valid_to,
+            idempotency_key: self.idempotency_key.clone(),
         }
     }
 }

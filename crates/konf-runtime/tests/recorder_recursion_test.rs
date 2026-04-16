@@ -65,6 +65,7 @@ fn sample_entry() -> JournalEntry {
         event_type: "interaction".into(),
         payload: json!({"id": "ignore"}),
         valid_to: None,
+        idempotency_key: None,
     }
 }
 

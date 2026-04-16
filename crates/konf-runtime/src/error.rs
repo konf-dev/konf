@@ -20,6 +20,10 @@ pub enum RuntimeError {
     #[error("capability denied: {0}")]
     CapabilityDenied(String),
 
+    /// The envelope's deadline has passed before the tool could be invoked.
+    #[error("deadline exceeded for tool '{tool}'")]
+    DeadlineExceeded { tool: String },
+
     /// A tool was invoked successfully (scope permitted it) but the tool
     /// itself returned an error. Used by [`crate::Runtime::invoke_tool`].
     #[error("tool '{tool}' failed: {message}")]

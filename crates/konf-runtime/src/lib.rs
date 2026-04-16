@@ -36,6 +36,7 @@
 //!   via `FanoutMetrics`).
 
 pub mod bisimulation;
+pub mod budget;
 pub mod context;
 pub(crate) mod dispatcher;
 pub mod error;
@@ -54,6 +55,7 @@ pub mod scope;
 pub mod storage;
 pub mod workflow_tool;
 
+pub use budget::{BudgetError, BudgetTable};
 pub use context::VirtualizedTool;
 pub use error::{RunId, RuntimeError};
 pub use event_bus::{RunEvent, RunEventBus, DEFAULT_EVENT_BUS_CAPACITY};

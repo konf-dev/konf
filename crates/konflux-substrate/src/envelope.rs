@@ -188,6 +188,14 @@ pub struct IdempotencyKey(pub String);
 
 // ── Extension ───────────────────────────────────────────────────────
 
+/// Quality-of-service class for priority shedding under load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum QoSClass {
+    Critical,
+    Normal,
+    BestEffort,
+}
+
 /// Typed metadata map. `serde_json::Value` values in V2 (amendment 6);
 /// sealed enum in Stage 9.
 ///
@@ -253,6 +261,11 @@ pub struct Envelope<P> {
     /// Dedupe window lookup key.
     pub idempotency_key: Option<IdempotencyKey>,
 
+    // ── V2: QoS ──
+    /// Optional quality-of-service class for priority shedding under load.
+    #[serde(default)]
+    pub qos_class: Option<QoSClass>,
+
     // ── V2: Stage 8 forward-compat reservation ──
     /// Semantic antecedents; `None` in V2, populated in Stage 8 (amendment 8).
     pub references: Option<Vec<EnvelopeId>>,
@@ -287,6 +300,7 @@ impl<P> Envelope<P> {
             stream_id: self.stream_id.clone(),
             deadline: self.deadline,
             idempotency_key: None,
+            qos_class: self.qos_class,
             references: None,
             metadata: self.metadata.clone(),
         }
@@ -324,6 +338,7 @@ impl Envelope<serde_json::Value> {
             stream_id: StreamId(stream_id.to_string()),
             deadline: None,
             idempotency_key: None,
+            qos_class: None,
             references: None,
             metadata: Metadata::default(),
         }
@@ -346,6 +361,7 @@ impl Envelope<serde_json::Value> {
             stream_id: StreamId("test".to_string()),
             deadline: None,
             idempotency_key: None,
+            qos_class: None,
             references: None,
             metadata: Metadata::default(),
         }

@@ -597,6 +597,13 @@ async fn invoke_with_retry(
             }));
         }
 
+        // Deadline enforcement — abort before invoking if past deadline.
+        if let Some(deadline) = env.deadline {
+            if chrono::Utc::now() > deadline {
+                return Err(KonfluxError::Tool(ToolError::Timeout { after_ms: 0 }));
+            }
+        }
+
         if attempt > 1 {
             let delay = calculate_backoff(retry_policy, attempt - 1, &ctx.config);
             tokio::time::sleep(delay).await;

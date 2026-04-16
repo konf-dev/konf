@@ -60,6 +60,9 @@ pub struct JournalEntry {
     /// `None` means the entry never expires.
     #[serde(default)]
     pub valid_to: Option<DateTime<Utc>>,
+    /// Idempotency key for dedupe lookup. `None` means no dedup.
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
 }
 
 /// One row returned from the journal.
@@ -76,6 +79,9 @@ pub struct JournalRow {
     /// When this entry expires. `None` means never.
     #[serde(default)]
     pub valid_to: Option<DateTime<Utc>>,
+    /// Idempotency key for dedupe lookup. `None` means no dedup.
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
 }
 
 /// Append-only event journal.
@@ -127,6 +133,14 @@ pub trait JournalStore: Send + Sync + 'static {
         _query: &AggregateQuery,
     ) -> Result<AggregateResult, JournalError> {
         Ok(AggregateResult::Count(0))
+    }
+
+    /// Look up a journal row by idempotency key. Returns the most recent
+    /// matching entry, or `None` if no entry carries this key.
+    ///
+    /// Default implementation returns `None` (no index available).
+    async fn get_by_idempotency_key(&self, _key: &str) -> Result<Option<JournalRow>, JournalError> {
+        Ok(None)
     }
 
     /// Physically delete all entries where `valid_to < now`. Returns the

@@ -41,8 +41,11 @@
 //!  …workflow completes…
 //! ```
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use konflux_substrate::envelope::IdempotencyKey;
 
 /// Runtime state for a dispatch. See module docs for lifecycle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +66,16 @@ pub struct ExecutionContext {
     /// the MCP session id. Multiple traces can share a session; a trace
     /// never spans sessions.
     pub session_id: String,
+
+    /// Absolute wall-clock deadline for this dispatch chain.
+    /// Propagated to child contexts and enforced before tool invocation.
+    #[serde(default)]
+    pub deadline: Option<DateTime<Utc>>,
+
+    /// Idempotency key for dedup. When set, the dispatcher checks the
+    /// journal for a cached result before invoking.
+    #[serde(default)]
+    pub idempotency_key: Option<IdempotencyKey>,
 }
 
 impl ExecutionContext {
@@ -78,6 +91,8 @@ impl ExecutionContext {
             trace_id: Uuid::new_v4(),
             parent_interaction_id: None,
             session_id: session_id.into(),
+            deadline: None,
+            idempotency_key: None,
         }
     }
 
@@ -90,6 +105,8 @@ impl ExecutionContext {
             trace_id,
             parent_interaction_id: None,
             session_id: session_id.into(),
+            deadline: None,
+            idempotency_key: None,
         }
     }
 
@@ -110,6 +127,8 @@ impl ExecutionContext {
             trace_id: env.trace_id.0,
             parent_interaction_id: env.parent_id.map(|id| id.0),
             session_id,
+            deadline: env.deadline,
+            idempotency_key: env.idempotency_key.clone(),
         }
     }
 
@@ -125,6 +144,8 @@ impl ExecutionContext {
             trace_id: self.trace_id,
             parent_interaction_id: Some(parent_interaction_id),
             session_id: session_id.unwrap_or_else(|| self.session_id.clone()),
+            deadline: self.deadline,
+            idempotency_key: None, // idempotency is per-dispatch, not inherited
         }
     }
 }

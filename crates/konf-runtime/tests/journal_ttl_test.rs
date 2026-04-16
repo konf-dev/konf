@@ -27,6 +27,7 @@ fn test_entry(namespace: &str, event_type: &str) -> JournalEntry {
         event_type: event_type.into(),
         payload: json!({"test": true}),
         valid_to: None,
+        idempotency_key: None,
     }
 }
 

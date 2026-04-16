@@ -90,6 +90,29 @@ impl Dispatcher {
             }
         };
 
+        // 5a. Deadline enforcement — abort before invoking if already past.
+        if let Some(deadline) = ctx.deadline {
+            if Utc::now() > deadline {
+                return Err(RuntimeError::DeadlineExceeded {
+                    tool: tool_name.to_string(),
+                });
+            }
+        }
+
+        // 5b. Idempotency check — return cached result if available.
+        if let Some(ref idem_key) = ctx.idempotency_key {
+            if let Some(journal) = self.journal.as_ref() {
+                if let Ok(Some(row)) = journal.get_by_idempotency_key(&idem_key.0).await {
+                    debug!(
+                        tool = %tool_name,
+                        idempotency_key = %idem_key.0,
+                        "dispatch_tool: returning cached idempotent result"
+                    );
+                    return Ok(row.payload);
+                }
+            }
+        }
+
         // 5. Build the dispatch envelope and invoke.
         let actor_role_str = match scope.actor.role {
             crate::scope::ActorRole::InfraAdmin => "infra_admin",
@@ -109,6 +132,8 @@ impl Dispatcher {
             &scope.actor.id,
             &ctx.session_id,
         );
+        env.deadline = ctx.deadline;
+        env.idempotency_key = ctx.idempotency_key.clone();
         env.metadata
             .0
             .insert("actor_role".into(), Value::String(actor_role_str.into()));
@@ -197,6 +222,7 @@ impl Dispatcher {
                 event_type: "interaction".into(),
                 payload: interaction.to_json(),
                 valid_to: None,
+                idempotency_key: ctx.idempotency_key.as_ref().map(|k| k.0.clone()),
             };
             match journal.append(entry).await {
                 Ok(sequence) => {

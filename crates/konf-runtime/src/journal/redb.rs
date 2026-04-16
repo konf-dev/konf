@@ -49,6 +49,11 @@ const BY_SESSION: MultimapTableDefinition<&str, u64> =
 const BY_EXPIRY: MultimapTableDefinition<i64, u64> =
     MultimapTableDefinition::new("journal_by_expiry");
 
+/// Multimap index: idempotency_key (string) → set of sequence ids.
+/// Only populated for entries with a non-None idempotency_key.
+const BY_IDEMPOTENCY: MultimapTableDefinition<&str, u64> =
+    MultimapTableDefinition::new("journal_by_idempotency");
+
 // ---------------------------------------------------------------------------
 // Stored value shape
 // ---------------------------------------------------------------------------
@@ -65,6 +70,8 @@ struct StoredEntry {
     /// Expiry timestamp in microseconds. None = never expires.
     /// Added in Stage 7.b; postcard decodes missing trailing Option as None.
     valid_to_micros: Option<i64>,
+    /// Idempotency key for dedupe. Added in Stage 9; postcard trailing Option.
+    idempotency_key: Option<String>,
 }
 
 impl StoredEntry {
@@ -78,6 +85,7 @@ impl StoredEntry {
                 .map_err(JournalError::serialization)?,
             created_at_micros: Utc::now().timestamp_micros(),
             valid_to_micros: entry.valid_to.map(|dt| dt.timestamp_micros()),
+            idempotency_key: entry.idempotency_key.clone(),
         })
     }
 
@@ -101,6 +109,7 @@ impl StoredEntry {
             payload,
             created_at,
             valid_to,
+            idempotency_key: self.idempotency_key,
         })
     }
 }
@@ -154,6 +163,9 @@ impl RedbJournal {
                 .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
             let _ = write
                 .open_multimap_table(BY_EXPIRY)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let _ = write
+                .open_multimap_table(BY_IDEMPOTENCY)
                 .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
         }
         write
@@ -224,6 +236,14 @@ impl JournalStore for RedbJournal {
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
                 by_expiry
                     .insert(valid_to_micros, next_id)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            }
+            if let Some(ref idem_key) = stored.idempotency_key {
+                let mut by_idem = write
+                    .open_multimap_table(BY_IDEMPOTENCY)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                by_idem
+                    .insert(idem_key.as_str(), next_id)
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
             }
             write
@@ -418,6 +438,7 @@ impl JournalStore for RedbJournal {
                                 "reconciled": true,
                             }),
                             valid_to: None,
+                            idempotency_key: None,
                         });
                     }
                 }
@@ -522,6 +543,58 @@ impl JournalStore for RedbJournal {
                 AggregateQuery::WindowSum { .. } => Err(JournalError::Storage(Box::from(
                     "WindowSum not yet implemented",
                 ))),
+            }
+        })
+        .await
+        .map_err(|e| JournalError::storage(std::io::Error::other(e)))?
+    }
+
+    async fn get_by_idempotency_key(&self, key: &str) -> Result<Option<JournalRow>, JournalError> {
+        let db = self.db.clone();
+        let key = key.to_string();
+        tokio::task::spawn_blocking(move || -> Result<Option<JournalRow>, JournalError> {
+            let read = db
+                .begin_read()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let by_idem = read
+                .open_multimap_table(BY_IDEMPOTENCY)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let events = read
+                .open_table(EVENTS)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+
+            // Find the most recent (highest sequence id) entry for this key.
+            let mut best: Option<(u64, StoredEntry)> = None;
+            let iter = by_idem
+                .get(key.as_str())
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            for id_res in iter {
+                let id = id_res
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?
+                    .value();
+                match &best {
+                    Some((prev_id, _)) if id <= *prev_id => {}
+                    _ => {
+                        if let Some(stored_bytes) = events.get(id).map_err(|e| {
+                            JournalError::storage(std::io::Error::other(e.to_string()))
+                        })? {
+                            let stored: StoredEntry = postcard::from_bytes(stored_bytes.value())
+                                .map_err(JournalError::serialization)?;
+                            best = Some((id, stored));
+                        }
+                    }
+                }
+            }
+            match best {
+                Some((id, stored)) => {
+                    let row = stored.into_row(id)?;
+                    if is_expired(&row) {
+                        Ok(None)
+                    } else {
+                        Ok(Some(row))
+                    }
+                }
+                None => Ok(None),
             }
         })
         .await
@@ -639,6 +712,7 @@ mod tests {
             event_type: event_type.into(),
             payload: serde_json::json!({}),
             valid_to: None,
+            idempotency_key: None,
         }
     }
 

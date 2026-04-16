@@ -67,6 +67,7 @@ impl JournalStore for MockJournal {
             payload: entry.payload,
             created_at: chrono::Utc::now(),
             valid_to: None,
+            idempotency_key: entry.idempotency_key,
         });
         Ok(id)
     }
@@ -124,6 +125,7 @@ fn sample_entry() -> JournalEntry {
         event_type: "tool_invoked".to_string(),
         payload: json!({"tool": "memory:search"}),
         valid_to: None,
+        idempotency_key: None,
     }
 }
 

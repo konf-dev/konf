@@ -84,6 +84,7 @@ fn arb_envelope() -> impl Strategy<Value = Envelope<Value>> {
                 stream_id: StreamId(stream_id),
                 deadline: None,
                 idempotency_key: None,
+                qos_class: None,
                 references: None,
                 metadata,
             }
@@ -132,6 +133,7 @@ fn arb_envelope_string() -> impl Strategy<Value = Envelope<String>> {
                 stream_id: StreamId(stream_id),
                 deadline: None,
                 idempotency_key: None,
+                qos_class: None,
                 references: None,
                 metadata: Metadata::default(),
             }

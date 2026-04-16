@@ -75,6 +75,7 @@ impl RuntimeHooks {
             event_type: "interaction".into(),
             payload: interaction.to_json(),
             valid_to: None,
+            idempotency_key: None,
         }
     }
 

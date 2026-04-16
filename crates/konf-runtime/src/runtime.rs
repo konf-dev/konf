@@ -58,6 +58,8 @@ pub struct Runtime {
     tool_guards: Arc<std::sync::RwLock<HashMap<String, ToolGuardEntry>>>,
     /// Single-tool dispatcher (capability check + wrapping + journaling).
     dispatcher: crate::dispatcher::Dispatcher,
+    /// Per-trace budget cells. In-memory only. See [`crate::budget::BudgetTable`].
+    budget_table: Arc<crate::budget::BudgetTable>,
     // Counters for metrics (Arc-wrapped for sharing with spawned tasks)
     total_completed: Arc<std::sync::atomic::AtomicU64>,
     total_failed: Arc<std::sync::atomic::AtomicU64>,
@@ -117,6 +119,7 @@ impl Runtime {
             started_at: Instant::now(),
             tool_guards,
             dispatcher,
+            budget_table: Arc::new(crate::budget::BudgetTable::new()),
             total_completed: Arc::new(0.into()),
             total_failed: Arc::new(0.into()),
             total_cancelled: Arc::new(0.into()),
@@ -128,6 +131,12 @@ impl Runtime {
     /// [`RunEvent`] values emitted by the runtime.
     pub fn event_bus(&self) -> Arc<RunEventBus> {
         self.event_bus.clone()
+    }
+
+    /// Access the per-trace budget table for minting and decrementing
+    /// budget cells.
+    pub fn budget_table(&self) -> Arc<crate::budget::BudgetTable> {
+        self.budget_table.clone()
     }
 
     /// Install the durable scheduler backed by [`crate::storage::KonfStorage`].
@@ -382,6 +391,7 @@ impl Runtime {
                         "actor_role": &scope.actor.role,
                     }),
                     valid_to: None,
+                    idempotency_key: None,
                 })
                 .await
             {
@@ -513,6 +523,7 @@ impl Runtime {
                         event_type: event_type.into(),
                         payload,
                         valid_to: None,
+                        idempotency_key: None,
                     })
                     .await
                 {
@@ -651,6 +662,7 @@ impl Runtime {
                         "streaming": true,
                     }),
                     valid_to: None,
+                    idempotency_key: None,
                 })
                 .await
             {
@@ -830,6 +842,7 @@ impl Runtime {
                             event_type: event_type.into(),
                             payload,
                             valid_to: None,
+                            idempotency_key: None,
                         })
                         .await
                     {
