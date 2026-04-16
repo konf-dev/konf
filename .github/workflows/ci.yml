@@ -35,32 +35,14 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
 
-      - name: Stub private smrti dependency
+      - name: Stub optional smrti dependency
         run: ./scripts/stub-smrti.sh
 
-      # Build and test each crate individually to avoid memory-smrti SSH dep
-      # (smrti is a private external repo — needs SSH keys not available in CI)
-      - name: Check workspace (no memory-smrti)
-        run: |
-          # Test each crate that doesn't need external deps
-          for crate in konflux-core konf-runtime konf-tool-http konf-tool-llm \
-                       konf-tool-embed konf-tool-mcp konf-tool-memory \
-                       konf-tool-secret konf-tool-shell konf-mcp; do
-            echo "::group::Check $crate"
-            cargo clippy -p "$crate" --all-targets -- -D warnings
-            cargo test -p "$crate"
-            echo "::endgroup::"
-          done
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Check konf-init (without memory-smrti)
-        run: |
-          cargo clippy -p konf-init --no-default-features --features postgres --all-targets -- -D warnings
-          cargo test -p konf-init --no-default-features --features postgres
-
-      - name: Check konf-backend
-        run: |
-          cargo clippy -p konf-backend --all-targets -- -D warnings
-          cargo test -p konf-backend
+      - name: Test (workspace)
+        run: cargo test --workspace
 
   build:
     name: Build Release
@@ -70,11 +52,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Stub private smrti dependency
+      - name: Stub optional smrti dependency
         run: ./scripts/stub-smrti.sh
       - name: Build binaries
         run: |
-          cargo build -p konf-init --no-default-features --features postgres --release
           cargo build --bin konf-backend --release
           cargo build --bin konf-mcp --release
 
@@ -83,11 +64,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: pip3 install PyYAML
       - name: Validate product configs are valid YAML
         run: |
-          for f in $(find products -name '*.yaml' -o -name '*.yml'); do
+          for f in $(find products -name '*.yaml' -o -name '*.yml' 2>/dev/null); do
             echo "Validating $f"
             python3 -c "import yaml; yaml.safe_load(open('$f'))"
           done
@@ -97,6 +76,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Stub private smrti dependency
+      - name: Stub optional smrti dependency
         run: ./scripts/stub-smrti.sh
       - uses: EmbarkStudios/cargo-deny-action@v2
