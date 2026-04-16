@@ -255,16 +255,10 @@ impl Runtime {
         ctx: &ExecutionContext,
     ) -> HashMap<String, Value> {
         let mut m = HashMap::with_capacity(5);
-        m.insert(
-            "trace_id".into(),
-            Value::String(ctx.trace_id.to_string()),
-        );
+        m.insert("trace_id".into(), Value::String(ctx.trace_id.to_string()));
         m.insert("namespace".into(), Value::String(scope.namespace.clone()));
         m.insert("actor_id".into(), Value::String(scope.actor.id.clone()));
-        m.insert(
-            "session_id".into(),
-            Value::String(ctx.session_id.clone()),
-        );
+        m.insert("session_id".into(), Value::String(ctx.session_id.clone()));
         let actor_role_str = match scope.actor.role {
             crate::scope::ActorRole::InfraAdmin => "infra_admin",
             crate::scope::ActorRole::ProductAdmin => "product_admin",
@@ -274,10 +268,7 @@ impl Runtime {
             crate::scope::ActorRole::UserAgent => "user_agent",
             crate::scope::ActorRole::System => "system",
         };
-        m.insert(
-            "actor_role".into(),
-            Value::String(actor_role_str.into()),
-        );
+        m.insert("actor_role".into(), Value::String(actor_role_str.into()));
         m.insert(
             "depth".into(),
             Value::Number(serde_json::Number::from(scope.depth as u64)),
@@ -388,6 +379,7 @@ impl Runtime {
                         "actor_id": &scope.actor.id,
                         "actor_role": &scope.actor.role,
                     }),
+                    valid_to: None,
                 })
                 .await
             {
@@ -518,6 +510,7 @@ impl Runtime {
                         namespace,
                         event_type: event_type.into(),
                         payload,
+                        valid_to: None,
                     })
                     .await
                 {
@@ -655,6 +648,7 @@ impl Runtime {
                         "actor_id": &scope.actor.id,
                         "streaming": true,
                     }),
+                    valid_to: None,
                 })
                 .await
             {
@@ -833,6 +827,7 @@ impl Runtime {
                             namespace,
                             event_type: event_type.into(),
                             payload,
+                            valid_to: None,
                         })
                         .await
                     {

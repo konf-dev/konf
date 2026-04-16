@@ -24,7 +24,7 @@ use redb::{Database, MultimapTableDefinition, ReadableDatabase, ReadableTable, T
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{JournalEntry, JournalError, JournalRow, JournalStore};
+use super::{JournalEntry, JournalError, JournalFilter, JournalRow, JournalStore};
 use crate::journal::RunId;
 
 // ---------------------------------------------------------------------------
@@ -44,6 +44,11 @@ const BY_RUN: MultimapTableDefinition<&[u8], u64> = MultimapTableDefinition::new
 const BY_SESSION: MultimapTableDefinition<&str, u64> =
     MultimapTableDefinition::new("journal_by_session");
 
+/// Multimap index: valid_to (micros) → set of sequence ids that expire at that time.
+/// Only populated for entries with a non-None valid_to.
+const BY_EXPIRY: MultimapTableDefinition<i64, u64> =
+    MultimapTableDefinition::new("journal_by_expiry");
+
 // ---------------------------------------------------------------------------
 // Stored value shape
 // ---------------------------------------------------------------------------
@@ -57,6 +62,9 @@ struct StoredEntry {
     event_type: String,
     payload_json: String, // serde_json::Value serialized to its canonical string form
     created_at_micros: i64,
+    /// Expiry timestamp in microseconds. None = never expires.
+    /// Added in Stage 7.b; postcard decodes missing trailing Option as None.
+    valid_to_micros: Option<i64>,
 }
 
 impl StoredEntry {
@@ -69,6 +77,7 @@ impl StoredEntry {
             payload_json: serde_json::to_string(&entry.payload)
                 .map_err(JournalError::serialization)?,
             created_at_micros: Utc::now().timestamp_micros(),
+            valid_to_micros: entry.valid_to.map(|dt| dt.timestamp_micros()),
         })
     }
 
@@ -80,6 +89,9 @@ impl StoredEntry {
             .timestamp_micros(self.created_at_micros)
             .single()
             .unwrap_or_else(Utc::now);
+        let valid_to = self
+            .valid_to_micros
+            .and_then(|micros| Utc.timestamp_micros(micros).single());
         Ok(JournalRow {
             id,
             run_id,
@@ -88,6 +100,7 @@ impl StoredEntry {
             event_type: self.event_type,
             payload,
             created_at,
+            valid_to,
         })
     }
 }
@@ -139,6 +152,9 @@ impl RedbJournal {
             let _ = write
                 .open_multimap_table(BY_SESSION)
                 .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let _ = write
+                .open_multimap_table(BY_EXPIRY)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
         }
         write
             .commit()
@@ -151,6 +167,11 @@ impl RedbJournal {
     pub fn database(&self) -> Arc<Database> {
         self.db.clone()
     }
+}
+
+/// Returns true if this row is expired (valid_to in the past).
+fn is_expired(row: &JournalRow) -> bool {
+    row.valid_to.map(|vt| vt < Utc::now()).unwrap_or(false)
 }
 
 #[async_trait::async_trait]
@@ -197,6 +218,14 @@ impl JournalStore for RedbJournal {
                     .insert(stored.session_id.as_str(), next_id)
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
             }
+            if let Some(valid_to_micros) = stored.valid_to_micros {
+                let mut by_expiry = write
+                    .open_multimap_table(BY_EXPIRY)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                by_expiry
+                    .insert(valid_to_micros, next_id)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            }
             write
                 .commit()
                 .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
@@ -238,6 +267,7 @@ impl JournalStore for RedbJournal {
                 }
             }
             rows.sort_by_key(|r| r.id);
+            rows.retain(|r| !is_expired(r));
             Ok(rows)
         })
         .await
@@ -296,6 +326,7 @@ impl JournalStore for RedbJournal {
                     rows.push(stored.into_row(id)?);
                 }
             }
+            rows.retain(|r| !is_expired(r));
             Ok(rows)
         })
         .await
@@ -323,6 +354,7 @@ impl JournalStore for RedbJournal {
                     postcard::from_bytes(val_guard.value()).map_err(JournalError::serialization)?;
                 rows.push(stored.into_row(id)?);
             }
+            rows.retain(|r| !is_expired(r));
             Ok(rows)
         })
         .await
@@ -385,6 +417,7 @@ impl JournalStore for RedbJournal {
                                 "error": "System restart — workflow was interrupted",
                                 "reconciled": true,
                             }),
+                            valid_to: None,
                         });
                     }
                 }
@@ -399,6 +432,190 @@ impl JournalStore for RedbJournal {
             self.append(entry).await?;
         }
         Ok(count)
+    }
+
+    async fn query(
+        &self,
+        filter: &JournalFilter,
+        limit: usize,
+    ) -> Result<Vec<JournalRow>, JournalError> {
+        let db = self.db.clone();
+        let filter = filter.clone();
+        tokio::task::spawn_blocking(move || -> Result<Vec<JournalRow>, JournalError> {
+            let read = db
+                .begin_read()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let events = read
+                .open_table(EVENTS)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let mut rows = Vec::with_capacity(limit.min(1024));
+            // Scan in reverse (newest first), filter, collect up to limit.
+            for pair in events
+                .iter()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?
+                .rev()
+            {
+                if rows.len() >= limit {
+                    break;
+                }
+                let (id_guard, val_guard) =
+                    pair.map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let id = id_guard.value();
+                let stored: StoredEntry =
+                    postcard::from_bytes(val_guard.value()).map_err(JournalError::serialization)?;
+                let row = stored.into_row(id)?;
+                if filter.matches(&row) {
+                    rows.push(row);
+                }
+            }
+            Ok(rows)
+        })
+        .await
+        .map_err(|e| JournalError::storage(std::io::Error::other(e)))?
+    }
+
+    async fn aggregate(
+        &self,
+        filter: &JournalFilter,
+        agg_query: &super::AggregateQuery,
+    ) -> Result<super::AggregateResult, JournalError> {
+        use super::{AggregateQuery, AggregateResult};
+        let db = self.db.clone();
+        let filter = filter.clone();
+        let agg_query = agg_query.clone();
+
+        tokio::task::spawn_blocking(move || -> Result<AggregateResult, JournalError> {
+            let read = db
+                .begin_read()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let events = read
+                .open_table(EVENTS)
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+
+            let mut count = 0u64;
+            let mut most_recent: Option<chrono::DateTime<Utc>> = None;
+
+            for pair in events
+                .iter()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?
+            {
+                let (id_guard, val_guard) =
+                    pair.map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let id = id_guard.value();
+                let stored: StoredEntry =
+                    postcard::from_bytes(val_guard.value()).map_err(JournalError::serialization)?;
+                let row = stored.into_row(id)?;
+                if !filter.matches(&row) {
+                    continue;
+                }
+                count += 1;
+                match most_recent {
+                    None => most_recent = Some(row.created_at),
+                    Some(prev) if row.created_at > prev => most_recent = Some(row.created_at),
+                    _ => {}
+                }
+            }
+
+            match agg_query {
+                AggregateQuery::Count => Ok(AggregateResult::Count(count)),
+                AggregateQuery::MostRecent => Ok(AggregateResult::MostRecent(most_recent)),
+                AggregateQuery::WindowSum { .. } => Err(JournalError::Storage(Box::from(
+                    "WindowSum not yet implemented",
+                ))),
+            }
+        })
+        .await
+        .map_err(|e| JournalError::storage(std::io::Error::other(e)))?
+    }
+
+    async fn delete_expired(&self) -> Result<u64, JournalError> {
+        let db = self.db.clone();
+        let now_micros = Utc::now().timestamp_micros();
+
+        tokio::task::spawn_blocking(move || -> Result<u64, JournalError> {
+            let write = db
+                .begin_write()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            let mut deleted = 0u64;
+
+            // Phase 1: scan EVENTS to collect expired entries with their
+            // index keys. Read-only table opened in its own scope so the
+            // borrow is released before phase 2 mutations.
+            struct ExpiredEntry {
+                seq: u64,
+                run_id_bytes: Option<[u8; 16]>,
+                session_id: String,
+                valid_to_micros: Option<i64>,
+            }
+            let expired: Vec<ExpiredEntry> = {
+                let events_read = write
+                    .open_table(EVENTS)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let mut entries = Vec::new();
+                for pair in events_read
+                    .iter()
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?
+                {
+                    let (key, val) = pair
+                        .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                    let stored: StoredEntry =
+                        postcard::from_bytes(val.value()).map_err(JournalError::serialization)?;
+                    if let Some(vt) = stored.valid_to_micros {
+                        if vt <= now_micros {
+                            entries.push(ExpiredEntry {
+                                seq: key.value(),
+                                run_id_bytes: stored.run_id_bytes,
+                                session_id: stored.session_id,
+                                valid_to_micros: stored.valid_to_micros,
+                            });
+                        }
+                    }
+                }
+                entries
+            };
+
+            if expired.is_empty() {
+                write
+                    .commit()
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                return Ok(0);
+            }
+
+            // Phase 2: delete from all tables using the collected keys.
+            {
+                let mut events = write
+                    .open_table(EVENTS)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let mut by_run = write
+                    .open_multimap_table(BY_RUN)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let mut by_session = write
+                    .open_multimap_table(BY_SESSION)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let mut by_expiry = write
+                    .open_multimap_table(BY_EXPIRY)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+
+                for entry in &expired {
+                    if let Some(ref rid) = entry.run_id_bytes {
+                        let _ = by_run.remove(rid.as_slice(), entry.seq);
+                    }
+                    let _ = by_session.remove(entry.session_id.as_str(), entry.seq);
+                    if let Some(vt) = entry.valid_to_micros {
+                        let _ = by_expiry.remove(vt, entry.seq);
+                    }
+                    let _ = events.remove(entry.seq);
+                    deleted += 1;
+                }
+            }
+
+            write
+                .commit()
+                .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+            Ok(deleted)
+        })
+        .await
+        .map_err(|e| JournalError::storage(std::io::Error::other(e)))?
     }
 }
 
@@ -421,6 +638,7 @@ mod tests {
             namespace: "konf:test:user".into(),
             event_type: event_type.into(),
             payload: serde_json::json!({}),
+            valid_to: None,
         }
     }
 

@@ -581,9 +581,13 @@ mod tests {
         };
 
         // Depth 0 → 1 → 2: OK
-        let child1 = scope.child_scope(vec![CapabilityGrant::new("*")], None).unwrap();
+        let child1 = scope
+            .child_scope(vec![CapabilityGrant::new("*")], None)
+            .unwrap();
         assert_eq!(child1.depth, 1);
-        let child2 = child1.child_scope(vec![CapabilityGrant::new("*")], None).unwrap();
+        let child2 = child1
+            .child_scope(vec![CapabilityGrant::new("*")], None)
+            .unwrap();
         assert_eq!(child2.depth, 2);
 
         // Depth 2 → validate_start should still pass (depth < max_child_depth=3)
@@ -591,7 +595,9 @@ mod tests {
         assert!(child2.validate_start(&table).is_ok());
 
         // Depth 3 → validate_start rejects
-        let child3 = child2.child_scope(vec![CapabilityGrant::new("*")], None).unwrap();
+        let child3 = child2
+            .child_scope(vec![CapabilityGrant::new("*")], None)
+            .unwrap();
         assert_eq!(child3.depth, 3);
         assert!(child3.validate_start(&table).is_err());
     }

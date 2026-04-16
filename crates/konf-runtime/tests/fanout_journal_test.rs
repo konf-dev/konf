@@ -66,6 +66,7 @@ impl JournalStore for MockJournal {
             event_type: entry.event_type,
             payload: entry.payload,
             created_at: chrono::Utc::now(),
+            valid_to: None,
         });
         Ok(id)
     }
@@ -122,6 +123,7 @@ fn sample_entry() -> JournalEntry {
         namespace: "konf:test".to_string(),
         event_type: "tool_invoked".to_string(),
         payload: json!({"tool": "memory:search"}),
+        valid_to: None,
     }
 }
 

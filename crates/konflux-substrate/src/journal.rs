@@ -5,6 +5,7 @@
 //! konf-runtime.
 
 use std::error::Error as StdError;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -55,6 +56,10 @@ pub struct JournalEntry {
     pub namespace: String,
     pub event_type: String,
     pub payload: Value,
+    /// When this entry expires and becomes invisible to queries.
+    /// `None` means the entry never expires.
+    #[serde(default)]
+    pub valid_to: Option<DateTime<Utc>>,
 }
 
 /// One row returned from the journal.
@@ -68,6 +73,9 @@ pub struct JournalRow {
     pub event_type: String,
     pub payload: Value,
     pub created_at: DateTime<Utc>,
+    /// When this entry expires. `None` means never.
+    #[serde(default)]
+    pub valid_to: Option<DateTime<Utc>>,
 }
 
 /// Append-only event journal.
@@ -99,4 +107,108 @@ pub trait JournalStore: Send + Sync + 'static {
     ///
     /// Intended to be called once at startup.
     async fn reconcile_zombies(&self) -> Result<u64, JournalError>;
+
+    /// Query entries matching a filter, respecting the expired-invisible
+    /// invariant unless `filter.include_expired` is true. Returns up to
+    /// `limit` entries, most recent first.
+    async fn query(
+        &self,
+        _filter: &JournalFilter,
+        _limit: usize,
+    ) -> Result<Vec<JournalRow>, JournalError> {
+        Ok(vec![])
+    }
+
+    /// Compute an aggregate over entries matching a filter. Respects
+    /// the expired-invisible invariant by default.
+    async fn aggregate(
+        &self,
+        _filter: &JournalFilter,
+        _query: &AggregateQuery,
+    ) -> Result<AggregateResult, JournalError> {
+        Ok(AggregateResult::Count(0))
+    }
+
+    /// Physically delete all entries where `valid_to < now`. Returns the
+    /// number of entries removed. Implementations that don't support TTL
+    /// return `Ok(0)`.
+    async fn delete_expired(&self) -> Result<u64, JournalError> {
+        Ok(0)
+    }
+}
+
+/// Filter predicate for journal queries and subscriptions.
+#[derive(Debug, Clone, Default)]
+pub struct JournalFilter {
+    pub namespace: Option<String>,
+    pub event_type: Option<String>,
+    pub run_id: Option<RunId>,
+    pub session_id: Option<String>,
+    pub trace_id: Option<Uuid>,
+    /// If true, include entries past their `valid_to`. Default false —
+    /// expired entries are invisible.
+    pub include_expired: bool,
+}
+
+impl JournalFilter {
+    /// Check if a row matches this filter (client-side predicate).
+    pub fn matches(&self, row: &JournalRow) -> bool {
+        if let Some(ref ns) = self.namespace {
+            if row.namespace != *ns {
+                return false;
+            }
+        }
+        if let Some(ref et) = self.event_type {
+            if row.event_type != *et {
+                return false;
+            }
+        }
+        if let Some(ref rid) = self.run_id {
+            if row.run_id.as_ref() != Some(rid) {
+                return false;
+            }
+        }
+        if let Some(ref sid) = self.session_id {
+            if row.session_id != *sid {
+                return false;
+            }
+        }
+        if let Some(ref tid) = self.trace_id {
+            // trace_id is inside the payload (Interaction.trace_id).
+            // For now, skip this check if the payload doesn't contain it.
+            if let Some(payload_tid) = row.payload.get("trace_id").and_then(|v| v.as_str()) {
+                if payload_tid != tid.to_string() {
+                    return false;
+                }
+            }
+        }
+        if !self.include_expired {
+            if let Some(valid_to) = row.valid_to {
+                if valid_to < Utc::now() {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+/// What to compute over matching journal entries.
+#[derive(Debug, Clone)]
+pub enum AggregateQuery {
+    /// Count matching entries.
+    Count,
+    /// Find the most recent `created_at` among matching entries.
+    MostRecent,
+    /// Sum a numeric field from payload within a time window.
+    /// Stub — returns error until a concrete use case exists.
+    WindowSum { field: String, window: Duration },
+}
+
+/// Result of an aggregate computation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AggregateResult {
+    Count(u64),
+    MostRecent(Option<DateTime<Utc>>),
+    WindowSum(f64),
 }

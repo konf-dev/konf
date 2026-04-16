@@ -33,7 +33,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::journal::RunId;
-use crate::journal::{JournalEntry, JournalError, JournalRow, JournalStore};
+use crate::journal::{
+    AggregateQuery, AggregateResult, JournalEntry, JournalError, JournalFilter, JournalRow,
+    JournalStore,
+};
 
 /// Counters exposed to observability. All atomics use `Ordering::Relaxed`
 /// because counters are read at observation time; no cross-counter
@@ -126,5 +129,25 @@ impl JournalStore for FanoutJournalStore {
 
     async fn reconcile_zombies(&self) -> Result<u64, JournalError> {
         self.primary.reconcile_zombies().await
+    }
+
+    async fn query(
+        &self,
+        filter: &JournalFilter,
+        limit: usize,
+    ) -> Result<Vec<JournalRow>, JournalError> {
+        self.primary.query(filter, limit).await
+    }
+
+    async fn aggregate(
+        &self,
+        filter: &JournalFilter,
+        query: &AggregateQuery,
+    ) -> Result<AggregateResult, JournalError> {
+        self.primary.aggregate(filter, query).await
+    }
+
+    async fn delete_expired(&self) -> Result<u64, JournalError> {
+        self.primary.delete_expired().await
     }
 }

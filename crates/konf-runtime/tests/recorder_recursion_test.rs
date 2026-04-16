@@ -64,6 +64,7 @@ fn sample_entry() -> JournalEntry {
         namespace: "konf:test".into(),
         event_type: "interaction".into(),
         payload: json!({"id": "ignore"}),
+        valid_to: None,
     }
 }
 

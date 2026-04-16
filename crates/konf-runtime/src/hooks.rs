@@ -68,6 +68,7 @@ impl RuntimeHooks {
             namespace: self.namespace.clone(),
             event_type: "interaction".into(),
             payload: interaction.to_json(),
+            valid_to: None,
         }
     }
 
@@ -76,9 +77,23 @@ impl RuntimeHooks {
             Some(j) => j,
             None => return,
         };
+        let event_bus = self.event_bus.clone();
+        let event_type = entry.event_type.clone();
+        let namespace = entry.namespace.clone();
+        let run_id_for_event = entry.run_id.unwrap_or(uuid::Uuid::nil());
         tokio::spawn(async move {
-            if let Err(e) = journal.append(entry).await {
-                tracing::warn!(error = %e, "Failed to append journal entry");
+            match journal.append(entry).await {
+                Ok(sequence) => {
+                    event_bus.emit(RunEvent::JournalAppended {
+                        sequence,
+                        event_type,
+                        namespace,
+                        run_id: run_id_for_event,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to append journal entry");
+                }
             }
         });
     }

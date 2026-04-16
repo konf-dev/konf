@@ -674,7 +674,9 @@ nodes:
     assert!(result.is_ok(), "Workflow failed: {result:?}");
 
     let env = captured.lock().await;
-    let env = env.as_ref().expect("CaptureTool should have captured an envelope");
+    let env = env
+        .as_ref()
+        .expect("CaptureTool should have captured an envelope");
 
     assert_eq!(
         env.namespace.0, expected_ns,
@@ -882,7 +884,10 @@ async fn single_dispatch_path_records_interaction() {
         .await
         .unwrap();
 
-    assert!(!rows.is_empty(), "journal should have recorded the dispatch");
+    assert!(
+        !rows.is_empty(),
+        "journal should have recorded the dispatch"
+    );
 
     // Find the interaction entry with ToolDispatch kind.
     let interaction_row = rows

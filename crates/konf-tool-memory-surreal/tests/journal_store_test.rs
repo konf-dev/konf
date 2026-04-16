@@ -48,6 +48,7 @@ fn sample_entry(run_id: Uuid, session: &str, event_type: &str) -> JournalEntry {
         namespace: "konf:test".to_string(),
         event_type: event_type.to_string(),
         payload: json!({"tool": "memory:search", "latency_ms": 12}),
+        valid_to: None,
     }
 }
 

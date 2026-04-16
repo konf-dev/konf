@@ -6,10 +6,15 @@
 
 pub mod fanout;
 pub mod redb;
+pub mod subscribe;
+pub mod sweep;
 
 // Re-export the substrate-defined journal contract so runtime consumers
 // can keep importing from `crate::journal::*`.
-pub use konflux_substrate::journal::{JournalEntry, JournalError, JournalRow, JournalStore, RunId};
+pub use konflux_substrate::journal::{
+    AggregateQuery, AggregateResult, JournalEntry, JournalError, JournalFilter, JournalRow,
+    JournalStore, RunId,
+};
 
 pub use fanout::{FanoutJournalStore, FanoutMetrics};
 pub use redb::RedbJournal;

@@ -64,6 +64,8 @@ struct RawEventRow {
     event_type: String,
     payload: Value,
     created_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    valid_to: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl RawEventRow {
@@ -99,6 +101,7 @@ impl RawEventRow {
             event_type: self.event_type,
             payload: data,
             created_at: self.created_at,
+            valid_to: self.valid_to,
         }
     }
 }
@@ -134,10 +137,13 @@ impl JournalStore for SurrealJournalStore {
         });
 
         self.db
-            .query("CREATE event SET namespace = $ns, event_type = $et, payload = $p")
+            .query(
+                "CREATE event SET namespace = $ns, event_type = $et, payload = $p, valid_to = $vt",
+            )
             .bind(("ns", entry.namespace))
             .bind(("et", entry.event_type))
             .bind(("p", payload))
+            .bind(("vt", entry.valid_to))
             .await
             .map_err(wrap_db_err)?
             .check()
@@ -151,9 +157,10 @@ impl JournalStore for SurrealJournalStore {
         let mut response = self
             .db
             .query(
-                "SELECT namespace, event_type, payload, created_at \
+                "SELECT namespace, event_type, payload, created_at, valid_to \
                  FROM event \
                  WHERE payload.run_id = $rid \
+                 AND (valid_to IS NONE OR valid_to > time::now()) \
                  ORDER BY created_at ASC",
             )
             .bind(("rid", run_id_str))
@@ -171,9 +178,10 @@ impl JournalStore for SurrealJournalStore {
         let mut response = self
             .db
             .query(
-                "SELECT namespace, event_type, payload, created_at \
+                "SELECT namespace, event_type, payload, created_at, valid_to \
                  FROM event \
                  WHERE payload.session_id = $sid \
+                 AND (valid_to IS NONE OR valid_to > time::now()) \
                  ORDER BY created_at DESC \
                  LIMIT $lim",
             )
@@ -189,8 +197,9 @@ impl JournalStore for SurrealJournalStore {
         let mut response = self
             .db
             .query(
-                "SELECT namespace, event_type, payload, created_at \
+                "SELECT namespace, event_type, payload, created_at, valid_to \
                  FROM event \
+                 WHERE valid_to IS NONE OR valid_to > time::now() \
                  ORDER BY created_at DESC \
                  LIMIT $lim",
             )
@@ -199,6 +208,18 @@ impl JournalStore for SurrealJournalStore {
             .map_err(wrap_db_err)?;
         let rows: Vec<Value> = response.take(0).map_err(wrap_db_err)?;
         rows_into_journal(rows)
+    }
+
+    async fn delete_expired(&self) -> Result<u64, JournalError> {
+        let mut response = self
+            .db
+            .query(
+                "DELETE event WHERE valid_to IS NOT NONE AND valid_to < time::now() RETURN BEFORE",
+            )
+            .await
+            .map_err(wrap_db_err)?;
+        let deleted: Vec<Value> = response.take(0).map_err(wrap_db_err)?;
+        Ok(deleted.len() as u64)
     }
 
     async fn reconcile_zombies(&self) -> Result<u64, JournalError> {

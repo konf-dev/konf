@@ -174,9 +174,20 @@ impl Dispatcher {
                 namespace: scope.namespace.clone(),
                 event_type: "interaction".into(),
                 payload: interaction.to_json(),
+                valid_to: None,
             };
-            if let Err(e) = journal.append(entry).await {
-                tracing::warn!(error = %e, "dispatch_tool: failed to append interaction");
+            match journal.append(entry).await {
+                Ok(sequence) => {
+                    self.event_bus.emit(RunEvent::JournalAppended {
+                        sequence,
+                        event_type: "interaction".into(),
+                        namespace: scope.namespace.clone(),
+                        run_id: uuid::Uuid::nil(),
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "dispatch_tool: failed to append interaction");
+                }
             }
         }
 
