@@ -149,6 +149,51 @@ Backed by fastembed (ONNX runtime). Runs locally — no API calls. Model configu
 
 Backed by a MemoryBackend implementation (see [memory-backends.md](memory-backends.md)). Backend selected via tools.yaml.
 
+### konf-tool-shell
+
+| Tool | Description | Annotations |
+|------|-------------|-------------|
+| `shell:exec` | Execute a shell command inside a Docker container sandbox | destructive, open_world |
+
+Requires `tools.shell` config with a `container` name and optional `timeout_ms` (default: 30000). The command runs via `docker exec` against the specified container.
+
+### konf-tool-secret
+
+| Tool | Description | Annotations |
+|------|-------------|-------------|
+| `secret:get` | Read an environment variable by key (restricted to allowed keys) | read_only |
+| `secret:list` | List all allowed secret key names (values not exposed) | read_only, idempotent |
+
+Requires `tools.secret` config with an `allowed_keys` list. Only keys in the allow-list can be read.
+
+### konf-tool-runner
+
+| Tool | Description | Annotations |
+|------|-------------|-------------|
+| `runner:spawn` | Start a workflow as a background run. Returns a `RunId` immediately. | |
+| `runner:status` | Check the status of a background run by `RunId`. | read_only, idempotent |
+| `runner:wait` | Block until a background run completes. Returns the output. | read_only |
+| `runner:cancel` | Cancel a running background workflow. | destructive |
+
+Runs are tracked in-memory by `RunRegistry`. When `KonfStorage` is configured, spawn intents are persisted to redb for at-least-once replay on restart.
+
+### Schedule and config tools (registered by konf-init)
+
+| Tool | Description | Annotations |
+|------|-------------|-------------|
+| `schedule:create` | Create a durable timer (once, fixed-delay, or cron) to fire a workflow. | |
+| `cancel:schedule` | Cancel a scheduled timer by job ID. | destructive |
+| `config:reload` | Hot-reload product config (workflows, prompts, tool guards) from disk. | |
+
+Schedule tools require a configured `[database]` section (redb storage). Without storage, `schedule:create` is still registered but the scheduler is unavailable.
+
+### Architect tools (registered by konf-init, always available)
+
+| Tool | Description | Annotations |
+|------|-------------|-------------|
+| `system:introspect` | Read-only metadata about the engine: lists all registered tools, resources, and prompts. | read_only, idempotent |
+| `yaml:validate_workflow` | Parse and validate a workflow YAML string without executing it. | read_only, idempotent |
+
 ### konf-tool-mcp
 
 Not a fixed tool set — discovers and registers tools from external MCP servers at startup. Each external tool is wrapped as a `McpToolWrapper` implementing the Tool trait.

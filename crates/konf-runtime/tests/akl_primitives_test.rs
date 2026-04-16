@@ -8,7 +8,7 @@ use konf_runtime::budget::{BudgetError, BudgetTable};
 fn budget_cell_atomic_decrement() {
     let table = BudgetTable::new();
     let tid = uuid::Uuid::new_v4();
-    table.mint(tid, 100);
+    table.mint(tid, 100).unwrap();
 
     let remaining = table.decrement(tid, 30).unwrap();
     assert_eq!(remaining, 70);

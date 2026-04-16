@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tracing::info;
+use tracing::{debug, info};
 
 use konflux_substrate::envelope::Envelope;
 use konflux_substrate::error::ToolError;
@@ -104,7 +104,7 @@ impl Tool for ShellExecTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(self.default_timeout_ms);
 
-        info!(
+        debug!(
             container = %self.container_name,
             command = %command,
             timeout_ms,

@@ -627,6 +627,15 @@ async fn invoke_with_retry(
 
         let start_time = std::time::Instant::now();
         let dur = timeout_duration.unwrap_or(Duration::from_millis(ctx.config.default_timeout_ms));
+        // If envelope has a deadline, clamp the timeout so we don't exceed it mid-execution.
+        let dur = if let Some(deadline) = env.deadline {
+            let remaining = (deadline - chrono::Utc::now())
+                .to_std()
+                .unwrap_or(Duration::ZERO);
+            dur.min(remaining)
+        } else {
+            dur
+        };
         let invoke_res = match timeout(
             dur,
             tool.invoke_streaming(env.clone(), tx.clone())

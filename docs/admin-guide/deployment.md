@@ -81,9 +81,7 @@ All platform configuration can be set via environment variables with the `KONF_`
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `KONF_CONFIG_DIR` | `./config` | Path to product config directory |
-| `KONF__DATABASE__URL` | — | Postgres connection string |
-| `KONF__DATABASE__POOL_MIN` | `5` | Minimum connection pool size |
-| `KONF__DATABASE__POOL_MAX` | `20` | Maximum connection pool size |
+| `KONF__DATABASE__URL` | — | Path or URL to the redb file (e.g. `redb:///var/lib/konf/konf.redb`) |
 | `KONF__SERVER__HOST` | `0.0.0.0` | Bind address |
 | `KONF__SERVER__PORT` | `8000` | Bind port |
 | `KONF__AUTH__SUPABASE_URL` | `http://localhost:9999` | Supabase auth endpoint |

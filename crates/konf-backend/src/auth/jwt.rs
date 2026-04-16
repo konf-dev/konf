@@ -138,6 +138,10 @@ impl JwtVerifier {
             .await
             .map_err(|e| AuthError::JwksFetchFailed(e.to_string()))?;
 
+        let response = response
+            .error_for_status()
+            .map_err(|e| AuthError::JwksFetchFailed(e.to_string()))?;
+
         let jwks: jsonwebtoken::jwk::JwkSet = response
             .json()
             .await

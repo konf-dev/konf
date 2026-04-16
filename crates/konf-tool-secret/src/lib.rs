@@ -71,17 +71,14 @@ impl Tool for SecretGetTool {
 
         if !self.allowed_keys.contains(&key.to_string()) {
             return Err(ToolError::AccessDenied {
-                message: format!("Secret key '{}' is not in the allowed_keys whitelist.", key),
+                message: format!("Secret key '{key}' not available"),
             });
         }
 
         match std::env::var(key) {
             Ok(val) => Ok(env.respond(Value::String(val))),
             Err(_) => Err(ToolError::ExecutionFailed {
-                message: format!(
-                    "Secret key '{}' is allowed but not found in the environment.",
-                    key
-                ),
+                message: format!("Secret key '{key}' not available"),
                 retryable: false,
             }),
         }

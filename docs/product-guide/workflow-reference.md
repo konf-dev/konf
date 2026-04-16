@@ -1,7 +1,7 @@
 # Workflow YAML Schema Reference
 
 **Status:** Authoritative
-**Scope:** YAML format for defining workflows executed by the konflux engine
+**Source of truth:** `crates/konflux-substrate/src/parser/schema.rs`
 
 ---
 
@@ -15,12 +15,12 @@ Workflows are YAML files that define a DAG (directed acyclic graph) of tool call
 
 ```yaml
 workflow: my_workflow          # Required. Unique identifier (becomes workflow ID)
-version: "1.0"                # Optional. Default: "0.1.0"
+version: "0.1.0"              # Optional. Default: "0.1.0"
 description: "What this does" # Optional. Human-readable description
 capabilities:                  # Required for register_as_tool. Capability grants.
   - "memory:search"
   - "ai:complete"
-register_as_tool: true         # Optional. Default: false. If true, registers as workflow_{id} tool
+register_as_tool: true         # Optional. Default: false. Registers as workflow:<id> tool.
 input_schema:                  # Optional. JSON Schema for workflow input (used by WorkflowTool)
   type: object
   properties:
@@ -30,7 +30,7 @@ output_schema:                 # Optional. JSON Schema for workflow output
   type: object
   properties:
     response: { type: string }
-nodes:                         # Required. Map of node_id → node definition
+nodes:                         # Required. Ordered map of node_id -> node definition
   step1:
     # ...
 ```
@@ -38,13 +38,13 @@ nodes:                         # Required. Map of node_id → node definition
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `workflow` | string | Yes | — | Unique workflow identifier |
-| `version` | string | No | "0.1.0" | Semantic version |
+| `version` | string | No | `"0.1.0"` | Semantic version |
 | `description` | string | No | — | Human-readable description |
-| `capabilities` | string[] | No | [] | Required capability grants (see note below) |
-| `register_as_tool` | bool | No | false | Register as `workflow_{id}` tool |
-| `input_schema` | JSON Schema | No | — | Input validation schema. When `register_as_tool: true`, this becomes the tool's parameter schema (advertised to MCP clients and LLMs). |
+| `capabilities` | string[] | No | `[]` | Required capability grants |
+| `register_as_tool` | bool | No | `false` | Register as `workflow:<id>` tool |
+| `input_schema` | JSON Schema | No | — | Input validation schema. When `register_as_tool: true`, this becomes the tool's parameter schema. |
 | `output_schema` | JSON Schema | No | — | Output schema for downstream tools |
-| `nodes` | map | Yes | — | Node definitions (at least one required) |
+| `nodes` | ordered map | Yes | — | Node definitions (at least one required). Order matters: first node is entry by default. |
 
 > **Important:** If `register_as_tool: true`, `capabilities` must be non-empty. A workflow with `capabilities: []` will fail at runtime with capability denied errors. Use `capabilities: ["*"]` to grant access to all tools, or list specific tool patterns (e.g., `["http:get", "memory:*"]`).
 
@@ -52,74 +52,242 @@ nodes:                         # Required. Map of node_id → node definition
 
 ## Node Definition
 
-Each node invokes a single tool with the parameters defined in `with:`.
+Every field documented here corresponds to a field on `NodeSchema` in `schema.rs`. Nothing else exists.
 
 ```yaml
 nodes:
   node_id:
-    do: tool_name              # Required. Which tool to invoke
+    do: tool_name              # Tool to invoke (single) or parallel array
     with:                      # Optional. Input parameters (supports {{templates}})
       query: "{{input.message}}"
       limit: 10
+    pipe:                      # Optional. Chain of transforms on output
+      - json_get
+      - { do: template, with: { template: "Result: {{vars.value}}" } }
     then: next_node            # Optional. Next node(s) on success
-    catch: error_node          # Optional. Node to run on failure
-    condition: "{{score > 0.5}}" # Optional. Skip if condition is false
-    return: true               # Optional. This node's output is the workflow output
+    catch: error_node          # Optional. Error handling
     retry:                     # Optional. Retry policy
-      max_attempts: 3
-      backoff_ms: 500
-    join: all                  # Optional. Wait for all/any dependencies
-    timeout_ms: 30000          # Optional. Per-node timeout
+      times: 3
+      delay: "1s"
+      backoff: exponential
+      max_delay: "30s"
+      on: ["timeout"]
+    timeout: "30s"             # Optional. Duration string (e.g. "500ms", "5m")
+    entry: true                # Optional. Marks explicit entry node
+    repeat:                    # Optional. Loop construct
+      until: "{{done}}"
+      max: 10
+      as: "iteration"
+    stream: true               # Optional. Streaming mode
+    return: true               # Optional. This node's output is the workflow output
+    join:                      # Optional. Wait for parallel branches
+      wait_for: [node_a, node_b]
+      policy: all
+    credentials:               # Optional. Key-value credential map
+      api_key: "{{secret.key}}"
+    grant:                     # Optional. Capability patterns for this node
+      - "http:get"
 ```
+
+### Field Reference
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `do` | string | Yes | — | Tool name to invoke (e.g. `echo`, `memory:search`, `ai:complete`) |
-| `with` | map | No | {} | Input parameters — supports both static values and `{{template}}` expressions |
-| `then` | string or string[] | No | — | Next node(s) on success. Use `then: [a, b]` for parallel fan-out. |
-| `catch` | string or array | No | — | Error handling. Simple: `catch: fallback_node`. Branch: `catch: [{when: true, then: node}]` |
-| `condition` | string | No | — | Expression that must be truthy to execute |
-| `return` | bool | No | false | If true, this node's output becomes the workflow result |
-| `retry` | object | No | — | Retry policy (see below) |
-| `join` | "all" or "any" | No | "all" | Wait for all or any predecessor nodes |
-| `timeout_ms` | integer | No | EngineConfig default | Per-node timeout in milliseconds |
-
-> **Note:** There is no separate `input:` field. Use `with:` for all parameters — it handles both static values (`limit: 10`) and template expressions (`query: "{{input.message}}"`).
+| `do` | string or array | No | — | Tool to invoke. Single string for one tool, array for parallel tasks. |
+| `with` | JSON object | No | — | Input parameters. Supports `{{input.field}}` and `{{node_id.field}}` templates. |
+| `pipe` | array | No | `[]` | Chain of transforms applied to output. Each element: simple string (tool name) or `{do: tool, with: {...}}`. |
+| `then` | string, string[], or conditional array | No | — | Next node(s). See [Then Block](#then-block). |
+| `catch` | string or array | No | — | Error handling. See [Catch Block](#catch-block). |
+| `retry` | object | No | — | Retry policy. See [Retry](#retry). |
+| `timeout` | string | No | — | Per-node timeout as duration string: `"30s"`, `"500ms"`, `"5m"`. |
+| `entry` | bool | No | — | If `true`, marks this node as the explicit entry point. |
+| `repeat` | object | No | — | Loop construct. See [Repeat](#repeat). |
+| `stream` | bool or string | No | `false` | Streaming mode: `true`, `"passthrough"`, `"pass"`, or `"stream"`. |
+| `return` | JSON value | No | — | Marks this node's output as the workflow output. |
+| `join` | object | No | — | Wait for parallel branches. See [Join](#join). |
+| `credentials` | map | No | `{}` | Key-value credential strings. |
+| `grant` | string[] | No | — | Capability patterns granted to this specific node. |
 
 ---
 
-## Entry Node and DAG Structure
+## Do Block
 
-The **first node** in the YAML `nodes:` map is the entry node. All other nodes must be reachable from it via `then:` edges. Unreachable nodes are rejected as orphans at parse time.
+The `do` field accepts two forms:
 
-> **Note:** The entry node must not use `join:` — it has no predecessors and is always the first node executed.
+### Single tool
 
-To run nodes in parallel, use `then: [a, b]` fan-out from the entry (or any node):
+```yaml
+do: echo
+```
+
+### Parallel tasks
+
+```yaml
+do:
+  - fetch_web:
+      tool: http:get
+      with:
+        url: "https://example.com/a"
+  - fetch_api:
+      tool: http:get
+      with:
+        url: "https://example.com/b"
+```
+
+Each parallel task has a name (key), a `tool` field, and an optional `with` field.
+
+---
+
+## Pipe
+
+A chain of transforms applied sequentially to the node's output. Each step is either a tool name string, a map with tool args, or a `{do, with}` block:
 
 ```yaml
 nodes:
-  start:
-    do: echo
-    with:
-      message: "Starting parallel work"
-    then: [fetch_a, fetch_b]    # Both run concurrently
-  fetch_a:
+  fetch:
     do: http:get
     with:
-      url: "{{input.url_a}}"
-    then: combine
-  fetch_b:
-    do: http:get
-    with:
-      url: "{{input.url_b}}"
-    then: combine
-  combine:
-    do: template
-    with:
-      template: "A: {{fetch_a.body}}, B: {{fetch_b.body}}"
-    join: all                   # Wait for both fetch_a and fetch_b
+      url: "{{input.url}}"
+    pipe:
+      - json_get                           # Simple: tool name only
+      - { do: template, with: { template: "Result: {{vars.data}}" } }  # Full form
     return: true
 ```
+
+---
+
+## Then Block
+
+Three forms:
+
+### Unconditional (single next node)
+
+```yaml
+then: next_node
+```
+
+### Multiple next nodes (parallel fan-out)
+
+```yaml
+then: [node_a, node_b]
+```
+
+### Conditional branching
+
+```yaml
+then:
+  - when: "{{score > 0.8}}"
+    then: high_quality
+  - when: "{{score > 0.5}}"
+    goto: medium_quality
+  - else: true
+    then: low_quality
+```
+
+Each branch has: `when` (condition string, optional), `then` or `goto` (target node, optional), `else` (bool, marks fallback branch).
+
+---
+
+## Catch Block
+
+Two forms:
+
+### Simple (jump to node on any error)
+
+```yaml
+catch: fallback_node
+```
+
+### Conditional branches
+
+```yaml
+catch:
+  - when: true
+    then: recovery_node
+  - do: skip
+    with: { default: "fallback value" }
+  - else: true
+    then: final_fallback
+```
+
+Each catch branch has: `when` (condition, optional), `do` (inline tool to run, optional), `with` (parameters for inline tool, optional), `then` (target node, optional), `else` (bool, marks fallback).
+
+A branch matches if: `when` is absent, or `when` is `true` (bool), or `when` is `"true"` (string), or `else: true`.
+
+---
+
+## Retry
+
+```yaml
+retry:
+  times: 3                    # Required. Total retry attempts (not including first try)
+  delay: "1s"                 # Optional. Delay between retries
+  backoff: exponential         # Optional. "exponential", "fixed", or "linear"
+  max_delay: "30s"            # Optional. Cap on delay
+  on:                          # Optional. Only retry on these error types
+    - timeout
+    - rate_limit
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `times` | u32 | Yes | Number of retry attempts |
+| `delay` | string | No | Delay duration (e.g. `"1s"`, `"500ms"`) |
+| `backoff` | string | No | Strategy: `"exponential"`, `"fixed"`, or `"linear"` |
+| `max_delay` | string | No | Maximum delay cap (e.g. `"30s"`) |
+| `on` | string[] | No | Error types to retry on. If absent, retries on any retryable error. |
+
+---
+
+## Repeat
+
+Loop a node until a condition is met:
+
+```yaml
+repeat:
+  until: "{{results.done == true}}"   # Required. Condition to stop looping
+  max: 10                              # Required. Maximum iterations (safety cap)
+  as: "iteration"                      # Optional. Variable name for current iteration
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `until` | string | Yes | Template expression evaluated after each iteration |
+| `max` | u32 | Yes | Maximum iterations before forced stop |
+| `as` | string | No | Loop variable name accessible in templates |
+
+---
+
+## Join
+
+Wait for multiple parallel branches to complete before executing this node:
+
+```yaml
+join:
+  wait_for: [fetch_a, fetch_b]    # Required. Node IDs to wait for
+  policy: all                       # Optional. "all", "any", or "quorum"
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `wait_for` | string[] | Yes | List of node IDs this node depends on |
+| `policy` | string | No | Wait policy: `"all"` (default), `"any"`, or `"quorum"` |
+
+---
+
+## Stream
+
+Controls streaming behavior for a node's output:
+
+```yaml
+# Boolean form
+stream: true
+
+# String form
+stream: passthrough    # also: "pass", "stream"
+```
+
+When `true` or set to `"passthrough"` / `"pass"` / `"stream"`, the node's output is streamed to the workflow's stream receiver as it is produced. Default behavior (false or absent): output is buffered.
 
 ---
 
@@ -127,61 +295,33 @@ nodes:
 
 Values in `with:` can reference workflow input and other nodes' outputs using `{{expression}}` syntax.
 
-### Reference Rules
-
 | Reference | Meaning | Example |
 |-----------|---------|---------|
-| `{{input.field}}` | Workflow input field | `{{input.message}}`, `{{input.url}}` |
-| `{{node_id.field}}` | Output field from a completed node | `{{search.results}}`, `{{fetch.body}}` |
+| `{{input.field}}` | Workflow input field | `{{input.message}}` |
+| `{{node_id.field}}` | Output field from a completed node | `{{search.results}}` |
 | `{{node_id}}` | Entire output of a completed node | `{{fetch}}` |
 | `{{node_id.a.b}}` | Nested field access | `{{response.data.items}}` |
 
-> **Important:** Workflow input is stored under the key `input`. To reference a workflow argument named `message`, use `{{input.message}}`, not `{{message}}`. Using `{{message}}` would look for a node named `message`.
-
-### Expression Types
-
-```yaml
-with:
-  # Static value (no template)
-  limit: 10
-
-  # Reference to workflow input
-  query: "{{input.message}}"
-
-  # Reference to another node's output
-  context: "{{search.results}}"
-
-  # String interpolation with multiple references
-  combined: "{{fetch_a.text}} + {{fetch_b.text}}"
-
-  # Conditional (used in condition: field)
-  # condition: "{{score > 0.5}}"
-```
+> **Important:** Workflow input is stored under the key `input`. To reference a workflow argument named `message`, use `{{input.message}}`, not `{{message}}`.
 
 ---
 
-## Retry Policy
+## Entry Node
+
+By default, the **first node** in the `nodes:` map is the entry node. To override this, set `entry: true` on any node:
 
 ```yaml
-retry:
-  max_attempts: 3        # Total attempts (including first try)
-  backoff_ms: 500        # Delay between retries (doubles each attempt)
+nodes:
+  setup:
+    do: echo
+    then: main
+  main:
+    entry: true
+    do: ai:complete
+    with:
+      prompt: "{{input.message}}"
+    return: true
 ```
-
-Only applies to tools marked as `retryable` in their ToolError. Non-retryable errors fail immediately.
-
----
-
-## DAG Execution
-
-Nodes form a DAG via `then` edges. The engine:
-
-1. Starts with the entry node (first in YAML order)
-2. When a node completes, evaluates its `then` targets
-3. If a target's `join` policy is satisfied (all/any predecessors done), executes it
-4. Nodes without shared dependencies run in parallel, bounded by `EngineConfig.max_concurrent_nodes`
-5. Continues until all reachable nodes complete or an unhandled error occurs
-6. The node with `return: true` provides the workflow output
 
 ---
 
@@ -207,7 +347,7 @@ nodes:
     return: true
 ```
 
-### Parallel Fan-Out
+### Parallel Fan-Out with Join
 
 ```yaml
 workflow: parallel_search
@@ -232,11 +372,14 @@ nodes:
     do: template
     with:
       template: "Web: {{web.body}}\nMemory: {{memory.results}}"
-    join: all
+      vars: {}
+    join:
+      wait_for: [web, memory]
+      policy: all
     return: true
 ```
 
-### Error Handling
+### Error Handling with Retry
 
 ```yaml
 workflow: safe_fetch
@@ -249,8 +392,11 @@ nodes:
     then: process
     catch: fallback
     retry:
-      max_attempts: 3
-      backoff_ms: 1000
+      times: 3
+      delay: "1s"
+      backoff: exponential
+      max_delay: "10s"
+    timeout: "30s"
   process:
     do: echo
     with:
@@ -260,6 +406,74 @@ nodes:
     do: echo
     with:
       error: "Fetch failed, using default"
+    return: true
+```
+
+### Conditional Branching
+
+```yaml
+workflow: route_by_score
+capabilities: ["ai:complete", "echo"]
+nodes:
+  analyze:
+    do: ai:complete
+    with:
+      prompt: "Score this: {{input.text}}"
+    then:
+      - when: "{{analyze.score > 0.8}}"
+        then: high
+      - when: "{{analyze.score > 0.5}}"
+        then: medium
+      - else: true
+        then: low
+  high:
+    do: echo
+    with: { result: "high quality" }
+    return: true
+  medium:
+    do: echo
+    with: { result: "medium quality" }
+    return: true
+  low:
+    do: echo
+    with: { result: "low quality" }
+    return: true
+```
+
+### Parallel Do Block
+
+```yaml
+workflow: parallel_fetch
+capabilities: ["http:get"]
+nodes:
+  fetch_both:
+    do:
+      - page_a:
+          tool: http:get
+          with:
+            url: "https://example.com/a"
+      - page_b:
+          tool: http:get
+          with:
+            url: "https://example.com/b"
+    return: true
+```
+
+### Repeat Loop
+
+```yaml
+workflow: poll_until_done
+capabilities: ["http:get"]
+nodes:
+  poll:
+    do: http:get
+    with:
+      url: "{{input.status_url}}"
+    repeat:
+      until: "{{poll.status == 'complete'}}"
+      max: 20
+      as: "attempt"
+    timeout: "10s"
     return: true
 ```
 
@@ -284,19 +498,91 @@ nodes:
     return: true
 ```
 
-Other workflows can call this as `workflow_summarize`:
+Other workflows can call this as `workflow:summarize`:
 
 ```yaml
 nodes:
   get_summary:
-    do: workflow_summarize
+    do: workflow:summarize
     with:
       document: "{{input.text}}"
       max_points: 3
     return: true
 ```
 
-> **Capability attenuation:** When a workflow calls another workflow-as-tool, the child runs in a child execution scope. Child capabilities can only be equal to or more restrictive than the parent's — never broader. A parent with `capabilities: ["ai:complete"]` cannot call a child that requires `["ai:complete", "shell:exec"]`. See [engine.md](../architecture/engine.md#capability-validation) for details.
+### Catch with Conditional Branches
+
+```yaml
+workflow: resilient_fetch
+capabilities: ["http:get", "echo"]
+nodes:
+  fetch:
+    do: http:get
+    with:
+      url: "{{input.url}}"
+    catch:
+      - when: true
+        do: echo
+        with: { error: "request failed" }
+        then: use_cache
+      - else: true
+        then: abort
+    return: true
+  use_cache:
+    do: echo
+    with: { source: "cache" }
+    return: true
+  abort:
+    do: echo
+    with: { error: "unrecoverable" }
+    return: true
+```
+
+### Pipe Transform Chain
+
+```yaml
+workflow: fetch_and_extract
+capabilities: ["http:get"]
+nodes:
+  fetch:
+    do: http:get
+    with:
+      url: "{{input.url}}"
+    pipe:
+      - json_get
+      - { do: template, with: { template: "Title: {{vars.title}}", vars: {} } }
+    return: true
+```
+
+### Credentials and Grant
+
+```yaml
+workflow: secure_fetch
+capabilities: ["http:get"]
+nodes:
+  fetch:
+    do: http:get
+    with:
+      url: "{{input.url}}"
+    credentials:
+      Authorization: "Bearer {{secret.api_token}}"
+    grant:
+      - "http:get"
+    return: true
+```
+
+---
+
+## DAG Execution
+
+Nodes form a DAG via `then` edges. The engine:
+
+1. Starts with the entry node (first in YAML order, or the node with `entry: true`)
+2. When a node completes, evaluates its `then` targets
+3. If a target's `join` policy is satisfied (all/any/quorum predecessors done), executes it
+4. Nodes without shared dependencies run in parallel, bounded by `EngineConfig.max_concurrent_nodes` (default: 50)
+5. Continues until all reachable nodes complete or an unhandled error occurs
+6. The node with `return` provides the workflow output
 
 ---
 

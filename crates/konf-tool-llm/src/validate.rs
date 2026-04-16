@@ -24,18 +24,7 @@ impl ValidateWorkflowTool {
     }
 }
 
-/// Check if a capability pattern matches a required capability.
-/// Uses the same logic as `konf_runtime::scope::matches_capability_pattern`.
-fn matches_capability_pattern(pattern: &str, capability: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if let Some(prefix) = pattern.strip_suffix(":*") {
-        return capability.starts_with(prefix)
-            && capability.get(prefix.len()..prefix.len() + 1) == Some(":");
-    }
-    pattern == capability
-}
+use konflux_substrate::envelope::Capability;
 
 #[async_trait]
 impl Tool for ValidateWorkflowTool {
@@ -104,7 +93,7 @@ impl Tool for ValidateWorkflowTool {
         for cap in &workflow.capabilities {
             let covered = capability_patterns
                 .iter()
-                .any(|grant| matches_capability_pattern(grant, cap));
+                .any(|grant| Capability::new(grant.as_str()).matches(cap));
             if !covered {
                 errors.push(format!(
                     "Workflow requires '{}' but caller does not have a matching grant",
@@ -155,20 +144,20 @@ mod tests {
 
     #[test]
     fn test_matches_capability_pattern_exact() {
-        assert!(matches_capability_pattern("ai:complete", "ai:complete"));
-        assert!(!matches_capability_pattern("ai:complete", "ai:other"));
+        assert!(Capability::new("ai:complete").matches("ai:complete"));
+        assert!(!Capability::new("ai:complete").matches("ai:other"));
     }
 
     #[test]
     fn test_matches_capability_pattern_glob() {
-        assert!(matches_capability_pattern("ai:*", "ai:complete"));
-        assert!(matches_capability_pattern("ai:*", "ai:other"));
-        assert!(!matches_capability_pattern("ai:*", "memory:search"));
+        assert!(Capability::new("ai:*").matches("ai:complete"));
+        assert!(Capability::new("ai:*").matches("ai:other"));
+        assert!(!Capability::new("ai:*").matches("memory:search"));
     }
 
     #[test]
     fn test_matches_capability_pattern_wildcard() {
-        assert!(matches_capability_pattern("*", "anything"));
-        assert!(matches_capability_pattern("*", "ai:complete"));
+        assert!(Capability::new("*").matches("anything"));
+        assert!(Capability::new("*").matches("ai:complete"));
     }
 }

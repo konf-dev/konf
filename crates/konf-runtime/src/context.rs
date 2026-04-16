@@ -32,12 +32,21 @@ impl VirtualizedTool {
         Self { inner, bindings }
     }
 
-    fn inject_bindings(&self, env: &mut Envelope<Value>) {
-        if let Some(map) = env.payload.as_object_mut() {
-            for (k, v) in &self.bindings {
-                map.insert(k.clone(), v.clone());
-            }
+    fn inject_bindings(&self, env: &mut Envelope<Value>) -> Result<(), ToolError> {
+        if self.bindings.is_empty() {
+            return Ok(());
         }
+        let map = env
+            .payload
+            .as_object_mut()
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "payload must be a JSON object when bindings are present".into(),
+                field: None,
+            })?;
+        for (k, v) in &self.bindings {
+            map.insert(k.clone(), v.clone());
+        }
+        Ok(())
     }
 }
 
@@ -48,7 +57,7 @@ impl Tool for VirtualizedTool {
     }
 
     async fn invoke(&self, mut env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
-        self.inject_bindings(&mut env);
+        self.inject_bindings(&mut env)?;
         self.inner.invoke(env).await
     }
 
@@ -61,7 +70,7 @@ impl Tool for VirtualizedTool {
         mut env: Envelope<Value>,
         sender: StreamSender,
     ) -> Result<Envelope<Value>, ToolError> {
-        self.inject_bindings(&mut env);
+        self.inject_bindings(&mut env)?;
         self.inner.invoke_streaming(env, sender).await
     }
 }

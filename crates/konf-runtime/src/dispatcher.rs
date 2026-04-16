@@ -100,12 +100,18 @@ impl Dispatcher {
         }
 
         // 5b. Idempotency check — return cached result if available.
-        if let Some(ref idem_key) = ctx.idempotency_key {
+        // Scope the key with the tool name so the same user-supplied key
+        // used for different tools doesn't collide.
+        let scoped_idempotency_key = ctx
+            .idempotency_key
+            .as_ref()
+            .map(|k| format!("{tool_name}:{}", k.0));
+        if let Some(ref scoped_key) = scoped_idempotency_key {
             if let Some(journal) = self.journal.as_ref() {
-                if let Ok(Some(row)) = journal.get_by_idempotency_key(&idem_key.0).await {
+                if let Ok(Some(row)) = journal.get_by_idempotency_key(scoped_key).await {
                     debug!(
                         tool = %tool_name,
-                        idempotency_key = %idem_key.0,
+                        idempotency_key = %scoped_key,
                         "dispatch_tool: returning cached idempotent result"
                     );
                     return Ok(row.payload);
@@ -222,7 +228,7 @@ impl Dispatcher {
                 event_type: "interaction".into(),
                 payload: interaction.to_json(),
                 valid_to: None,
-                idempotency_key: ctx.idempotency_key.as_ref().map(|k| k.0.clone()),
+                idempotency_key: scoped_idempotency_key.clone(),
             };
             match journal.append(entry).await {
                 Ok(sequence) => {

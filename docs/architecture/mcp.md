@@ -34,21 +34,21 @@ Takes references to the engine's three registries and translates them to the MCP
 pub struct KonfMcpServer {
     engine: Arc<Engine>,
     runtime: Arc<Runtime>,
+    session_capabilities: Vec<String>,  // default: ["*"] (dev mode)
 }
 
 impl KonfMcpServer {
     pub fn new(engine: Arc<Engine>, runtime: Arc<Runtime>) -> Self;
 
+    /// Create with specific capability patterns (for scoped sessions).
+    pub fn with_capabilities(engine: Arc<Engine>, runtime: Arc<Runtime>, capabilities: Vec<String>) -> Self;
+
     /// Serve MCP over stdio (for CLI / Claude Desktop)
-    pub async fn serve_stdio(&self) -> anyhow::Result<()>;
-
-    /// Serve MCP over SSE (for remote clients)
-    pub async fn serve_sse(&self, listener: TcpListener) -> anyhow::Result<()>;
-
-    /// Get an axum handler for mounting alongside HTTP routes
-    pub fn sse_handler(&self) -> axum::Router;
+    pub async fn serve_stdio(self) -> anyhow::Result<()>;
 }
 ```
+
+The Streamable HTTP transport is provided by konf-backend mounting `StreamableHttpService` from the `rmcp` crate, not by `KonfMcpServer` directly. `konf-mcp` re-exports `rmcp::transport::streamable_http_server` types via its `http` module for downstream use.
 
 ### What's exposed
 
@@ -60,11 +60,7 @@ impl KonfMcpServer {
 - Workflow tools: `workflow:chat`, `workflow:summarize`, etc.
 - MCP-forwarded tools: `brave:search`, `github:create_issue`, etc.
 
-Each tool's `ToolInfo` is translated to MCP's tool definition format. The name translation is handled by an adapter. Annotations map directly:
-- `read_only` → `readOnlyHint`
-- `destructive` → `destructiveHint`
-- `idempotent` → `idempotentHint`
-- `open_world` → `openWorldHint`
+Each tool's `ToolInfo` is translated to MCP's tool definition format. The name translation is handled by an adapter. Tool annotations are defined in `ToolInfo` but are **not exposed** via MCP responses. The `tool_info_to_mcp` function in `konf-mcp/src/lib.rs` intentionally omits `.with_annotations()` because Claude Code silently drops all tools when annotations are present in the `tools/list` response (anthropics/claude-code#25081).
 
 **Resources** — all registered resources:
 - Product config files (`konf://config/tools.yaml`)
@@ -72,9 +68,7 @@ Each tool's `ToolInfo` is translated to MCP's tool definition format. The name t
 - Memory schema (if backend exposes it)
 - Audit journal summary (`konf://audit/recent`)
 
-**Prompts** (planned — not yet implemented):
-- Workflow templates from prompts/ directory
-- System prompts per product mode
+**Prompts** — the PromptRegistry is wired in the engine but `prompts/list` and `prompts/get` handlers are not implemented in the MCP server. The `ServerCapabilities` returned by `get_info()` does not advertise prompt support.
 
 ### MCP protocol mapping
 
@@ -84,15 +78,15 @@ Each tool's `ToolInfo` is translated to MCP's tool definition format. The name t
 | `tools/call` | Look up tool by name, build Envelope, call `tool.invoke()` | Implemented |
 | `resources/list` | Read ResourceRegistry, map ResourceInfo → MCP resource definitions | Implemented |
 | `resources/read` | Look up resource by URI, call `resource.read()` | Implemented |
-| `prompts/list` | Read PromptRegistry, map PromptInfo → MCP prompt definitions | Planned (Phase E+) |
-| `prompts/get` | Look up prompt by name, call `prompt.expand(args)` | Planned (Phase E+) |
+| `prompts/list` | Not implemented. Server does not advertise prompt capability. | — |
+| `prompts/get` | Not implemented. | — |
 
 ### Transports
 
 | Transport | Use case | How to start |
 |-----------|----------|-------------|
-| stdio | CLI, Claude Desktop, local development | `konf --mcp-stdio` |
-| SSE over HTTP | Remote MCP clients, Konf-to-Konf | Mounted in konf-backend at `/mcp` |
+| stdio | CLI, Claude Desktop, local development | `konf-mcp` binary (standalone) |
+| Streamable HTTP | Remote MCP clients, Konf-to-Konf | Mounted in konf-backend at `/mcp` |
 
 ### Capability scoping
 
@@ -107,13 +101,10 @@ konf-mcp can run without konf-backend:
 
 ```bash
 # CLI mode — Claude Desktop connects via stdio
-konf --mcp-stdio --config ./config
-
-# Remote mode — MCP over SSE, no REST API
-konf --mcp-sse --port 3001 --config ./config
+konf-mcp --config ./config
 ```
 
-Both modes use konf-init to boot the engine. No HTTP server, no auth middleware, no scheduling.
+The `konf-mcp` binary uses konf-init to boot the engine and serves MCP over stdio. No HTTP server, no auth middleware. The Streamable HTTP transport is provided by `konf-backend` when `KONF_MCP_HTTP=1`.
 
 ### Name Translation (Colon → Underscore)
 
@@ -210,16 +201,9 @@ impl Tool for McpToolWrapper {
 }
 ```
 
-### Annotation mapping
+### Annotation handling
 
-MCP server annotations are preserved:
-
-| MCP annotation | Konf ToolAnnotations field |
-|---------------|--------------------------|
-| `readOnlyHint` | `read_only` |
-| `destructiveHint` | `destructive` |
-| `idempotentHint` | `idempotent` |
-| `openWorldHint` | `open_world` |
+MCP server annotations received from external MCP servers are preserved internally in `ToolAnnotations` fields (`read_only`, `destructive`, `idempotent`, `open_world`). However, when Konf acts as an MCP **server** (via konf-mcp), annotations are **not included** in `tools/list` responses due to a Claude Code client bug (anthropics/claude-code#25081). See the konf-mcp server section above.
 
 ### Capability filtering
 

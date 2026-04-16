@@ -312,9 +312,10 @@ impl JournalStore for RedbJournal {
                 .open_table(EVENTS)
                 .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
 
-            // Collect all sequences for this session, then pick the most
-            // recent `limit` (sequences are monotonic by time so last N is
-            // newest N).
+            // Collect all sequences for this session sorted descending
+            // (newest first). We resolve each row and filter expired
+            // entries BEFORE applying the limit so that expired rows
+            // don't consume limit slots.
             let ids_iter = by_session
                 .get(session_id.as_str())
                 .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
@@ -327,26 +328,27 @@ impl JournalStore for RedbJournal {
                 );
             }
             ids.sort_unstable();
-            if ids.len() > limit {
-                let start = ids.len() - limit;
-                ids.drain(..start);
-            }
             // Return newest first to match the old Postgres
             // `ORDER BY created_at DESC LIMIT N` semantics.
             ids.reverse();
 
-            let mut rows = Vec::with_capacity(ids.len());
+            let mut rows = Vec::with_capacity(limit.min(ids.len()));
             for id in ids {
+                if rows.len() >= limit {
+                    break;
+                }
                 if let Some(stored_bytes) = events
                     .get(id)
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?
                 {
                     let stored: StoredEntry = postcard::from_bytes(stored_bytes.value())
                         .map_err(JournalError::serialization)?;
-                    rows.push(stored.into_row(id)?);
+                    let row = stored.into_row(id)?;
+                    if !is_expired(&row) {
+                        rows.push(row);
+                    }
                 }
             }
-            rows.retain(|r| !is_expired(r));
             Ok(rows)
         })
         .await
@@ -619,6 +621,7 @@ impl JournalStore for RedbJournal {
                 run_id_bytes: Option<[u8; 16]>,
                 session_id: String,
                 valid_to_micros: Option<i64>,
+                idempotency_key: Option<String>,
             }
             let expired: Vec<ExpiredEntry> = {
                 let events_read = write
@@ -640,6 +643,7 @@ impl JournalStore for RedbJournal {
                                 run_id_bytes: stored.run_id_bytes,
                                 session_id: stored.session_id,
                                 valid_to_micros: stored.valid_to_micros,
+                                idempotency_key: stored.idempotency_key,
                             });
                         }
                     }
@@ -668,6 +672,9 @@ impl JournalStore for RedbJournal {
                 let mut by_expiry = write
                     .open_multimap_table(BY_EXPIRY)
                     .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
+                let mut by_idem = write
+                    .open_multimap_table(BY_IDEMPOTENCY)
+                    .map_err(|e| JournalError::storage(std::io::Error::other(e.to_string())))?;
 
                 for entry in &expired {
                     if let Some(ref rid) = entry.run_id_bytes {
@@ -676,6 +683,9 @@ impl JournalStore for RedbJournal {
                     let _ = by_session.remove(entry.session_id.as_str(), entry.seq);
                     if let Some(vt) = entry.valid_to_micros {
                         let _ = by_expiry.remove(vt, entry.seq);
+                    }
+                    if let Some(ref idem_key) = entry.idempotency_key {
+                        let _ = by_idem.remove(idem_key.as_str(), entry.seq);
                     }
                     let _ = events.remove(entry.seq);
                     deleted += 1;

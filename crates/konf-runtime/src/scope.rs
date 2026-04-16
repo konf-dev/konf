@@ -69,26 +69,12 @@ impl CapabilityGrant {
 
     /// Check if this grant matches a tool name. Returns bindings if matched.
     pub fn matches(&self, tool_name: &str) -> Option<&HashMap<String, Value>> {
-        if matches_capability_pattern(&self.pattern, tool_name) {
+        if konflux_substrate::envelope::Capability::new(&self.pattern).matches(tool_name) {
             Some(&self.bindings)
         } else {
             None
         }
     }
-}
-
-/// Check if a capability pattern matches a tool name.
-/// Uses the same logic as konflux_substrate::capability::matches_capability.
-fn matches_capability_pattern(pattern: &str, tool_name: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if let Some(prefix) = pattern.strip_suffix(":*") {
-        // "memory:*" matches "memory:search" but not "memorysearch"
-        return tool_name.starts_with(prefix)
-            && tool_name.get(prefix.len()..prefix.len() + 1) == Some(":");
-    }
-    pattern == tool_name
 }
 
 impl ExecutionScope {
@@ -132,10 +118,8 @@ impl ExecutionScope {
                 if let Some(parent_prefix) = parent_grant.pattern.strip_suffix(":*") {
                     // Child is a specific tool under the parent prefix
                     if !child_grant.pattern.ends_with(":*") {
-                        return matches_capability_pattern(
-                            &parent_grant.pattern,
-                            &child_grant.pattern,
-                        );
+                        return konflux_substrate::envelope::Capability::new(&parent_grant.pattern)
+                            .matches(&child_grant.pattern);
                     }
                     // Child is also a prefix — must be equal or more specific
                     if let Some(child_prefix) = child_grant.pattern.strip_suffix(":*") {

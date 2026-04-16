@@ -23,12 +23,17 @@ impl BudgetTable {
         }
     }
 
-    /// Mint a new budget cell for a trace. Overwrites any existing cell.
-    pub fn mint(&self, trace_id: Uuid, amount: i64) {
-        self.cells
-            .lock()
-            .expect("budget lock poisoned")
-            .insert(trace_id, amount);
+    /// Mint a new budget cell for a trace. Returns an error if a cell already exists.
+    pub fn mint(&self, trace_id: Uuid, amount: i64) -> Result<(), BudgetError> {
+        use std::collections::hash_map::Entry;
+        let mut cells = self.cells.lock().expect("budget lock poisoned");
+        match cells.entry(trace_id) {
+            Entry::Occupied(_) => Err(BudgetError::AlreadyExists),
+            Entry::Vacant(e) => {
+                e.insert(amount);
+                Ok(())
+            }
+        }
     }
 
     /// Attempt to decrement. Returns `Ok(remaining)` or `Err` if insufficient
@@ -85,6 +90,8 @@ impl fmt::Debug for BudgetTable {
 pub enum BudgetError {
     /// No budget cell exists for this trace.
     NotFound,
+    /// A budget cell already exists for this trace.
+    AlreadyExists,
     /// Insufficient budget remaining.
     Insufficient { remaining: i64, requested: i64 },
 }
@@ -93,6 +100,7 @@ impl fmt::Display for BudgetError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             BudgetError::NotFound => write!(f, "no budget cell found for trace"),
+            BudgetError::AlreadyExists => write!(f, "budget cell already exists for trace"),
             BudgetError::Insufficient {
                 remaining,
                 requested,
@@ -116,7 +124,7 @@ mod tests {
     fn mint_and_decrement() {
         let table = BudgetTable::new();
         let tid = Uuid::new_v4();
-        table.mint(tid, 100);
+        table.mint(tid, 100).unwrap();
         assert_eq!(table.remaining(tid), Some(100));
 
         let remaining = table.decrement(tid, 30).unwrap();
@@ -128,7 +136,7 @@ mod tests {
     fn decrement_insufficient() {
         let table = BudgetTable::new();
         let tid = Uuid::new_v4();
-        table.mint(tid, 50);
+        table.mint(tid, 50).unwrap();
 
         let err = table.decrement(tid, 80).unwrap_err();
         assert_eq!(
@@ -159,7 +167,7 @@ mod tests {
     fn remove_cleans_up() {
         let table = BudgetTable::new();
         let tid = Uuid::new_v4();
-        table.mint(tid, 100);
+        table.mint(tid, 100).unwrap();
         assert_eq!(table.remove(tid), Some(100));
         assert_eq!(table.remaining(tid), None);
     }

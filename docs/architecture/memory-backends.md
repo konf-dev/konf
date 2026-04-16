@@ -217,7 +217,7 @@ memory:
 #     config: { ... }
 ```
 
-Currently, all memory tools use the same backend. Multi-backend overrides are a planned extension point.
+Currently, all memory tools use the same backend. The `MemoryBackend` trait supports a single backend per deployment.
 
 ---
 

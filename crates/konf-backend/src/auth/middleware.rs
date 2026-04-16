@@ -20,7 +20,11 @@ pub async fn auth_middleware(
     next: Next,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     // Dev mode: bypass JWT, inject fake user
-    if std::env::var("KONF_DEV_MODE").is_ok() {
+    if std::env::var("KONF_DEV_MODE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        tracing::warn!("Dev mode active — JWT auth bypassed. Do not use in production.");
         let dev_claims = Claims {
             sub: "dev_user".into(),
             aud: None,
