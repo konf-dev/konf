@@ -29,9 +29,14 @@ Named after Valve's Hammer Editor — which authors maps for the Source engine.
 | Tool (MCP name) | What it does |
 |---|---|
 | `workflow:echo` | Round-trip smoke test — send a prompt to the configured LLM, return its text. |
+| `workflow:draft_workflow` | Given `{target_product_dir, description, slug}`, gathers the target's authoring prompt + existing workflows as style context, drafts a workflow YAML via the configured LLM, validates it, attempts one repair pass on failure. Returns YAML text + status. No writes. |
+| `workflow:publish_workflow` | Given `{target_product_dir, slug, yaml_text}` (typically the output of `draft_workflow` after review), re-validates, checks target path is free, writes `auto_<slug>.yaml` into the target's `config/workflows/`, and git-commits. One commit per publish; rollback is `git revert <sha>`. Does NOT call the target MCP's `config:reload` — the caller triggers that. |
 
-Slice 3+ adds `draft_workflow`, `validate_and_iterate`, `commit_and_reload`,
-and eventually `draft_product` (full product scaffolding).
+Typical usage: `draft_workflow` → inspect the YAML → `publish_workflow` →
+call `config:reload` on the target MCP → invoke the new workflow.
+
+Later slices: full-product drafting (project.yaml + tools.yaml + prompts),
+cross-MCP `config:reload` automation, background Ollama observers.
 
 ## Quick start (host mode)
 
@@ -130,13 +135,17 @@ No code change. Same workflows. Different backend.
   dir and is gitignored. Authoring runs can store past drafts and retrieval
   patterns for iterative refinement.
 
-## Deferred to later slices
+## Deferred to later work
 
-- Slice 3: `draft_workflow` — NL description → YAML text (no writes).
-- Slice 4: `validate_and_iterate` — YAML → validate → repair loop.
-- Slice 5: `commit_and_reload` — write to target, git commit, hot-reload.
-- Slice 6: `tools.gemini.yaml` alternate config + swap docs.
-- Beyond: whole-product drafting (project.yaml + tools.yaml + prompts).
+- Cross-MCP `config:reload` automation (publish → auto-reload target product
+  without manual tool call).
+- Whole-product drafting (project.yaml + tools.yaml + prompts scaffold).
+- Decision log in `memory_store` (why we chose pattern X over Y; recall on
+  next similar draft).
+- Background Ollama observer (continuous classification of journal events).
+- Tool-use / function calling in Ollama substrate (currently plain text
+  completion only).
+- Per-node thinking-budget config for Gemini 2.5/3 thinking models.
 
 ## Rollback
 
