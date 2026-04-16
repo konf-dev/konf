@@ -191,6 +191,29 @@ impl ExecutionScope {
             .map(|g| g.pattern.clone())
             .collect()
     }
+
+    /// Build an `Envelope` from this scope's identity fields.
+    ///
+    /// This is the composition relationship: the runtime's scope provides
+    /// the identity (namespace, actor, capabilities) and the substrate's
+    /// Envelope carries it across dispatch boundaries.
+    pub fn to_envelope(
+        &self,
+        target: &str,
+        payload: serde_json::Value,
+        trace_id: uuid::Uuid,
+        stream_id: &str,
+    ) -> konflux_substrate::envelope::Envelope<serde_json::Value> {
+        konflux_substrate::envelope::Envelope::for_tool_dispatch(
+            target,
+            payload,
+            &self.capability_patterns(),
+            trace_id,
+            &self.namespace,
+            &self.actor.id,
+            stream_id,
+        )
+    }
 }
 
 /// Resource limits for a workflow execution.
