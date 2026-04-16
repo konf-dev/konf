@@ -1,0 +1,77 @@
+# konf-hammer — Gemini variant of tools.yaml.
+#
+# Same shape as tools.yaml (Ollama default), only the LLM provider differs.
+# This file proves konf's "everything is configurable" property: the same
+# workflows run against Ollama or Gemini depending on which tools file is
+# active.
+#
+# To activate:
+#   cd konf/products/konf-hammer/config
+#   cp tools.yaml tools.ollama.yaml.bak   # preserve current default
+#   cp tools.gemini.yaml tools.yaml
+#   # in Claude Code:
+#   /mcp reconnect
+#
+# To restore Ollama default:
+#   cp tools.ollama.yaml.bak tools.yaml && rm tools.ollama.yaml.bak
+#   /mcp reconnect
+#
+# Requires GEMINI_API_KEY in konf-hammer's MCP env block in ~/.claude.json.
+#
+# Model selection (2026-04 pricing, USD per 1M tokens):
+#   gemini-2.5-flash     $0.30 in / $2.50 out (uniform) — DEFAULT
+#   gemini-2.5-flash-lite  cheaper — for low-stakes drafts
+#   gemini-2.5-pro       $1.25 / $10.00 (<=200k) — when reasoning depth matters
+#   gemini-3-flash-preview / gemini-3-pro-preview — newest, preview tier
+
+tools:
+  llm:
+    provider: gemini
+    model: "${KONF_MODEL:-gemini-2.5-flash}"
+    temperature: 0.2
+    max_tokens: 4096
+
+  memory:
+    backend: surreal
+    config:
+      mode: embedded
+      path: /home/bert/Work/orgs/konf-dev-stack/konf/products/konf-hammer/memory.db
+      namespace: konf
+      database: konf-hammer
+      vector_dimension: 768
+
+  shell:
+    container: "host"
+    timeout_ms: 60000
+
+tool_guards:
+  shell:exec:
+    rules:
+      - action: deny
+        predicate:
+          type: contains
+          path: command
+          value: "sudo"
+        message: "sudo blocked in konf-hammer"
+
+      - action: deny
+        predicate:
+          type: matches
+          path: command
+          pattern: "rm -rf /"
+        message: "destructive rm on root blocked"
+
+      - action: deny
+        predicate:
+          type: contains
+          path: command
+          value: "git config"
+        message: "git config changes are owner-only"
+
+      - action: deny
+        predicate:
+          type: matches
+          path: command
+          pattern: "git push .* (main|master)\\b"
+        message: "pushes to main/master are owner-only"
+    default: allow
