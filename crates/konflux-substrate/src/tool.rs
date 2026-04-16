@@ -95,22 +95,6 @@ pub struct ToolAnnotations {
     pub open_world: bool,
 }
 
-/// Context passed to tools during invocation.
-#[derive(Debug, Clone)]
-pub struct ToolContext {
-    /// Capabilities granted to the current execution scope
-    pub capabilities: Vec<String>,
-
-    /// Workflow that initiated this tool call
-    pub workflow_id: String,
-
-    /// Node within the workflow
-    pub node_id: String,
-
-    /// Arbitrary metadata (session_id, user_id, config_version, etc.)
-    pub metadata: HashMap<String, Value>,
-}
-
 /// Registry of available tools, keyed by name.
 #[derive(Default, Clone)]
 pub struct ToolRegistry {

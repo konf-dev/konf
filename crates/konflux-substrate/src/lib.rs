@@ -28,5 +28,5 @@ pub use error::KonfluxError;
 pub use prompt::{Message, Prompt, PromptArgument, PromptError, PromptInfo, PromptRegistry};
 pub use resource::{Resource, ResourceChanged, ResourceError, ResourceInfo, ResourceRegistry};
 pub use stream::{ProgressType, StreamEvent, StreamReceiver};
-pub use tool::{Tool, ToolAnnotations, ToolContext, ToolInfo, ToolRegistry};
+pub use tool::{Tool, ToolAnnotations, ToolInfo, ToolRegistry};
 pub use workflow::Workflow;
