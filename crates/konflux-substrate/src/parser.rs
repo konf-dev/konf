@@ -7,12 +7,13 @@ pub mod validator;
 
 use tracing::{debug, info_span};
 
+use crate::engine::EngineConfig;
 use crate::error::KonfluxError;
 use crate::parser::schema::WorkflowSchema;
 use crate::workflow::Workflow;
 
 /// Parse a YAML string into a Workflow IR.
-pub fn parse(yaml: &str) -> Result<Workflow, KonfluxError> {
+pub fn parse(yaml: &str, config: &EngineConfig) -> Result<Workflow, KonfluxError> {
     let _span = info_span!("workflow.parse", yaml_size = yaml.len()).entered();
     let start = std::time::Instant::now();
 
@@ -28,7 +29,7 @@ pub fn parse(yaml: &str) -> Result<Workflow, KonfluxError> {
 
     let graph = graph::DependencyGraph::build(&schema);
 
-    let workflow = compiler::compile(schema, &graph)?;
+    let workflow = compiler::compile(schema, &graph, config)?;
 
     debug!(
         workflow_id = %workflow.id,

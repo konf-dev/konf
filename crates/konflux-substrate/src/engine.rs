@@ -41,6 +41,10 @@ pub struct EngineConfig {
     pub max_yaml_size: usize,
     /// Maximum concurrent nodes executing in parallel (caps JoinSet size).
     pub max_concurrent_nodes: usize,
+    /// Default retry base delay (ms) when workflow YAML omits `retry.delay`.
+    pub default_retry_base_delay_ms: u64,
+    /// Default retry max delay (ms) when workflow YAML omits `retry.max_delay`.
+    pub default_retry_max_delay_ms: u64,
 }
 
 impl Default for EngineConfig {
@@ -54,6 +58,8 @@ impl Default for EngineConfig {
             default_retry_backoff_ms: 250,
             max_yaml_size: 10 * 1024 * 1024, // 10 MB
             max_concurrent_nodes: 50,
+            default_retry_base_delay_ms: 1_000,
+            default_retry_max_delay_ms: 30_000,
         }
     }
 }
@@ -78,6 +84,12 @@ impl EngineConfig {
         }
         if self.max_concurrent_nodes == 0 {
             return Err("max_concurrent_nodes must be > 0".into());
+        }
+        if self.default_retry_base_delay_ms == 0 {
+            return Err("default_retry_base_delay_ms must be > 0".into());
+        }
+        if self.default_retry_max_delay_ms == 0 {
+            return Err("default_retry_max_delay_ms must be > 0".into());
         }
         // max_workflow_timeout_ms == 0 means no limit (intentional)
         Ok(())
@@ -362,7 +374,7 @@ impl Engine {
                 ),
             }));
         }
-        crate::parser::parse(yaml)
+        crate::parser::parse(yaml, &self.config)
     }
 
     /// Get a snapshot of the tool registry (for inspection).

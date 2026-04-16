@@ -332,7 +332,7 @@ async fn subscribe_replay_backfill() {
         ..Default::default()
     };
 
-    let mut rx = JournalSubscription::start(Arc::new(journal), &event_bus, filter, 100);
+    let mut rx = JournalSubscription::start(Arc::new(journal), &event_bus, filter, 100, 256);
 
     // Should receive the 3 matching entries via replay
     for _ in 0..3 {
@@ -365,7 +365,7 @@ async fn subscribe_filter_respects_ttl() {
         ..Default::default()
     };
 
-    let mut rx = JournalSubscription::start(Arc::new(journal), &event_bus, filter, 100);
+    let mut rx = JournalSubscription::start(Arc::new(journal), &event_bus, filter, 100, 256);
 
     // Should only receive the live entry
     let row = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())

@@ -279,6 +279,8 @@ pub struct ResourceLimits {
     pub max_child_depth: usize,
     /// Maximum concurrent runs per namespace (default: 20).
     pub max_active_runs_per_namespace: usize,
+    /// Event bus broadcast channel capacity.
+    pub event_bus_capacity: usize,
 }
 
 impl Default for ResourceLimits {
@@ -289,6 +291,7 @@ impl Default for ResourceLimits {
             max_concurrent_nodes: 50,
             max_child_depth: 10,
             max_active_runs_per_namespace: 20,
+            event_bus_capacity: 1024,
         }
     }
 }
@@ -310,6 +313,9 @@ impl ResourceLimits {
         }
         if self.max_active_runs_per_namespace == 0 {
             return Err("max_active_runs_per_namespace must be > 0".into());
+        }
+        if self.event_bus_capacity == 0 {
+            return Err("event_bus_capacity must be > 0".into());
         }
         Ok(())
     }

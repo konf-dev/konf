@@ -28,8 +28,9 @@ impl JournalSubscription {
         event_bus: &RunEventBus,
         filter: JournalFilter,
         replay_limit: usize,
+        buffer_size: usize,
     ) -> mpsc::Receiver<JournalRow> {
-        let (tx, rx) = mpsc::channel(256);
+        let (tx, rx) = mpsc::channel(buffer_size);
         let mut bus_rx = event_bus.subscribe();
 
         tokio::spawn(async move {

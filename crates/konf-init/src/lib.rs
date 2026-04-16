@@ -23,8 +23,8 @@ use konf_runtime::{
 use konflux_substrate::engine::Engine;
 
 pub use config::{
-    AuthConfig, PlatformConfig, ProductConfig, RoleConfig, ServerConfig, ShellConfig,
-    ToolGuardConfig, ToolsConfig,
+    AuthConfig, JournalConfig, PlatformConfig, ProductConfig, RoleConfig, ServerConfig,
+    ShellConfig, ToolGuardConfig, ToolsConfig,
 };
 
 /// A fully booted Konf instance, ready for transport shells to serve.
@@ -43,6 +43,10 @@ pub struct KonfInstance {
     /// Persistent-storage handle (journal + future scheduler + runner
     /// intents). `None` on edge deployments that opt out of persistence.
     pub storage: Option<Arc<KonfStorage>>,
+
+    /// Background TTL sweeper for expired journal entries. Dropped on
+    /// instance shutdown (abort-on-drop).
+    _sweeper: Option<konf_runtime::journal::sweep::TtlSweeper>,
 }
 
 /// Boot the Konf platform from a config directory.
@@ -202,6 +206,26 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
     );
     info!("Runtime initialized");
 
+    // 9-sweep. Spawn TTL sweeper if journal exists and sweep is enabled.
+    let sweeper = if config.journal.sweep_interval_secs > 0 {
+        // Clone the journal Arc used by the runtime (the fanout-wrapped one).
+        // `primary_journal` is the raw redb journal; `journal` may be a fanout.
+        // We use `primary_journal` here — sweep only needs the durable store.
+        primary_journal.as_ref().map(|j| {
+            let s = konf_runtime::journal::sweep::TtlSweeper::spawn(
+                j.clone(),
+                std::time::Duration::from_secs(config.journal.sweep_interval_secs),
+            );
+            info!(
+                interval_secs = config.journal.sweep_interval_secs,
+                "TTL sweeper started"
+            );
+            s
+        })
+    } else {
+        None
+    };
+
     // 9a. Install durable scheduler (if storage is configured).
     if let Some(ref storage) = storage {
         let scheduler = Arc::new(
@@ -335,6 +359,7 @@ pub async fn boot(config_dir: &Path) -> anyhow::Result<KonfInstance> {
         config,
         product_config,
         storage,
+        _sweeper: sweeper,
     })
 }
 

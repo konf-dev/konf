@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::engine::EngineConfig;
 use crate::error::ParseError;
 use crate::parser::graph::DependencyGraph;
 use crate::parser::schema::{
@@ -14,7 +15,7 @@ use crate::workflow::{
 };
 
 /// Compile a validated WorkflowSchema into a Workflow IR.
-pub fn compile(schema: WorkflowSchema, graph: &DependencyGraph) -> Result<Workflow, ParseError> {
+pub fn compile(schema: WorkflowSchema, graph: &DependencyGraph, config: &EngineConfig) -> Result<Workflow, ParseError> {
     let mut steps = Vec::new();
 
     // Determine entry point: first node in YAML order
@@ -28,7 +29,7 @@ pub fn compile(schema: WorkflowSchema, graph: &DependencyGraph) -> Result<Workfl
         })?;
 
     for (name, node) in &schema.nodes {
-        let mut step = compile_node(name, node, &schema)?;
+        let mut step = compile_node(name, node, &schema, config)?;
         if let Some(deps) = graph.dependencies_of(name) {
             step.depends_on = deps.iter().map(StepId::new).collect();
         }
@@ -51,6 +52,7 @@ fn compile_node(
     name: &str,
     node: &NodeSchema,
     _schema: &WorkflowSchema,
+    config: &EngineConfig,
 ) -> Result<Step, ParseError> {
     let tool_id = match &node.do_ {
         Some(DoBlock::Single(tool)) => ToolId::new(tool),
@@ -153,7 +155,7 @@ fn compile_node(
     if let Some(retry) = &node.retry {
         let base_delay = match retry.delay.as_ref() {
             Some(d) => parse_duration(d)?,
-            None => Duration::from_secs(1),
+            None => Duration::from_millis(config.default_retry_base_delay_ms),
         };
         step.retry = Some(RetryPolicy {
             max_attempts: retry.times,
@@ -167,7 +169,7 @@ fn compile_node(
             base_delay,
             max_delay: match retry.max_delay.as_ref() {
                 Some(d) => parse_duration(d)?,
-                None => Duration::from_secs(30),
+                None => Duration::from_millis(config.default_retry_max_delay_ms),
             },
         });
     }
