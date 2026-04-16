@@ -36,6 +36,7 @@
 //!   via `FanoutMetrics`).
 
 pub mod context;
+pub(crate) mod dispatcher;
 pub mod error;
 pub mod event_bus;
 pub mod execution_context;

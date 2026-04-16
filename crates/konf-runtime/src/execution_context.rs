@@ -93,6 +93,26 @@ impl ExecutionContext {
         }
     }
 
+    /// Reconstruct an ExecutionContext from a substrate Envelope.
+    ///
+    /// Used by WorkflowDispatchTool to propagate the caller's trace_id
+    /// and session_id into the inner workflow execution.
+    pub fn from_envelope(env: &konflux_substrate::envelope::Envelope<serde_json::Value>) -> Self {
+        let session_id = env
+            .metadata
+            .0
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("workflow_tool")
+            .to_string();
+
+        Self {
+            trace_id: env.trace_id.0,
+            parent_interaction_id: env.parent_id.map(|id| id.0),
+            session_id,
+        }
+    }
+
     /// Derive a child context for a nested dispatch.
     ///
     /// The child inherits `trace_id` unchanged (the whole point of

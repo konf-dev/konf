@@ -520,10 +520,11 @@ async fn execute_step(
         ctx.capabilities.to_vec()
     };
 
-    // Bridge: construct Envelope from existing executor context.
-    // trace_id and namespace are extracted from the metadata HashMap
-    // (the stringly-typed side-channel). This bridge is transitional —
-    // 4.f/4.g will make these fields flow through the Envelope from the start.
+    // Extract typed context from the execution metadata populated by
+    // Runtime::build_execution_metadata (Stage 5.a). The "unknown"
+    // fallbacks are defense-in-depth for edge cases (e.g. engine used
+    // standalone without runtime); in normal runtime dispatch these
+    // keys are always present.
     let trace_id = ctx
         .metadata
         .get("trace_id")

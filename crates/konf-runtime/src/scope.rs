@@ -184,6 +184,56 @@ impl ExecutionScope {
         Ok(())
     }
 
+    /// Reconstruct an ExecutionScope from a substrate Envelope.
+    ///
+    /// Used by WorkflowDispatchTool: when a workflow-as-tool is invoked,
+    /// the caller's scope is carried in the Envelope's typed fields and
+    /// reconstructed here so the inner workflow inherits the caller's
+    /// namespace, actor, and capabilities.
+    pub fn from_envelope(env: &konflux_substrate::envelope::Envelope<serde_json::Value>) -> Self {
+        let capabilities = env
+            .capabilities
+            .patterns()
+            .into_iter()
+            .map(CapabilityGrant::new)
+            .collect();
+
+        let actor_role = env
+            .metadata
+            .0
+            .get("actor_role")
+            .and_then(|v| v.as_str())
+            .map(|s| match s {
+                "infra_admin" => ActorRole::InfraAdmin,
+                "product_admin" => ActorRole::ProductAdmin,
+                "user" => ActorRole::User,
+                "infra_agent" => ActorRole::InfraAgent,
+                "product_agent" => ActorRole::ProductAgent,
+                "user_agent" => ActorRole::UserAgent,
+                "system" => ActorRole::System,
+                _ => ActorRole::User,
+            })
+            .unwrap_or(ActorRole::System);
+
+        let depth = env
+            .metadata
+            .0
+            .get("depth")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        ExecutionScope {
+            namespace: env.namespace.0.clone(),
+            capabilities,
+            limits: ResourceLimits::default(),
+            actor: Actor {
+                id: env.actor_id.0.clone(),
+                role: actor_role,
+            },
+            depth,
+        }
+    }
+
     /// Get the list of capability patterns (for passing to konflux engine).
     pub fn capability_patterns(&self) -> Vec<String> {
         self.capabilities
@@ -512,6 +562,38 @@ mod tests {
         // Specific tool under prefix is allowed
         let child = parent.child_scope(vec![CapabilityGrant::new("memory:search")], None);
         assert!(child.is_ok());
+    }
+
+    #[test]
+    fn test_max_depth_prevents_deep_nesting() {
+        let scope = ExecutionScope {
+            namespace: "konf:test".into(),
+            capabilities: vec![CapabilityGrant::new("*")],
+            limits: ResourceLimits {
+                max_child_depth: 3,
+                ..ResourceLimits::default()
+            },
+            actor: Actor {
+                id: "test".into(),
+                role: ActorRole::System,
+            },
+            depth: 0,
+        };
+
+        // Depth 0 → 1 → 2: OK
+        let child1 = scope.child_scope(vec![CapabilityGrant::new("*")], None).unwrap();
+        assert_eq!(child1.depth, 1);
+        let child2 = child1.child_scope(vec![CapabilityGrant::new("*")], None).unwrap();
+        assert_eq!(child2.depth, 2);
+
+        // Depth 2 → validate_start should still pass (depth < max_child_depth=3)
+        let table = crate::ProcessTable::new();
+        assert!(child2.validate_start(&table).is_ok());
+
+        // Depth 3 → validate_start rejects
+        let child3 = child2.child_scope(vec![CapabilityGrant::new("*")], None).unwrap();
+        assert_eq!(child3.depth, 3);
+        assert!(child3.validate_start(&table).is_err());
     }
 
     #[test]

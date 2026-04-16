@@ -4,8 +4,9 @@
 //! registered as `workflow:{id}`. This enables composition: workflows
 //! calling sub-workflows, MCP clients invoking workflows as tools.
 //!
-//! The WorkflowTool creates a child execution scope (attenuated capabilities)
-//! and runs the workflow via the runtime.
+//! Stage 5.c: the caller's scope is reconstructed from the Envelope's
+//! typed fields (namespace, actor_id, capabilities, actor_role metadata).
+//! No boot-baked `default_scope` — the caller's context flows through.
 
 use std::sync::Arc;
 
@@ -17,17 +18,18 @@ use konflux_substrate::error::ToolError;
 use konflux_substrate::tool::{Tool, ToolAnnotations, ToolInfo};
 use konflux_substrate::Workflow;
 
+use crate::execution_context::ExecutionContext;
 use crate::scope::ExecutionScope;
 use crate::Runtime;
 
 /// A workflow wrapped as a callable tool.
 ///
 /// Created by konf-init for each workflow with `register_as_tool: true`.
-/// When invoked, creates a child scope and runs the workflow via the runtime.
+/// When invoked, reconstructs the caller's scope from the Envelope and
+/// runs the workflow via the runtime.
 pub struct WorkflowTool {
     workflow: Workflow,
     runtime: Arc<Runtime>,
-    default_scope: ExecutionScope,
 }
 
 impl WorkflowTool {
@@ -35,13 +37,8 @@ impl WorkflowTool {
     ///
     /// - `workflow`: the parsed workflow to execute
     /// - `runtime`: the runtime to execute through
-    /// - `default_scope`: the scope to attenuate for child execution
-    pub fn new(workflow: Workflow, runtime: Arc<Runtime>, default_scope: ExecutionScope) -> Self {
-        Self {
-            workflow,
-            runtime,
-            default_scope,
-        }
+    pub fn new(workflow: Workflow, runtime: Arc<Runtime>) -> Self {
+        Self { workflow, runtime }
     }
 }
 
@@ -71,11 +68,15 @@ impl Tool for WorkflowTool {
     }
 
     async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
-        // Create a child scope with attenuated capabilities
-        let child_scope = self
-            .default_scope
+        // Reconstruct the caller's scope and context from the Envelope.
+        // This replaces the old boot-baked default_scope (concession #1).
+        let caller_scope = ExecutionScope::from_envelope(&env);
+        let exec_ctx = ExecutionContext::from_envelope(&env);
+
+        // Create a child scope — increments depth, inherits caller's caps.
+        let child_scope = caller_scope
             .child_scope(
-                self.default_scope.capabilities.clone(),
+                caller_scope.capabilities.clone(),
                 None, // same namespace
             )
             .map_err(|e| ToolError::ExecutionFailed {
@@ -83,18 +84,8 @@ impl Tool for WorkflowTool {
                 retryable: false,
             })?;
 
-        // Extract session_id from envelope metadata; fall back to a default
-        let session_id = env
-            .metadata
-            .0
-            .get("session_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("workflow_tool")
-            .to_string();
-
-        // Use the envelope's trace_id directly — it's typed, no string parsing needed.
-        let exec_ctx = crate::ExecutionContext::with_trace(env.trace_id.0, session_id);
-
+        // Stamp depth into envelope metadata so nested workflow-as-tool
+        // calls can reconstruct the correct depth.
         let output = self
             .runtime
             .run(&self.workflow, env.payload.clone(), child_scope, exec_ctx)
@@ -113,23 +104,8 @@ mod tests {
     use super::*;
     use crate::scope::{Actor, ActorRole, CapabilityGrant, ResourceLimits};
 
-    fn test_scope() -> ExecutionScope {
-        ExecutionScope {
-            namespace: "konf:test".into(),
-            capabilities: vec![CapabilityGrant::new("*")],
-            limits: ResourceLimits::default(),
-            actor: Actor {
-                id: "test".into(),
-                role: ActorRole::System,
-            },
-            depth: 0,
-        }
-    }
-
     #[test]
     fn test_workflow_tool_info() {
-        // We can't easily construct a Workflow without parsing YAML,
-        // so test the naming convention and annotations
         let info = ToolInfo {
             name: "workflow:summarize".into(),
             description: "Summarize a document".into(),
@@ -152,7 +128,16 @@ mod tests {
 
     #[test]
     fn test_child_scope_creation() {
-        let scope = test_scope();
+        let scope = ExecutionScope {
+            namespace: "konf:test".into(),
+            capabilities: vec![CapabilityGrant::new("*")],
+            limits: ResourceLimits::default(),
+            actor: Actor {
+                id: "test".into(),
+                role: ActorRole::System,
+            },
+            depth: 0,
+        };
         let child = scope.child_scope(vec![CapabilityGrant::new("memory_search")], None);
         assert!(child.is_ok());
         let child = child.unwrap();

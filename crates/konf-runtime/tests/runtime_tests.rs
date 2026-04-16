@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use tokio::sync::Mutex;
 
 use konflux_substrate::engine::Engine;
 use konflux_substrate::envelope::Envelope;
@@ -606,4 +607,305 @@ nodes:
         .unwrap();
     let result = runtime.wait(run_id).await;
     assert!(result.is_err(), "Should fail due to capability denial");
+}
+
+// ============================================================
+// Stage 5.a — Metadata flow to executor
+// ============================================================
+
+/// A tool that captures the Envelope it receives for later assertion.
+struct CaptureTool {
+    captured: Arc<Mutex<Option<Envelope<Value>>>>,
+}
+
+impl CaptureTool {
+    fn new(sink: Arc<Mutex<Option<Envelope<Value>>>>) -> Self {
+        Self { captured: sink }
+    }
+}
+
+#[async_trait]
+impl Tool for CaptureTool {
+    fn info(&self) -> ToolInfo {
+        ToolInfo {
+            name: "capture".into(),
+            description: "Captures its envelope".into(),
+            input_schema: json!({}),
+            capabilities: vec![],
+            supports_streaming: false,
+            output_schema: None,
+            annotations: Default::default(),
+        }
+    }
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        *self.captured.lock().await = Some(env.clone());
+        Ok(env.respond(json!({"captured": true})))
+    }
+}
+
+#[tokio::test]
+async fn executor_envelope_has_real_metadata() {
+    let captured = Arc::new(Mutex::new(None));
+    let engine = Engine::new();
+    engine.register_tool(Arc::new(CaptureTool::new(captured.clone())));
+    konflux_substrate::builtin::register_builtins(&engine);
+
+    let runtime = Runtime::new(engine, None).await.unwrap();
+
+    let workflow = runtime
+        .parse_yaml(
+            r#"
+workflow: metadata_flow_test
+nodes:
+  step1:
+    do: capture
+    with: {}
+    return: true
+"#,
+        )
+        .unwrap();
+
+    let expected_ns = "konf:test:metadata_flow";
+    let scope = test_scope(expected_ns);
+    let ctx = konf_runtime::ExecutionContext::new_root("metadata_sess");
+    let expected_trace_id = ctx.trace_id;
+
+    let result = runtime.run(&workflow, json!({}), scope, ctx).await;
+    assert!(result.is_ok(), "Workflow failed: {result:?}");
+
+    let env = captured.lock().await;
+    let env = env.as_ref().expect("CaptureTool should have captured an envelope");
+
+    assert_eq!(
+        env.namespace.0, expected_ns,
+        "Executor envelope should carry the real namespace, not 'unknown'"
+    );
+    assert_eq!(
+        env.trace_id.0, expected_trace_id,
+        "Executor envelope should carry the real trace_id from ExecutionContext"
+    );
+    assert_eq!(
+        env.actor_id.0, "test_user",
+        "Executor envelope should carry the real actor_id"
+    );
+}
+
+#[tokio::test]
+async fn dispatch_symmetry_namespace_and_trace() {
+    // Both invoke_tool (Path A) and workflow execution (Path B) should
+    // see the same namespace and trace_id on the tool's Envelope.
+    let captured_a = Arc::new(Mutex::new(None));
+    let captured_b = Arc::new(Mutex::new(None));
+
+    // Two capture tools: one for each path
+    struct NamedCaptureTool {
+        name: String,
+        sink: Arc<Mutex<Option<(String, uuid::Uuid)>>>,
+    }
+    #[async_trait]
+    impl Tool for NamedCaptureTool {
+        fn info(&self) -> ToolInfo {
+            ToolInfo {
+                name: self.name.clone(),
+                description: "Captures ns+trace".into(),
+                input_schema: json!({}),
+                capabilities: vec![],
+                supports_streaming: false,
+                output_schema: None,
+                annotations: Default::default(),
+            }
+        }
+        async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+            *self.sink.lock().await = Some((env.namespace.0.clone(), env.trace_id.0));
+            Ok(env.respond(json!({"ok": true})))
+        }
+    }
+
+    let engine = Engine::new();
+    engine.register_tool(Arc::new(NamedCaptureTool {
+        name: "cap_a".into(),
+        sink: captured_a.clone(),
+    }));
+    engine.register_tool(Arc::new(NamedCaptureTool {
+        name: "cap_b".into(),
+        sink: captured_b.clone(),
+    }));
+    konflux_substrate::builtin::register_builtins(&engine);
+
+    let runtime = Runtime::new(engine, None).await.unwrap();
+
+    let ns = "konf:test:symmetry";
+    let scope = test_scope(ns);
+    let ctx = konf_runtime::ExecutionContext::new_root("symmetry_sess");
+    let trace_id = ctx.trace_id;
+
+    // Path A: invoke_tool
+    let _ = runtime
+        .invoke_tool("cap_a", json!({}), &scope, &ctx)
+        .await
+        .unwrap();
+
+    // Path B: workflow execution
+    let workflow = runtime
+        .parse_yaml(
+            r#"
+workflow: symmetry_test
+nodes:
+  step1:
+    do: cap_b
+    with: {}
+    return: true
+"#,
+        )
+        .unwrap();
+    let _ = runtime.run(&workflow, json!({}), scope, ctx).await.unwrap();
+
+    let (ns_a, trace_a) = captured_a.lock().await.clone().unwrap();
+    let (ns_b, trace_b) = captured_b.lock().await.clone().unwrap();
+
+    assert_eq!(ns_a, ns, "Path A namespace");
+    assert_eq!(ns_b, ns, "Path B namespace");
+    assert_eq!(trace_a, trace_id, "Path A trace_id");
+    assert_eq!(trace_b, trace_id, "Path B trace_id");
+}
+
+// ============================================================
+// Test: cross-namespace dispatch rejected
+// ============================================================
+
+#[tokio::test]
+async fn cross_namespace_dispatch_rejected() {
+    let runtime = create_runtime_edge().await;
+    // Scope grants only "ai:complete" — echo exists in the engine but is NOT
+    // granted by this scope.
+    let scope = ExecutionScope {
+        namespace: "konf:test:cross_ns".into(),
+        capabilities: vec![CapabilityGrant::new("ai:complete")],
+        limits: ResourceLimits::default(),
+        actor: Actor {
+            id: "test".into(),
+            role: ActorRole::User,
+        },
+        depth: 0,
+    };
+    let err = runtime
+        .invoke_tool(
+            "echo",
+            json!({"val": "should_fail"}),
+            &scope,
+            &konf_runtime::ExecutionContext::new_root("sess_cross_ns"),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    // The error must indicate capability denial, not "not found".
+    assert!(
+        err.contains("not granted") || err.contains("capability denied"),
+        "Expected CapabilityDenied error, got: {err}"
+    );
+}
+
+// ============================================================
+// Test: max depth recursive dispatch abort
+// ============================================================
+
+#[tokio::test]
+async fn max_depth_recursive_dispatch_abort() {
+    let runtime = create_runtime_edge().await;
+
+    let workflow = runtime
+        .parse_yaml(
+            r#"
+workflow: depth_limit_test
+nodes:
+  step1:
+    do: echo
+    with: { val: "deep" }
+    return: true
+"#,
+        )
+        .unwrap();
+
+    // depth=2 with max_child_depth=2 → validate_start rejects (depth >= max).
+    let scope = ExecutionScope {
+        namespace: "konf:test:depth".into(),
+        capabilities: vec![CapabilityGrant::new("*")],
+        limits: ResourceLimits {
+            max_child_depth: 2,
+            ..ResourceLimits::default()
+        },
+        actor: Actor {
+            id: "test".into(),
+            role: ActorRole::User,
+        },
+        depth: 2,
+    };
+
+    let result = runtime
+        .start(
+            &workflow,
+            json!({}),
+            scope,
+            konf_runtime::ExecutionContext::new_root("sess_depth"),
+        )
+        .await;
+    assert!(result.is_err(), "Should fail due to depth limit");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("max_child_depth"),
+        "Expected ResourceLimit(max_child_depth) error, got: {err}"
+    );
+}
+
+// ============================================================
+// Test: single dispatch path records Interaction in journal
+// ============================================================
+
+#[tokio::test]
+async fn single_dispatch_path_records_interaction() {
+    let (runtime, _dir) = create_runtime_with_journal().await;
+
+    let scope = test_scope("konf:test:dispatch_journal");
+    let ctx = konf_runtime::ExecutionContext::new_root("sess_dispatch_j");
+    let _ = runtime
+        .invoke_tool("echo", json!({"hello": "journal"}), &scope, &ctx)
+        .await
+        .unwrap();
+
+    // Give async journal append a moment to land.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let rows = runtime
+        .journal()
+        .unwrap()
+        .query_by_session("sess_dispatch_j", 100)
+        .await
+        .unwrap();
+
+    assert!(!rows.is_empty(), "journal should have recorded the dispatch");
+
+    // Find the interaction entry with ToolDispatch kind.
+    let interaction_row = rows
+        .iter()
+        .find(|r| r.event_type == "interaction")
+        .expect("expected an 'interaction' journal entry");
+
+    let payload = &interaction_row.payload;
+    let kind_type = payload
+        .get("kind")
+        .and_then(|v| v.get("type"))
+        .and_then(|v| v.as_str());
+    assert_eq!(
+        kind_type,
+        Some("tool_dispatch"),
+        "Interaction kind should be tool_dispatch, got: {payload}"
+    );
+    assert_eq!(
+        payload
+            .get("attributes")
+            .and_then(|a| a.get("tool_name"))
+            .and_then(|v| v.as_str()),
+        Some("echo"),
+        "Interaction should record the tool name"
+    );
 }

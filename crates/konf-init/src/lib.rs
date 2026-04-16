@@ -867,22 +867,7 @@ fn register_workflows(
 
         // Register as a tool if flagged
         if workflow.register_as_tool {
-            let scope = konf_runtime::scope::ExecutionScope {
-                namespace: "konf:system".into(),
-                capabilities: workflow
-                    .capabilities
-                    .iter()
-                    .map(|c| konf_runtime::scope::CapabilityGrant::new(c.as_str()))
-                    .collect(),
-                limits: konf_runtime::scope::ResourceLimits::default(),
-                actor: konf_runtime::scope::Actor {
-                    id: "system".into(),
-                    role: konf_runtime::scope::ActorRole::System,
-                },
-                depth: 0,
-            };
-
-            let tool = konf_runtime::WorkflowTool::new(workflow.clone(), runtime.clone(), scope);
+            let tool = konf_runtime::WorkflowTool::new(workflow.clone(), runtime.clone());
 
             engine.register_tool(Arc::new(tool));
             info!(workflow = %workflow.id, "Registered workflow as tool: workflow:{}", workflow.id);

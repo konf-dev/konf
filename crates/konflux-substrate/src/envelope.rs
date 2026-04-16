@@ -5,8 +5,8 @@
 //! - Causal propagation (`trace_id`, `parent_id`, `namespace`)
 //! - Journaling (every envelope is recorded)
 //!
-//! V2 shape from `RFC_ENVELOPE.md`. Unused in this checkpoint (4.b);
-//! wired into dispatch at 4.e–4.f.
+//! V2 shape from `RFC_ENVELOPE.md`. Wired into both dispatch paths
+//! (executor + runtime Dispatcher) since Stages 4–5.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -294,11 +294,12 @@ impl<P> Envelope<P> {
 }
 
 impl Envelope<serde_json::Value> {
-    /// Construct a tool-dispatch envelope from available context.
+    /// Construct a tool-dispatch envelope from primitive arguments.
     ///
-    /// Used by the executor and runtime to bridge existing context into
-    /// a typed Envelope for the Tool trait. Transitional — will be
-    /// replaced by proper Envelope flow in 4.f/4.g.
+    /// Used by the substrate executor (via metadata HashMap) and the
+    /// runtime Dispatcher (via ExecutionScope fields) to build a typed
+    /// Envelope for the Tool trait. Takes `&str` arguments; a future
+    /// refactor could accept typed newtypes directly.
     pub fn for_tool_dispatch(
         target: &str,
         payload: serde_json::Value,
