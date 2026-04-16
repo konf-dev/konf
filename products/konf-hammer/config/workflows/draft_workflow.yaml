@@ -1,14 +1,12 @@
-# Slice 3: draft a workflow YAML from a plain-English description.
+# Slice 3+4: draft a workflow YAML from NL description, validate it,
+# attempt one repair pass if validation fails.
 #
-# Reads the target product's authoring prompt + existing workflows as style
-# context, then asks the LLM to emit a complete workflow YAML file.
-#
-# NO writes in this slice. The draft is returned as text for inspection.
-# Slice 4 adds validation + repair; Slice 5 adds write + hot-reload.
+# NO writes in this slice. The draft + validation status are returned as
+# text for inspection. Slice 5 adds write + hot-reload.
 
 workflow: draft_workflow
-description: "Draft a workflow YAML for a target product from a plain-English description. Returns YAML text, no writes."
-version: "0.1.0"
+description: "Draft a workflow YAML for a target product, validate it, retry once on failure. Returns YAML text + status, no writes."
+version: "0.2.0"
 register_as_tool: true
 
 capabilities:
@@ -16,6 +14,7 @@ capabilities:
   - "shell:exec"
   - "template"
   - "echo"
+  - "yaml:validate_workflow"
 
 input_schema:
   type: object
@@ -33,7 +32,6 @@ input_schema:
 
 nodes:
   # Gather style context: target's authoring prompt + every existing workflow.
-  # One shell node so the draft prompt stays small and predictable.
   gather_context:
     do: shell:exec
     with:
@@ -67,7 +65,7 @@ nodes:
     timeout: "10s"
     then: draft
 
-  # Ask the LLM to draft the YAML. Ollama default, configurable per call.
+  # Ask the LLM to draft the YAML.
   draft:
     do: ai:complete
     with:
@@ -98,9 +96,8 @@ nodes:
           `vars: {}` is fine but the key must be present.
         - Interpolation uses double curly braces around NODE_ID.FIELD
           (e.g. the stdout of a shell node called `probe` is referenced as
-          double-open-brace probe.stdout double-close-brace). Do not emit
-          the literal descriptive text in your output — emit actual
-          mustache syntax.
+          double-open-brace probe.stdout double-close-brace). Emit actual
+          mustache syntax in your output — do not emit the descriptive text.
 
         ai:complete returns `.text`, not `.content`.
 
@@ -126,4 +123,119 @@ nodes:
         {{gather_context.stdout}}
       max_tokens: 3072
       temperature: 0.2
+    then: validate
+
+  # Validate the draft against the konf kernel schema + tool references.
+  # yaml:validate_workflow returns {valid: bool, errors: []} — it does NOT
+  # throw on invalid YAML, so branch on `.valid` via `when:` rather than
+  # relying on `catch:`.
+  validate:
+    do: yaml:validate_workflow
+    with:
+      yaml: "{{draft.text}}"
+    then:
+      - when: "validate.valid == true"
+        then: success_v1
+      - else: true
+        then: repair
+
+  # One repair attempt — feed the invalid draft + validator error back.
+  repair:
+    do: ai:complete
+    with:
+      system: |
+        You are fixing a konf workflow YAML that failed validation. Output
+        EXACTLY one complete corrected YAML document. No markdown fences.
+        No prose. Begin with the `workflow:` line.
+
+        Apply the same mandatory rules as a fresh draft:
+        - explicit `capabilities:` list, never "*"
+        - no `config:reload` or `yaml:validate_workflow` capabilities
+        - every node has id/do/with; exactly one terminal node has `return: true`
+        - template nodes require both `template:` and `vars:`
+        - interpolate with double curly braces around NODE_ID.FIELD
+        - substrate primitives only: echo, template, shell:exec, ai:complete,
+          memory:*, state:*, http:get, http:post, runner:*
+
+        Fix what the validator flagged. Keep everything else intact.
+      prompt: |
+        ## Previous draft (failed validation)
+
+        {{draft.text}}
+
+        ## Validator error
+
+        {{validate}}
+
+        Emit the corrected YAML file body now.
+      max_tokens: 3072
+      temperature: 0.1
+    then: validate_repair
+
+  # Re-validate after repair.
+  validate_repair:
+    do: yaml:validate_workflow
+    with:
+      yaml: "{{repair.text}}"
+    then:
+      - when: "validate_repair.valid == true"
+        then: success_v2
+      - else: true
+        then: failed
+
+  # Terminal — first draft was valid.
+  #
+  # Why shell:exec and not template: konf's `template` tool double-renders
+  # (inputs are template-resolved, then the tool renders the template again).
+  # Drafted YAML contains its own `{{...}}` references which the second pass
+  # tries to expand against this workflow's vars, producing undefined errors.
+  # shell:exec's command is rendered once; stdout is not re-rendered.
+  success_v1:
+    do: shell:exec
+    with:
+      command: |
+        cat <<'__KONF_HAMMER_RESULT__'
+        status: ok
+        attempts: 1
+        slug: {{input.slug}}
+        target_path: {{input.target_product_dir}}/config/workflows/auto_{{input.slug}}.yaml
+
+        ---yaml---
+        {{draft.text}}
+        __KONF_HAMMER_RESULT__
+    timeout: "5s"
+    return: true
+
+  # Terminal — repair succeeded on the second attempt.
+  success_v2:
+    do: shell:exec
+    with:
+      command: |
+        cat <<'__KONF_HAMMER_RESULT__'
+        status: ok
+        attempts: 2
+        slug: {{input.slug}}
+        target_path: {{input.target_product_dir}}/config/workflows/auto_{{input.slug}}.yaml
+
+        ---yaml---
+        {{repair.text}}
+        __KONF_HAMMER_RESULT__
+    timeout: "5s"
+    return: true
+
+  # Terminal — still invalid after one repair. Caller can retry with a
+  # different description or accept the last draft as a starting point.
+  failed:
+    do: shell:exec
+    with:
+      command: |
+        cat <<'__KONF_HAMMER_RESULT__'
+        status: failed
+        attempts: 2
+        slug: {{input.slug}}
+
+        ---last_draft---
+        {{repair.text}}
+        __KONF_HAMMER_RESULT__
+    timeout: "5s"
     return: true
