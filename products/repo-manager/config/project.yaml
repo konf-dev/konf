@@ -1,0 +1,37 @@
+# repo-manager — the single owner of the konf/ codebase.
+#
+# You talk to it from Claude CLI over MCP. It inspects, triages, and extends
+# itself via self_improve. Scope is strictly the konf repo at konf-dev/konf.
+#
+# See docs/MENTAL_MODEL.md for substrate doctrine.
+
+name: repo-manager
+description: "Single owner of the konf codebase. Interactive maintenance + self-extension via Claude CLI over MCP."
+version: "0.1.0"
+
+# Semantic label — documents which identity source mints the GitHub token
+# injected into this product's environment. v0 reads a PAT from the env var
+# GITHUB_PERSONAL_ACCESS_TOKEN. When konf-identity-github lands, flip to
+# github:app:konf-agents — repo-manager's config won't otherwise change.
+identity: "github:pat"
+
+roles:
+  # Bert, via MCP stdio session. Full capabilities.
+  owner:
+    capabilities: ["*"]
+
+  # Non-interactive internal role. Everything needed to run the v0 workflows,
+  # nothing more. No catch-all wildcards.
+  agent:
+    capabilities:
+      - "ai:complete"
+      - "shell:exec"
+      - "template"
+      - "echo"
+      - "log"
+      - "memory:*"
+      - "yaml:validate_workflow"
+      - "config:reload"
+      - "workflow:*"
+      - "github:*"
+    namespace_suffix: "repo-manager"

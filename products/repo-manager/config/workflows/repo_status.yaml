@@ -1,0 +1,122 @@
+workflow: repo_status
+description: "Read-only snapshot of the konf repo: git state, compile/clippy, open PRs and issues."
+version: "0.1.0"
+register_as_tool: true
+
+capabilities:
+  - "shell:exec"
+  - "github:*"
+  - "template"
+  - "echo"
+
+input_schema:
+  type: object
+  properties: {}
+
+nodes:
+  # Fan-out entry — echo as a no-op source for the parallel branches.
+  start:
+    do: echo
+    with:
+      message: "collecting konf repo status"
+    then: [git_state, compile_check, clippy_count, open_prs, open_issues]
+
+  # Branch 1: local git state (branch, dirty count, ahead/behind, recent commits).
+  git_state:
+    do: shell:exec
+    with:
+      command: |
+        cd /home/bert/Work/orgs/konf-dev-stack/konf && \
+          printf '### git\n' && \
+          printf 'branch=%s\n' "$(git rev-parse --abbrev-ref HEAD)" && \
+          printf 'head=%s\n' "$(git rev-parse --short HEAD)" && \
+          printf 'dirty_files=%s\n' "$(git status --porcelain | wc -l | tr -d ' ')" && \
+          printf 'ahead=%s\n' "$(git rev-list --count HEAD ^origin/main 2>/dev/null || echo 0)" && \
+          printf 'behind=%s\n' "$(git rev-list --count origin/main ^HEAD 2>/dev/null || echo 0)" && \
+          printf '\n### recent commits\n' && \
+          git log --oneline -5
+    timeout: "10s"
+    then: compose
+
+  # Branch 2: compile-only test build (fast; catches compile regressions).
+  compile_check:
+    do: shell:exec
+    with:
+      command: |
+        cd /home/bert/Work/orgs/konf-dev-stack/konf && \
+          cargo test --workspace --no-run --message-format=short 2>&1 | tail -20
+    timeout: "90s"
+    catch: compose
+    then: compose
+
+  # Branch 3: clippy warning count (with -D warnings would block; we just count).
+  clippy_count:
+    do: shell:exec
+    with:
+      command: |
+        cd /home/bert/Work/orgs/konf-dev-stack/konf && \
+          count=$(cargo clippy --workspace --tests --message-format=short 2>&1 | grep -c '^warning' || true); \
+          printf 'clippy_warnings=%s\n' "$count"
+    timeout: "120s"
+    catch: compose
+    then: compose
+
+  # Branch 4: open PRs on konf-dev/konf.
+  open_prs:
+    do: github:list_pull_requests
+    with:
+      owner: "konf-dev"
+      repo: "konf"
+      state: "open"
+      per_page: 50
+    timeout: "20s"
+    catch: compose
+    then: compose
+
+  # Branch 5: open issues on konf-dev/konf.
+  open_issues:
+    do: github:list_issues
+    with:
+      owner: "konf-dev"
+      repo: "konf"
+      state: "open"
+      per_page: 50
+    timeout: "20s"
+    catch: compose
+    then: compose
+
+  # Sink — wait for all branches, then render a combined markdown digest
+  # alongside the structured fields. Individual branch failures are
+  # caught above and still flow here so the digest is never blocked on
+  # one broken fetch.
+  compose:
+    do: template
+    with:
+      vars: {}
+      template: |
+        # konf status
+
+        ## git
+        ```
+        {{git_state.stdout}}
+        ```
+
+        ## build
+        ```
+        {{compile_check.stdout}}
+        ```
+
+        ## lint
+        ```
+        {{clippy_count.stdout}}
+        ```
+
+        ## open pull requests
+        {{open_prs}}
+
+        ## open issues
+        {{open_issues}}
+    join:
+      wait_for: [git_state, compile_check, clippy_count, open_prs, open_issues]
+      policy: all
+    return: true

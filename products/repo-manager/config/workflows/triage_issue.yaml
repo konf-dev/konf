@@ -1,0 +1,90 @@
+workflow: triage_issue
+description: "Read an issue on konf-dev/konf, classify it, and return a recommendation. Pure read — no mutations."
+version: "0.1.0"
+register_as_tool: true
+
+capabilities:
+  - "github:*"
+  - "ai:complete"
+  - "template"
+
+input_schema:
+  type: object
+  required: [issue_number]
+  properties:
+    issue_number:
+      type: integer
+      description: "Issue number on konf-dev/konf."
+
+nodes:
+  fetch_issue:
+    do: github:get_issue
+    with:
+      owner: "konf-dev"
+      repo: "konf"
+      issue_number: "{{input.issue_number}}"
+    timeout: "20s"
+    then: fetch_comments
+
+  fetch_comments:
+    do: github:get_issue_comments
+    with:
+      owner: "konf-dev"
+      repo: "konf"
+      issue_number: "{{input.issue_number}}"
+    timeout: "20s"
+    catch: classify
+    then: classify
+
+  classify:
+    do: ai:complete
+    with:
+      system: |
+        You are triaging issues for the konf project (operating system for AI
+        agents). Return a single JSON object — nothing else, no markdown
+        fences, no commentary.
+
+        Schema:
+        {
+          "classification": "bug" | "feature" | "docs" | "architectural" |
+                            "refactor" | "question" | "spam",
+          "urgency":        "now" | "soon" | "later",
+          "security_sensitive": true | false,
+          "needs_owner":        true | false,
+          "suggested_label":    "type:<classification>"  (or "security", "needs-design", etc.),
+          "suggested_comment":  "<markdown body for a triage reply>",
+          "reasoning":          "<one paragraph explaining the classification>"
+        }
+
+        Rules:
+        - Anything touching the capability lattice, trust model, shell
+          sandbox, tool_guards, secrets, or authentication is
+          `security_sensitive: true` AND `needs_owner: true`.
+        - Multiple plausible designs → classification is "architectural"
+          and `needs_owner: true`.
+        - Be concrete in `suggested_comment`: reference files with
+          `path:line` form when appropriate, ask a clarifying question
+          if requirements are ambiguous.
+      prompt: |
+        Issue #{{input.issue_number}} on konf-dev/konf.
+
+        Issue body:
+        {{fetch_issue}}
+
+        Comments:
+        {{fetch_comments}}
+      max_iterations: 1
+      max_tokens: 2048
+      temperature: 0.2
+    timeout: "120s"
+    then: compose
+
+  compose:
+    do: template
+    with:
+      vars: {}
+      template: |
+        # Triage — issue #{{input.issue_number}}
+
+        {{classify.text}}
+    return: true

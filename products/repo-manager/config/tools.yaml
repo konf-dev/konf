@@ -1,0 +1,87 @@
+# Tool configuration for repo-manager.
+#
+# LLM default: Gemini 2.5 Pro (2M context, cheap, adequate for maintenance).
+# Per-node `model:` overrides (in individual workflows) switch to Claude
+# Sonnet 4.6 for anything persisted as executable configuration — see
+# workflows/self_improve.yaml.
+
+tools:
+  llm:
+    provider: gemini
+    model: "${KONF_MODEL:-gemini-2.5-pro}"
+
+  # Embedded SurrealDB for journal-adjacent memory.
+  # Same pattern as _template — embedded mode, single RocksDB file.
+  memory:
+    backend: surreal
+    config:
+      mode: embedded
+      path: ./memory.db
+      namespace: konf
+      database: repo-manager
+      vector_dimension: 768
+
+  # Host shell — repo-manager must run cargo, git, and plain shell against
+  # the konf working tree at konf-dev-stack/konf/.
+  shell:
+    container: "host"
+    timeout_ms: 180000
+
+  # GitHub via the native github-mcp-server binary.
+  # - Inside the sandbox image: the Dockerfile installs it to
+  #   /usr/local/bin/github-mcp-server, so `command: github-mcp-server`
+  #   resolves on PATH with no docker-in-docker.
+  # - On a bare host: install the binary from
+  #   https://github.com/github/github-mcp-server/releases and ensure
+  #   it is on PATH.
+  # Reads GITHUB_PERSONAL_ACCESS_TOKEN (provisioned by the identity layer —
+  # v0: operator-supplied PAT; future: konf-identity-github mints it).
+  mcp_servers:
+    mcp_servers:
+      - name: github
+        transport: stdio
+        command: github-mcp-server
+        args:
+          - stdio
+          - --toolsets
+          - repos,issues,pull_requests,git
+        env:
+          GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+
+# Tool guards — enforce at the kernel, not relying on prompt discipline.
+# Autonomous shell execution must not escape the konf working tree.
+tool_guards:
+  shell:exec:
+    rules:
+      - action: deny
+        predicate:
+          type: contains
+          path: command
+          value: "sudo"
+        message: "sudo blocked in repo-manager"
+
+      - action: deny
+        predicate:
+          type: matches
+          path: command
+          pattern: "rm -rf /"
+        message: "destructive rm on root blocked"
+
+      # Protect identity — never let a generated or stray command rewrite
+      # the git author/email or remote origin inside the konf repo.
+      - action: deny
+        predicate:
+          type: contains
+          path: command
+          value: "git config"
+        message: "git config changes are owner-only"
+
+      # Keep pushes to protected branches out of repo-manager's reach.
+      # Branch pushes still work; `main` requires owner intervention.
+      - action: deny
+        predicate:
+          type: matches
+          path: command
+          pattern: "git push .* (main|master)\\b"
+        message: "pushes to main/master are owner-only"
+    default: allow

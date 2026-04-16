@@ -1,0 +1,326 @@
+workflow: self_improve
+description: "Given a plain-English intent, draft a new auto_<slug> workflow, validate it, commit it, and hot-reload. Caller smoke-tests manually; rollback is a single git revert."
+version: "0.1.0"
+register_as_tool: true
+
+capabilities:
+  - "shell:exec"
+  - "ai:complete"
+  - "yaml:validate_workflow"
+  - "config:reload"
+  - "template"
+  - "echo"
+
+input_schema:
+  type: object
+  required: [intent, name_hint]
+  properties:
+    intent:
+      type: string
+      description: "Plain-English description of the repeatable action to automate."
+    name_hint:
+      type: string
+      description: "Short slug (snake_case). Becomes auto_<name_hint>.yaml and the workflow id auto_<name_hint>."
+    sample_input:
+      type: object
+      description: "Reserved. Currently ignored. In v0.1 this will feed an auto smoke-test + rollback after reload."
+
+nodes:
+  # 1. List existing workflow files so the draft step can avoid collisions.
+  survey:
+    do: shell:exec
+    with:
+      command: |
+        ls "${KONF_CONFIG_DIR}/workflows" | sort
+    timeout: "5s"
+    then: check_clean_tree
+
+  # 2. Refuse to generate on top of uncommitted work. Mixing agent-
+  #    authored and human-authored changes in one commit destroys the
+  #    one-revert rollback guarantee.
+  check_clean_tree:
+    do: shell:exec
+    with:
+      command: |
+        cd "${KONF_CONFIG_DIR}/../../.." && \
+          dirty="$(git status --porcelain -- konf/products/repo-manager/)"
+        if [ -n "$dirty" ]; then
+          printf 'dirty\n%s\n' "$dirty"
+          exit 1
+        fi
+        printf 'clean\n'
+    timeout: "10s"
+    then:
+      - when: "check_clean_tree.exit_code != 0"
+        then: report_dirty
+      - else: true
+        then: draft
+
+  # 3. Draft the new workflow YAML. Claude Sonnet 4.6 override because
+  #    this is persisted executable configuration — instruction-following
+  #    on "no wildcards, only these tool names" matters more than token
+  #    cost.
+  draft:
+    do: ai:complete
+    with:
+      model: "claude-sonnet-4-6"
+      temperature: 0.1
+      max_tokens: 3072
+      max_iterations: 1
+      system: |
+        You generate konf workflow YAML for the repo-manager product.
+
+        HARD RULES (violations are rejected by downstream validators):
+        - Output ONLY raw YAML. No markdown fences. No commentary before
+          or after.
+        - `workflow: auto_<name_hint>` — exact id.
+        - `register_as_tool: true`.
+        - `capabilities:` must be an explicit list. Never `"*"`. Never
+          wildcards inside strings. Never `config:reload` or
+          `yaml:validate_workflow` (meta-tools reserved for hand-authored).
+        - Allowed tool names: `ai:complete`, `shell:exec`, `template`,
+          `echo`, `log`, `memory:search`, `memory:store`, `github:get_issue`,
+          `github:list_issues`, `github:get_issue_comments`,
+          `github:list_pull_requests`, `github:get_pull_request`,
+          `github:get_pull_request_comments`,
+          `github:get_pull_request_status`,
+          `github:list_commits`, `github:get_file_contents`,
+          `workflow:<other_auto_or_registered_id>`.
+        - Prefer READ-only operations for v0 generations. If a mutation
+          is necessary, call it out in `description:` so Bert can audit.
+        - `shell:exec` commands must target the konf working tree only
+          (`${KONF_CONFIG_DIR}/../../..`). No `sudo`, no `rm -rf`,
+          no `git config`, no push to `main`/`master`.
+        - End output with a trailing newline.
+
+        SHAPE the output to the v0.1 schema at
+        `konf/docs/product-guide/workflow-reference.md`: top-level
+        `workflow`, `description`, `version`, `capabilities`,
+        `register_as_tool`, optional `input_schema`, `nodes` map.
+
+        Every node has `do`, optional `with`, optional `then`, optional
+        `catch`, optional `timeout`. Exactly one terminal node has
+        `return: true`.
+      prompt: |
+        Intent: {{input.intent}}
+        Name hint (slug): {{input.name_hint}}
+        Target workflow id: auto_{{input.name_hint}}
+
+        Existing workflow files (avoid id collisions):
+        {{survey.stdout}}
+
+        Reference patterns (for structural guidance only — do not copy
+        verbatim):
+          - konf/products/repo-manager/config/workflows/repo_status.yaml
+            (shell-based parallel fan-out + template compose)
+          - konf/products/repo-manager/config/workflows/triage_issue.yaml
+            (github:* read + ai:complete classify)
+
+        Emit the YAML now.
+    timeout: "180s"
+    then: validate
+
+  # 4. Structural validation first.
+  validate:
+    do: yaml:validate_workflow
+    with:
+      yaml: "{{draft.text}}"
+    then: wildcard_guard
+    catch: report_invalid
+
+  # 5. Belt-and-braces: grep the drafted YAML for disallowed patterns.
+  #    Rejects wildcard capabilities even if the validator allowed them,
+  #    and blocks the meta-tools that must not appear in auto_* files.
+  wildcard_guard:
+    do: shell:exec
+    with:
+      command: |
+        cat <<'__KONF_DRAFT_EOF__' > /tmp/konf-self-improve-guard.yaml
+        {{draft.text}}
+        __KONF_DRAFT_EOF__
+
+        # Reject wildcard capability entries in any common form:
+        #   - "*"     - '*'     - *     - "*:*"   etc.
+        if grep -E "^[[:space:]]*-[[:space:]]*[\"']?\*" /tmp/konf-self-improve-guard.yaml; then
+          echo "BLOCKED: wildcard capability"
+          exit 1
+        fi
+        # Reject meta-tools anywhere (capabilities, do:, descriptions).
+        # Overzealous by design — auto-generated workflows must not touch
+        # these even in comments.
+        if grep -E '(config:reload|yaml:validate_workflow)' /tmp/konf-self-improve-guard.yaml; then
+          echo "BLOCKED: meta-tool in generated workflow"
+          exit 1
+        fi
+        echo "guard_ok"
+    timeout: "5s"
+    then:
+      - when: "wildcard_guard.exit_code != 0"
+        then: report_guard_violation
+      - else: true
+        then: collision_check
+
+  # 6. Target path must not already exist.
+  collision_check:
+    do: shell:exec
+    with:
+      command: |
+        target="${KONF_CONFIG_DIR}/workflows/auto_{{input.name_hint}}.yaml"
+        if [ -e "$target" ]; then
+          echo "collision: $target"
+          exit 1
+        fi
+        echo "ok: $target"
+    timeout: "5s"
+    then:
+      - when: "collision_check.exit_code != 0"
+        then: report_collision
+      - else: true
+        then: write
+
+  # 7. Write the draft to its final destination. Heredoc with a
+  #    long, unambiguous terminator avoids shell-quoting hazards on
+  #    typical YAML content.
+  write:
+    do: shell:exec
+    with:
+      command: |
+        target="${KONF_CONFIG_DIR}/workflows/auto_{{input.name_hint}}.yaml"
+        cat > "$target" <<'__KONF_DRAFT_EOF__'
+        {{draft.text}}
+        __KONF_DRAFT_EOF__
+
+        # Ensure trailing newline (heredoc preserves content as-is; if
+        # the model produced no trailing newline the file is still valid
+        # but we normalise for downstream tooling).
+        tail_byte=$(tail -c1 "$target" | od -An -c | tr -d ' ')
+        if [ "$tail_byte" != "\\n" ]; then
+          echo "" >> "$target"
+        fi
+        echo "wrote: $target ($(wc -l < "$target") lines)"
+    timeout: "10s"
+    then: git_commit
+
+  # 8. Atomic commit-per-generation. `git revert HEAD` is the rollback.
+  git_commit:
+    do: shell:exec
+    with:
+      command: |
+        cd "${KONF_CONFIG_DIR}/../../.." && \
+          rel="konf/products/repo-manager/config/workflows/auto_{{input.name_hint}}.yaml"
+        git add "$rel"
+        # Truncate intent at 72 chars; shell escaping is tricky, so pipe
+        # through cut.
+        intent_short="$(printf '%s' "{{input.intent}}" | cut -c1-72)"
+        git commit -m "self_improve: auto_{{input.name_hint}} — $intent_short" >/dev/null
+        sha="$(git rev-parse --short HEAD)"
+        echo "commit=$sha"
+        echo "file=$rel"
+    timeout: "15s"
+    then: reload
+
+  # 9. Hot-reload the product config so the new workflow becomes a
+  #    live MCP tool immediately.
+  reload:
+    do: config:reload
+    then: done
+
+  # --- terminal nodes -----------------------------------------------
+  #
+  # Smoke testing is deliberately left to the caller for v0: template
+  # expansion inside `do:` (to resolve `workflow:auto_<slug>`) is not
+  # documented as supported by the konf parser, and a failed smoke test
+  # would be just as easily rolled back by the caller via `git revert`.
+  # Once a generic dispatch tool (e.g. runner:spawn with workflow name as
+  # parameter) is proven for this flow, a smoke_test node can be added
+  # between reload and done.
+
+  done:
+    do: template
+    with:
+      vars: {}
+      template: |
+        # self_improve succeeded
+
+        - **Workflow id**: `auto_{{input.name_hint}}`
+        - **Commit**: `{{git_commit.stdout}}`
+        - **Invocation**: `workflow:auto_{{input.name_hint}}` (reconnect MCP to pick up the new tool)
+
+        Smoke-test manually from Claude CLI. If it misbehaves:
+        ```
+        cd /home/bert/Work/orgs/konf-dev-stack/konf
+        git revert <commit-sha>
+        # then /mcp reconnect in Claude CLI (or restart konf-mcp)
+        ```
+    return: true
+
+  report_dirty:
+    do: template
+    with:
+      vars: {}
+      template: |
+        # self_improve refused: dirty tree
+
+        The product directory `konf/products/repo-manager/` has
+        uncommitted changes. self_improve requires a clean tree so the
+        generated commit is a single atomic change.
+
+        Commit or stash your changes, then retry.
+
+        Status output:
+        ```
+        {{check_clean_tree.stdout}}
+        ```
+    return: true
+
+  report_invalid:
+    do: template
+    with:
+      vars: {}
+      template: |
+        # self_improve refused: draft failed validation
+
+        The generated YAML did not pass `yaml:validate_workflow`.
+
+        Validator output:
+        ```
+        {{validate}}
+        ```
+
+        Draft preview:
+        ```yaml
+        {{draft.text}}
+        ```
+    return: true
+
+  report_guard_violation:
+    do: template
+    with:
+      vars: {}
+      template: |
+        # self_improve refused: capability guard tripped
+
+        The generated YAML contained a disallowed pattern (wildcard
+        capabilities or a meta-tool reserved for hand-authored workflows).
+
+        Guard output:
+        ```
+        {{wildcard_guard.stdout}}
+        ```
+    return: true
+
+  report_collision:
+    do: template
+    with:
+      vars: {}
+      template: |
+        # self_improve refused: collision
+
+        A workflow file already exists at the target path. Choose a
+        different `name_hint` or remove the existing file first.
+
+        ```
+        {{collision_check.stdout}}
+        ```
+    return: true
+
