@@ -386,7 +386,6 @@ Any workflow with `register_as_tool: true` in its YAML header can be registered 
 pub struct WorkflowTool {
     workflow: Workflow,
     runtime: Arc<Runtime>,
-    default_scope: ExecutionScope,
 }
 
 impl Tool for WorkflowTool {
@@ -394,13 +393,19 @@ impl Tool for WorkflowTool {
         // name, description, input_schema from workflow YAML header
     }
 
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        // Reconstruct scope from the Envelope's typed fields
+        // (namespace, actor_id, capabilities, trace_id, deadline, etc.)
         // Create child scope (attenuated from parent)
         // Run workflow via self.runtime.run()
-        // Return workflow output
+        // Return workflow output wrapped in an Envelope
     }
 }
 ```
+
+`WorkflowTool` no longer stores a `default_scope`. The execution scope is reconstructed from the incoming `Envelope` at invocation time, which carries namespace, actor, capabilities (`CapSet`), trace_id, deadline, and other context. This ensures the scope always reflects the caller's actual grant, not a stale default.
+
+The `Dispatcher` struct in `konf-runtime` handles single-tool dispatch outside of workflow execution (e.g. direct `tools/call` from MCP or HTTP), applying `VirtualizedTool` namespace injection and `GuardedTool` deny/allow rules.
 
 konf-init creates `WorkflowTool` instances for each eligible workflow and registers them in the engine.
 
@@ -416,7 +421,7 @@ See [engine.md](engine.md) for workflow-as-tool composition details.
 from konf_runtime import Runtime, ExecutionScope, CapabilityGrant, ResourceLimits, Actor
 
 # Create
-runtime = await Runtime.connect("postgresql://localhost/konf")
+runtime = await Runtime.create("redb:///var/lib/konf/konf.redb")
 
 # Register tools
 runtime.register_tool("echo", echo_func, {"description": "Echo input"})

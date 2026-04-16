@@ -22,5 +22,5 @@ architecture, vocabulary, and doctrine.
 - [Backend](architecture/backend.md) — HTTP server, REST API, auth
 - [MCP](architecture/mcp.md) — MCP server and client, name translation at the wire
 - [Tools](architecture/tools.md) — Tool protocol, plugin crate structure, adapters
-- [Memory Backends](architecture/memory-backends.md) — `MemoryBackend` trait, smrti integration
+- [Memory Backends](architecture/memory-backends.md) — `MemoryBackend` trait, SurrealDB default
 - [Why Konf](architecture/why-konf.md) — Structural properties that differentiate konf

@@ -29,22 +29,21 @@ pub trait Tool: Send + Sync {
     /// Metadata: name, description, schemas, capabilities, annotations
     fn info(&self) -> ToolInfo;
 
-    /// Execute the tool with the given input
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError>;
+    /// Execute the tool. Context (namespace, actor, capabilities, trace_id,
+    /// deadline, etc.) is carried inside the Envelope.
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError>;
 
     /// Optional: execute with streaming output
-    async fn invoke_streaming(
-        &self,
-        input: Value,
-        ctx: &ToolContext,
-        sender: StreamSender,
-    ) -> Result<Value, ToolError> {
-        self.invoke(input, ctx).await
+    async fn invoke_streaming(&self, env: Envelope<Value>, sender: StreamSender) -> Result<Envelope<Value>, ToolError> {
+        self.invoke(env).await
     }
+
+    /// Optional: return a StateProjection for bisimulation testing
+    fn projection(&self) -> Option<&dyn StateProjection> { None }
 }
 ```
 
-See [engine.md](engine.md) for full definitions of `ToolInfo`, `ToolAnnotations`, `ToolContext`, and `ToolError`.
+See [engine.md](engine.md) for full definitions of `ToolInfo`, `ToolAnnotations`, `Envelope`, and `ToolError`.
 
 ---
 
@@ -87,8 +86,7 @@ crates/
     └── src/lib.rs                  # McpManager, McpToolWrapper, register()
 ```
 
-> **Note:** Memory backend implementations (konf-tool-memory-smrti, konf-tool-memory-surrealdb,
-> konf-tool-memory-sqlite) live in **external repos**, not in this monorepo.
+> **Note:** The default memory backend is `konf-tool-memory-surreal` (SurrealDB, embedded).
 > See [memory-backends.md](memory-backends.md) for details.
 
 ---
@@ -114,7 +112,7 @@ Backed by reqwest. Configurable max timeout (default 30s, capped at 300s). Retur
 
 **How it works:**
 1. At invocation, tools are resolved dynamically from the engine's live registry
-2. Only tools that pass the caller's `ToolContext.capabilities` (same lattice as the executor) are exposed to the LLM
+2. Only tools that pass the caller's Envelope capabilities (same lattice as the executor) are exposed to the LLM
 3. An optional `tools` whitelist in `with:` further restricts visibility (AND with capabilities)
 4. The LLM calls tools → kernel dispatches → feeds results back → repeats until text response or `max_iterations`
 5. `ai:complete` itself is excluded from inner tools to prevent unbounded recursion (unless explicitly whitelisted)
@@ -173,7 +171,7 @@ pub struct MyTool { /* state */ }
 #[async_trait]
 impl Tool for MyTool {
     fn info(&self) -> ToolInfo { /* ... */ }
-    async fn invoke(&self, input: Value, ctx: &ToolContext) -> Result<Value, ToolError> { /* ... */ }
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> { /* ... */ }
 }
 ```
 
@@ -241,7 +239,7 @@ The agent sees a flat list. It doesn't know which tools are Rust, which are MCP,
 
 ## Related Specs
 
-- [engine](engine.md) — Tool/Resource/Prompt traits, ToolInfo, ToolContext, ToolError
+- [engine](engine.md) — Tool/Resource/Prompt traits, ToolInfo, Envelope, ToolError
 - [overview](overview.md) — platform-wide architecture, crate map
 - [memory-backends](memory-backends.md) — MemoryBackend trait, backend implementations
 - [mcp](mcp.md) — MCP client (konf-tool-mcp) details

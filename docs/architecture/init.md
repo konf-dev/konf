@@ -97,7 +97,7 @@ konf-init is the **only crate that imports all tool crates**:
 ```toml
 # konf-init/Cargo.toml
 [dependencies]
-konflux = { path = "../konflux-core" }
+konflux = { path = "../konflux-substrate" }
 konf-runtime = { path = "../konf-runtime" }
 
 # Tool crates (all in this monorepo)
@@ -119,9 +119,7 @@ default = ["postgres"]
 postgres = ["sqlx"]
 ```
 
-> **Note:** Memory backend implementations (konf-tool-memory-smrti, konf-tool-memory-surrealdb,
-> konf-tool-memory-sqlite) are **external dependencies**, not part of this monorepo. They live in
-> their own repos (e.g., konf-dev/smrti) and are added as git or registry dependencies when needed.
+> **Note:** The default memory backend is `konf-tool-memory-surreal` (SurrealDB, embedded). Alternative backends are external dependencies added as git or registry dependencies when needed.
 
 ---
 

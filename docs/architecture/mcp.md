@@ -81,7 +81,7 @@ Each tool's `ToolInfo` is translated to MCP's tool definition format. The name t
 | MCP method | konf-mcp handler | Status |
 |-----------|-----------------|--------|
 | `tools/list` | Read ToolRegistry, map ToolInfo → MCP tool definitions | Implemented |
-| `tools/call` | Look up tool by name, build ToolContext, call `tool.invoke()` | Implemented |
+| `tools/call` | Look up tool by name, build Envelope, call `tool.invoke()` | Implemented |
 | `resources/list` | Read ResourceRegistry, map ResourceInfo → MCP resource definitions | Implemented |
 | `resources/read` | Look up resource by URI, call `resource.read()` | Implemented |
 | `prompts/list` | Read PromptRegistry, map PromptInfo → MCP prompt definitions | Planned (Phase E+) |
@@ -203,7 +203,7 @@ impl Tool for McpToolWrapper {
         }
     }
 
-    async fn invoke(&self, input: Value, _ctx: &ToolContext) -> Result<Value, ToolError> {
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
         // JSON-RPC tools/call to MCP server
         // Returns structured content
     }

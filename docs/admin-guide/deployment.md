@@ -7,10 +7,7 @@
 The repository includes a `docker-compose.yml` at the project root:
 
 ```bash
-# Set a secure password
-export POSTGRES_PASSWORD=change-me-in-production
-
-# Start Konf + Postgres with pgvector
+# Start Konf (uses embedded redb for persistence, no external DB required)
 docker compose up -d
 ```
 
@@ -31,7 +28,7 @@ cargo build --release --bin konf-backend
 
 # Run with a product config directory
 KONF_CONFIG_DIR=products/devkit/config \
-KONF__DATABASE__URL=postgresql://postgres:konf@localhost/konf \
+KONF__DATABASE__URL=redb:///var/lib/konf/konf.redb \
   ./target/release/konf-backend
 ```
 
@@ -40,7 +37,7 @@ KONF__DATABASE__URL=postgresql://postgres:konf@localhost/konf \
 ```ini
 [Unit]
 Description=Konf Agent OS Backend
-After=network-online.target postgresql.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -54,7 +51,7 @@ RestartSec=5
 
 # Configuration
 Environment=KONF_CONFIG_DIR=/opt/konf/config
-Environment=KONF__DATABASE__URL=postgresql://konf:secret@localhost/konf
+Environment=KONF__DATABASE__URL=redb:///var/lib/konf/konf.redb
 Environment=KONF__SERVER__HOST=127.0.0.1
 Environment=KONF__SERVER__PORT=8000
 

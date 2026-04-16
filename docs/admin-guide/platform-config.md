@@ -51,10 +51,6 @@ The `url` field is redacted in logs to prevent path/credential
 leakage. See [`architecture/storage.md`](../architecture/storage.md)
 for the full layout of the redb file.
 
-**Breaking change from v1**: konf v1 used Postgres for the journal
-(`postgresql://...` URLs and `pool_min` / `pool_max` settings).
-Those fields no longer exist in v2. Use redb.
-
 ### [server]
 
 ```toml
@@ -70,11 +66,12 @@ cors_origins = ["https://app.example.com"]  # default: [] (allow all, dev only)
 [auth]
 supabase_url = "https://your-project.supabase.co"  # default: "http://localhost:9999"
 jwt_audience = "authenticated"                       # default: "authenticated"
+jwks_cache_ttl_secs = 3600                           # default: 3600 — how long to cache JWKS keys
 ```
 
 ### [engine]
 
-Controls the workflow execution engine (konflux-core).
+Controls the workflow execution engine (konflux-substrate).
 
 ```toml
 [engine]
@@ -84,6 +81,8 @@ max_workflow_timeout_ms = 300000 # default: 300000 — total workflow timeout
 stream_buffer = 64              # default: 64 — SSE channel buffer
 finished_channel_size = 128     # default: 128
 default_retry_backoff_ms = 1000 # default: 1000
+default_retry_base_delay_ms = 100  # default: 100 — base delay for exponential backoff
+default_retry_max_delay_ms = 30000 # default: 30000 — max delay cap for retries
 max_yaml_size = 1048576         # default: 1MB — prevents DoS
 max_concurrent_nodes = 50       # default: 50 — parallel JoinSet cap
 ```
@@ -99,6 +98,17 @@ max_workflow_timeout_ms = 300000     # default: 300000 (5 min)
 max_concurrent_nodes = 50           # default: 50
 max_child_depth = 10                # default: 10 — nested workflow limit
 max_active_runs_per_namespace = 20  # default: 20
+event_bus_capacity = 1024           # default: 1024 — broadcast channel buffer for RunEventBus
+```
+
+### [journal]
+
+Controls the event journal (backed by redb). Only relevant when `[database]` is configured.
+
+```toml
+[journal]
+sweep_interval_secs = 300          # default: 300 — how often TTL sweep runs to prune expired entries
+subscribe_buffer = 256             # default: 256 — per-subscriber broadcast channel buffer
 ```
 
 ### [observability]
@@ -123,8 +133,8 @@ The binary validates all config at startup. Invalid config causes an immediate e
 
 ```toml
 [database]
-url = "postgresql://konf:secret@db.internal/konf"
-pool_max = 50
+url = "redb:///var/lib/konf/konf.redb"
+retention_days = 14
 
 [server]
 host = "127.0.0.1"
@@ -133,10 +143,18 @@ cors_origins = ["https://app.example.com"]
 
 [auth]
 supabase_url = "https://your-project.supabase.co"
+jwks_cache_ttl_secs = 3600
 
 [engine]
 max_steps = 200
+default_retry_base_delay_ms = 100
+default_retry_max_delay_ms = 30000
 
 [runtime]
 max_active_runs_per_namespace = 50
+event_bus_capacity = 1024
+
+[journal]
+sweep_interval_secs = 300
+subscribe_buffer = 256
 ```

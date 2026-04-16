@@ -16,7 +16,7 @@ registries, namespaces, and a capability lattice. Each role is a Rust crate.
 
 | Crate | Role | Entry point |
 |---|---|---|
-| `konflux-core` | Workflow execution engine. Three registries: tools, resources, prompts. Parses YAML workflows, executes them as DAGs, enforces capabilities at dispatch. Zero I/O. | `Engine` in `crates/konflux-core/src/engine.rs` |
+| `konflux-substrate` | Workflow execution engine. Three registries: tools, resources, prompts. Parses YAML workflows, executes them as DAGs, enforces capabilities at dispatch. Zero I/O. | `Engine` in `crates/konflux-substrate/src/engine.rs` |
 | `konf-runtime` | Process manager. Wraps the engine with `ExecutionScope` (namespace, capabilities, limits, actor), process table, `VirtualizedTool` for namespace injection, `GuardedTool` for deny/allow rules, attenuation-only capability lattice. | `Runtime` in `crates/konf-runtime/src/runtime.rs` |
 | `konf-init` | Bootstrap. Reads platform config (`konf.toml`) and product config (`tools.yaml`, `workflows/`, `prompts/`), interpolates env vars in YAML, registers built-in and configured tools, connects to Postgres if configured, creates the runtime, registers workflows as tools, applies tool guards. See `docs/architecture/init.md` for the full boot sequence. | `boot(config_dir)` in `crates/konf-init/src/lib.rs` |
 | `konf-backend` | HTTP transport. `POST /v1/chat` with SSE streaming. Optional scheduler backed by Postgres. | `crates/konf-backend/src/main.rs` |
@@ -34,12 +34,7 @@ Memory is pluggable via the `MemoryBackend` trait in `konf-tool-memory`
   Fusion hybrid search. Implementation at
   `crates/konf-tool-memory-surreal/src/lib.rs`; schema at
   `crates/konf-tool-memory-surreal/src/schema.rs`.
-- **`konf-tool-memory-smrti`** is opt-in behind the `memory-smrti` feature.
-  Backed by [smrti](https://github.com/konf-dev/smrti), a separate Rust crate
-  storing nodes, edges, and embeddings in Postgres + pgvector. Requires SSH
-  access to the private smrti repository at build time.
-
-Both backends are dumb storage layers: they do not call LLMs or generate
+The memory backend is a dumb storage layer: it does not call LLMs or generate
 embeddings. Products pass pre-computed embeddings when they need semantic
 search — for SurrealDB via the `metadata_filter.query_vector` escape hatch
 inside `SearchParams`.
@@ -82,10 +77,6 @@ retention_days = 7
 
 Memory backends are independent: the default `konf-tool-memory-surreal`
 uses an embedded SurrealDB (RocksDB) or a remote Surreal server. The
-older `konf-tool-memory-smrti` (Postgres + pgvector) is still available
-behind the `memory-smrti` feature for existing Postgres deployments,
-but it has no relationship to the runtime's redb storage.
-
 Edge deployments can omit the `[database]` section entirely: workflows
 still run, but nothing survives a restart. See
 [`architecture/storage.md`](architecture/storage.md) for the full
@@ -103,12 +94,12 @@ reference to code or a verified finding per the "Referencing code" rule below.
 | Term | What it is | Definition lives at |
 |---|---|---|
 | **Product** | A directory of YAML + markdown defining one konf agent. Rust type: `ProductConfig`. | `konf-init/src/config.rs` |
-| **Workflow** | A DAG of nodes in YAML. Runs to completion. Optionally registered as a callable tool via `register_as_tool: true`. | `konflux-core/src/parser/` |
+| **Workflow** | A DAG of nodes in YAML. Runs to completion. Optionally registered as a callable tool via `register_as_tool: true`. | `konflux-substrate/src/parser/` |
 | **Node** | One step inside a workflow. Has `id`, `do`, `with`, `then`, `return`. | Workflow YAML schema |
-| **Tool** | A dispatchable action. Implements the `Tool` trait. Tool names use **colons** at the kernel layer (`memory:search`, `ai:complete`, `http:get`). In workflow `do:` fields, write colons. MCP clients see underscore-translated names (`memory_search`). | `konflux-core/src/tool.rs` |
-| **Resource** | Read-only context exposed to workflows and MCP clients. URIs like `konf://config/tools.yaml`. | `konflux-core/src/resource.rs` |
-| **Prompt** | A parameterized template that expands into messages for an LLM call. Registered with the engine. | `konflux-core/src/prompt.rs` |
-| **Registry** | An in-memory map keyed by name. The engine has three: tools, resources, prompts. | `konflux-core/src/engine.rs` |
+| **Tool** | A dispatchable action. Implements the `Tool` trait. Tool names use **colons** at the kernel layer (`memory:search`, `ai:complete`, `http:get`). In workflow `do:` fields, write colons. MCP clients see underscore-translated names (`memory_search`). | `konflux-substrate/src/tool.rs` |
+| **Resource** | Read-only context exposed to workflows and MCP clients. URIs like `konf://config/tools.yaml`. | `konflux-substrate/src/resource.rs` |
+| **Prompt** | A parameterized template that expands into messages for an LLM call. Registered with the engine. | `konflux-substrate/src/prompt.rs` |
+| **Registry** | An in-memory map keyed by name. The engine has three: tools, resources, prompts. | `konflux-substrate/src/engine.rs` |
 | **ExecutionScope** (or just "scope") | What a workflow runs under: namespace, capabilities, resource limits, actor identity. Attenuates at workflow→child boundaries; never amplifies. | `konf-runtime/src/scope.rs` |
 | **Namespace** | A hierarchical string identifying a tenant scope. E.g. `konf:myproduct:user_123`. Injected into memory operations by `VirtualizedTool`. | `konf-runtime/src/scope.rs` |
 | **Capability** | A tool-name pattern a scope is allowed to call. E.g. `memory:*`, `ai:complete`, `*`. Checked at dispatch. | `konf-runtime/src/scope.rs` |
