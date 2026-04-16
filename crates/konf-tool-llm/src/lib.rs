@@ -669,12 +669,8 @@ mod tests {
 
     fn mock_env(capabilities: Vec<&str>) -> Envelope<Value> {
         let mut env = Envelope::test(json!({}));
-        env.capabilities = CapSet(
-            capabilities
-                .into_iter()
-                .map(|c| Capability(c.to_string()))
-                .collect(),
-        );
+        env.capabilities =
+            CapSet::from_capabilities(capabilities.into_iter().map(Capability::new).collect());
         env
     }
 

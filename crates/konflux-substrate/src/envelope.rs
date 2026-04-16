@@ -58,17 +58,127 @@ pub struct StreamId(pub String);
 
 // ── Authority ───────────────────────────────────────────────────────
 
-/// A single capability grant. String-backed in V2; typed handle in Stage 6.
+/// A single capability grant. Sealed constructor — construct only via
+/// `Capability::new()`. Pattern matching is via `Capability::matches()`.
+///
+/// The inner string is private: Rust code cannot forge arbitrary
+/// capabilities without going through the constructor API.
+/// Serde deserialization is trusted (substrate-controlled wire format).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Capability(pub String);
+pub struct Capability(String);
+
+impl Capability {
+    /// Create a capability from a pattern string.
+    ///
+    /// Patterns: `"memory:search"` (exact), `"memory:*"` (prefix), `"*"` (all).
+    pub fn new(pattern: impl Into<String>) -> Self {
+        Self(pattern.into())
+    }
+
+    /// Get the pattern string.
+    pub fn pattern(&self) -> &str {
+        &self.0
+    }
+
+    /// Check if this capability matches a tool name.
+    pub fn matches(&self, tool_name: &str) -> bool {
+        if self.0 == "*" {
+            return true;
+        }
+        if let Some(prefix) = self.0.strip_suffix(":*") {
+            return tool_name.starts_with(prefix)
+                && tool_name.get(prefix.len()..prefix.len() + 1) == Some(":");
+        }
+        self.0 == tool_name
+    }
+}
 
 /// Set of capabilities carried by an envelope.
 ///
-/// `Vec<Capability>` in V2 (amendment 4); typed-handle table in Stage 6.
+/// Sealed construction: build via `CapSet::from_patterns()` or
+/// `CapSet::from_capabilities()`. Attenuate via `CapSet::attenuate()`.
 ///
 /// Invariant: `child.capabilities ⊆ parent.capabilities`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CapSet(pub Vec<Capability>);
+pub struct CapSet(Vec<Capability>);
+
+impl CapSet {
+    /// Create a CapSet from string patterns.
+    pub fn from_patterns(patterns: &[impl AsRef<str>]) -> Self {
+        Self(
+            patterns
+                .iter()
+                .map(|p| Capability::new(p.as_ref()))
+                .collect(),
+        )
+    }
+
+    /// Create a CapSet from pre-built capabilities.
+    pub fn from_capabilities(caps: Vec<Capability>) -> Self {
+        Self(caps)
+    }
+
+    /// Check if this set grants access to a specific tool.
+    pub fn check_access(&self, tool_name: &str) -> Result<(), crate::error::ToolError> {
+        if self.0.is_empty() {
+            return Err(crate::error::ToolError::CapabilityDenied {
+                capability: "ALL (empty capability set)".to_string(),
+            });
+        }
+        if self.0.iter().any(|c| c.matches(tool_name)) {
+            Ok(())
+        } else {
+            Err(crate::error::ToolError::CapabilityDenied {
+                capability: tool_name.to_string(),
+            })
+        }
+    }
+
+    /// Create a child CapSet that is a subset of this one.
+    /// Every child pattern must be covered by a parent pattern.
+    pub fn attenuate(&self, child_patterns: &[impl AsRef<str>]) -> Result<CapSet, String> {
+        if child_patterns.is_empty() {
+            return Ok(CapSet::default());
+        }
+        if self.0.is_empty() {
+            return Err("parent has no capabilities to grant from".to_string());
+        }
+        for pat in child_patterns {
+            let pat = pat.as_ref();
+            if !self.0.iter().any(|parent| parent.matches(pat)) {
+                return Err(format!(
+                    "capability '{pat}' cannot be granted — parent does not have it"
+                ));
+            }
+        }
+        Ok(CapSet::from_patterns(child_patterns))
+    }
+
+    /// Get the patterns as strings.
+    pub fn patterns(&self) -> Vec<&str> {
+        self.0.iter().map(|c| c.pattern()).collect()
+    }
+
+    /// Get the patterns as owned strings (for legacy bridging).
+    pub fn to_patterns(&self) -> Vec<String> {
+        self.0.iter().map(|c| c.pattern().to_string()).collect()
+    }
+
+    /// Check if this set is empty (denies all access).
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Number of capabilities.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Iterate over capabilities.
+    pub fn iter(&self) -> std::slice::Iter<'_, Capability> {
+        self.0.iter()
+    }
+}
 
 // ── Execution control ───────────────────────────────────────────────
 
@@ -204,7 +314,7 @@ impl Envelope<serde_json::Value> {
             parent_id: None,
             actor_id: ActorId(actor_id.to_string()),
             namespace: Namespace(namespace.to_string()),
-            capabilities: CapSet(capabilities.iter().map(|c| Capability(c.clone())).collect()),
+            capabilities: CapSet::from_patterns(capabilities),
             target: TargetId(target.to_string()),
             payload_type: PayloadType("tool_input".to_string()),
             payload,
@@ -226,7 +336,7 @@ impl Envelope<serde_json::Value> {
             parent_id: None,
             actor_id: ActorId("test".to_string()),
             namespace: Namespace("test".to_string()),
-            capabilities: CapSet(vec![Capability("*".to_string())]),
+            capabilities: CapSet::from_patterns(&["*"]),
             target: TargetId("test".to_string()),
             payload_type: PayloadType("test".to_string()),
             payload,
@@ -238,14 +348,6 @@ impl Envelope<serde_json::Value> {
             references: None,
             metadata: Metadata::default(),
         }
-    }
-}
-
-impl CapSet {
-    /// Get the capability patterns as a `Vec<String>` for bridging
-    /// with legacy code that expects `Vec<String>`.
-    pub fn to_patterns(&self) -> Vec<String> {
-        self.0.iter().map(|c| c.0.clone()).collect()
     }
 }
 

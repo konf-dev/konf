@@ -27,11 +27,11 @@ fn arb_trace_id() -> impl Strategy<Value = TraceId> {
 }
 
 fn arb_capability() -> impl Strategy<Value = Capability> {
-    "[a-z:*]{1,30}".prop_map(Capability)
+    "[a-z:*]{1,30}".prop_map(Capability::new)
 }
 
 fn arb_cap_set() -> impl Strategy<Value = CapSet> {
-    proptest::collection::vec(arb_capability(), 0..5).prop_map(CapSet)
+    proptest::collection::vec(arb_capability(), 0..5).prop_map(CapSet::from_capabilities)
 }
 
 fn arb_metadata() -> impl Strategy<Value = Metadata> {
@@ -95,13 +95,60 @@ fn arb_envelope() -> impl Strategy<Value = Envelope<Value>> {
 // Proptest: postcard round-trip
 // ============================================================
 
-proptest! {
-    #[test]
-    fn envelope_postcard_round_trip(env in arb_envelope()) {
-        let bytes = postcard::to_allocvec(&env).expect("serialize");
-        let decoded: Envelope<Value> = postcard::from_bytes(&bytes).expect("deserialize");
+/// Strategy for Envelope<String> — postcard-compatible payload.
+fn arb_envelope_string() -> impl Strategy<Value = Envelope<String>> {
+    let identity = (
+        arb_envelope_id(),
+        arb_trace_id(),
+        proptest::option::of(arb_envelope_id()),
+        "[a-z_]{1,20}", // actor_id
+        "[a-z:]{1,30}", // namespace
+        arb_cap_set(),
+    );
+    let dispatch = (
+        "[a-z:]{1,20}",       // target
+        "[a-z_]{1,15}",       // payload_type
+        "[a-zA-Z0-9 ]{0,50}", // payload (String)
+        any::<u64>(),         // step_index
+        "[a-z_]{1,10}",       // stream_id
+    );
+    (identity, dispatch).prop_map(
+        |(
+            (id, trace_id, parent_id, actor_id, namespace, capabilities),
+            (target, payload_type, payload, step_index, stream_id),
+        )| {
+            Envelope {
+                id,
+                trace_id,
+                parent_id,
+                actor_id: ActorId(actor_id),
+                namespace: Namespace(namespace),
+                capabilities,
+                target: TargetId(target),
+                payload_type: PayloadType(payload_type),
+                payload,
+                emitted_at: Utc::now(),
+                step_index,
+                stream_id: StreamId(stream_id),
+                deadline: None,
+                idempotency_key: None,
+                references: None,
+                metadata: Metadata::default(),
+            }
+        },
+    )
+}
 
-        // Identity fields must survive round-trip exactly.
+proptest! {
+    /// Postcard round-trip for envelope structure. Uses `Envelope<String>`
+    /// because `serde_json::Value` is self-describing and not supported by
+    /// postcard. The redb journal handles this by JSON-stringifying the
+    /// payload before postcard encoding — same pattern.
+    #[test]
+    fn envelope_postcard_round_trip(env in arb_envelope_string()) {
+        let bytes = postcard::to_allocvec(&env).expect("serialize");
+        let decoded: Envelope<String> = postcard::from_bytes(&bytes).expect("deserialize");
+
         prop_assert_eq!(decoded.id, env.id);
         prop_assert_eq!(decoded.trace_id, env.trace_id);
         prop_assert_eq!(decoded.parent_id, env.parent_id);
@@ -112,11 +159,10 @@ proptest! {
         prop_assert_eq!(decoded.payload_type, env.payload_type);
         prop_assert_eq!(decoded.step_index, env.step_index);
         prop_assert_eq!(decoded.stream_id, env.stream_id);
-        prop_assert_eq!(decoded.metadata, env.metadata);
-        // Payload round-trips via serde_json::Value equality.
         prop_assert_eq!(decoded.payload, env.payload);
     }
 
+    /// JSON round-trip for Envelope<Value> — the full wire format.
     #[test]
     fn envelope_json_round_trip(env in arb_envelope()) {
         let json = serde_json::to_vec(&env).expect("serialize");
@@ -218,7 +264,101 @@ fn for_tool_dispatch_maps_fields_correctly() {
     assert_eq!(env.namespace, Namespace("konf:test:user1".to_string()));
     assert_eq!(env.actor_id, ActorId("user_42".to_string()));
     assert_eq!(env.stream_id, StreamId("session_abc".to_string()));
-    assert_eq!(env.capabilities.0.len(), 2);
-    assert_eq!(env.capabilities.0[0], Capability("memory:*".to_string()));
+    assert_eq!(env.capabilities.len(), 2);
+    assert_eq!(
+        env.capabilities.iter().next().unwrap(),
+        &Capability::new("memory:*")
+    );
     assert_eq!(env.payload, json!({"query": "test"}));
+}
+
+// ============================================================
+// Stage 6: Capability attenuation
+// ============================================================
+
+#[test]
+fn capability_matches_exact() {
+    let cap = Capability::new("memory:search");
+    assert!(cap.matches("memory:search"));
+    assert!(!cap.matches("memory:store"));
+    assert!(!cap.matches("memory:search:nested"));
+}
+
+#[test]
+fn capability_matches_prefix() {
+    let cap = Capability::new("memory:*");
+    assert!(cap.matches("memory:search"));
+    assert!(cap.matches("memory:store"));
+    assert!(!cap.matches("memorysearch")); // no colon separator
+}
+
+#[test]
+fn capability_matches_wildcard() {
+    let cap = Capability::new("*");
+    assert!(cap.matches("anything"));
+    assert!(cap.matches("memory:search"));
+}
+
+#[test]
+fn capset_check_access_empty_denies() {
+    let caps = CapSet::default();
+    assert!(caps.check_access("echo").is_err());
+}
+
+#[test]
+fn capset_check_access_grants() {
+    let caps = CapSet::from_patterns(&["memory:*", "ai:complete"]);
+    assert!(caps.check_access("memory:search").is_ok());
+    assert!(caps.check_access("ai:complete").is_ok());
+    assert!(caps.check_access("http:get").is_err());
+}
+
+#[test]
+fn capset_attenuate_subset_ok() {
+    let parent = CapSet::from_patterns(&["memory:*", "ai:complete"]);
+    let child = parent.attenuate(&["memory:search"]).unwrap();
+    assert_eq!(child.len(), 1);
+    assert!(child.check_access("memory:search").is_ok());
+    assert!(child.check_access("memory:store").is_err());
+}
+
+#[test]
+fn capset_attenuate_rejects_amplification() {
+    let parent = CapSet::from_patterns(&["memory:search"]);
+    assert!(parent.attenuate(&["memory:*"]).is_err());
+    assert!(parent.attenuate(&["*"]).is_err());
+    assert!(parent.attenuate(&["http:get"]).is_err());
+}
+
+#[test]
+fn capset_attenuate_empty_child_ok() {
+    let parent = CapSet::from_patterns(&["*"]);
+    let child = parent.attenuate(&Vec::<String>::new()).unwrap();
+    assert!(child.is_empty());
+}
+
+proptest! {
+    /// Property: attenuated CapSet never grants access beyond the parent.
+    #[test]
+    fn attenuation_is_narrowing_only(
+        parent_pats in proptest::collection::vec("[a-z]{1,5}:[a-z]{1,5}", 1..5),
+        child_idx in proptest::collection::vec(any::<proptest::sample::Index>(), 0..3),
+    ) {
+        let parent = CapSet::from_patterns(&parent_pats);
+
+        // Pick a subset of parent patterns for the child.
+        let child_pats: Vec<&str> = child_idx.iter()
+            .map(|idx| parent_pats[idx.index(parent_pats.len())].as_str())
+            .collect();
+
+        let child = parent.attenuate(&child_pats).expect("subset should succeed");
+
+        // For every tool the child grants, the parent must also grant it.
+        for pat in child.patterns() {
+            prop_assert!(
+                parent.check_access(pat).is_ok(),
+                "child grants '{pat}' but parent does not"
+            );
+        }
+    }
 }

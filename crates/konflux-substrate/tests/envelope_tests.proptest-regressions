@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b49dd591a77c7e92c1047644afc6a0ac9c6fe961a469a1ed36959b71b44063a0 # shrinks to env = Envelope { id: EnvelopeId(00000000-0000-0000-0000-000000000000), trace_id: TraceId(00000000-0000-0000-0000-000000000000), parent_id: None, actor_id: ActorId("_"), namespace: Namespace(":"), capabilities: CapSet([]), target: TargetId("a"), payload_type: PayloadType("_"), payload: Null, emitted_at: 2026-04-16T11:20:08.251707043Z, step_index: 0, stream_id: StreamId("_"), deadline: None, idempotency_key: None, references: None, metadata: Metadata({}) }

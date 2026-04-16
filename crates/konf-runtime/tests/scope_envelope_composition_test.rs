@@ -52,9 +52,9 @@ fn scope_to_envelope_preserves_capabilities() {
 
     assert_eq!(
         env.capabilities,
-        CapSet(vec![
-            Capability("memory:*".to_string()),
-            Capability("ai:complete".to_string()),
+        CapSet::from_capabilities(vec![
+            Capability::new("memory:*"),
+            Capability::new("ai:complete"),
         ])
     );
 }
@@ -95,7 +95,7 @@ fn scope_to_envelope_child_attenuates_capabilities() {
     // Child envelope should have attenuated capabilities
     assert_eq!(
         env.capabilities,
-        CapSet(vec![Capability("memory:search".to_string())])
+        CapSet::from_capabilities(vec![Capability::new("memory:search")])
     );
     assert_eq!(
         env.namespace,

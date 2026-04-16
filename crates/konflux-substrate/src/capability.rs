@@ -1,68 +1,26 @@
 //! Capability lattice — capabilities only attenuate, never amplify.
+//!
+//! The typed `Capability` and `CapSet` types in `crate::envelope` own
+//! the matching and attenuation logic. These free functions are thin
+//! legacy wrappers for callers that still pass `&[String]`.
 
+use crate::envelope::CapSet;
 use crate::error::ToolError;
 
-/// Check if a tool invocation is allowed given the current capabilities.
+/// Check if a tool invocation is allowed given string capability patterns.
+///
+/// Prefer `CapSet::check_access()` when you already have a `CapSet`.
 pub fn check_tool_access(tool_name: &str, capabilities: &[String]) -> Result<(), ToolError> {
-    if capabilities.is_empty() {
-        // SECURITY: Empty capabilities must deny all tools.
-        // Use ["*"] for unrestricted access.
-        return Err(ToolError::CapabilityDenied {
-            capability: "ALL (empty capability list)".to_string(),
-        });
-    }
-
-    if capabilities
-        .iter()
-        .any(|c| matches_capability(c, tool_name))
-    {
-        Ok(())
-    } else {
-        Err(ToolError::CapabilityDenied {
-            capability: tool_name.to_string(),
-        })
-    }
+    CapSet::from_patterns(capabilities).check_access(tool_name)
 }
 
 /// Check if a grant list is a subset of the parent's capabilities.
+///
+/// Prefer `CapSet::attenuate()` when you already have a `CapSet`.
 pub fn validate_grant(grant: &[String], parent_capabilities: &[String]) -> Result<(), String> {
-    // If the child workflow/node requests no capabilities, it's always valid (full attenuation)
-    if grant.is_empty() {
-        return Ok(());
-    }
-
-    if parent_capabilities.is_empty() {
-        return Err("Parent has no capabilities to grant from".to_string());
-    }
-
-    for cap in grant {
-        if !parent_capabilities
-            .iter()
-            .any(|p| matches_capability(p, cap))
-        {
-            return Err(format!(
-                "capability '{cap}' cannot be granted — parent does not have it"
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Match a capability pattern against a tool name.
-/// Supports glob-style wildcards:
-///   "memory:*" matches "memory:search", "memory:store"
-///   "ai:*" matches "ai:complete", "ai:stream"
-///   "*" matches everything
-///   "memory:search" matches only "memory:search" (exact)
-fn matches_capability(pattern: &str, tool_name: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if let Some(prefix) = pattern.strip_suffix(":*") {
-        return tool_name.starts_with(prefix)
-            && tool_name.get(prefix.len()..prefix.len() + 1) == Some(":");
-    }
-    pattern == tool_name
+    CapSet::from_patterns(parent_capabilities)
+        .attenuate(grant)
+        .map(|_| ())
 }
 
 #[cfg(test)]
@@ -70,36 +28,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_check_tool_access() {
-        // Deny all if empty
+    fn check_tool_access_deny_empty() {
         assert!(check_tool_access("echo", &[]).is_err());
+    }
 
-        // Exact match
+    #[test]
+    fn check_tool_access_exact_match() {
         assert!(check_tool_access("echo", &["echo".to_string()]).is_ok());
+    }
 
-        // Wildcard match
+    #[test]
+    fn check_tool_access_wildcard() {
         assert!(check_tool_access("echo", &["*".to_string()]).is_ok());
+    }
 
-        // Prefix match
+    #[test]
+    fn check_tool_access_prefix_match() {
         assert!(check_tool_access("memory:search", &["memory:*".to_string()]).is_ok());
         assert!(check_tool_access("memorysearch", &["memory:*".to_string()]).is_err());
+    }
 
-        // Denial
+    #[test]
+    fn check_tool_access_denial() {
         assert!(check_tool_access("fail", &["echo".to_string()]).is_err());
     }
 
     #[test]
-    fn test_validate_grant() {
-        // Child requests none - always ok
+    fn validate_grant_empty_child() {
         assert!(validate_grant(&[], &["*".to_string()]).is_ok());
+    }
 
-        // Parent has none - deny child request
+    #[test]
+    fn validate_grant_empty_parent() {
         assert!(validate_grant(&["echo".to_string()], &[]).is_err());
+    }
 
-        // Subset
+    #[test]
+    fn validate_grant_subset() {
         assert!(validate_grant(&["mem:s".into()], &["mem:*".into()]).is_ok());
+    }
 
-        // Not subset
+    #[test]
+    fn validate_grant_not_subset() {
         assert!(validate_grant(&["other".into()], &["mem:*".into()]).is_err());
     }
 }
