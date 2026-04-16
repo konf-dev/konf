@@ -1,0 +1,129 @@
+# Slice 3: draft a workflow YAML from a plain-English description.
+#
+# Reads the target product's authoring prompt + existing workflows as style
+# context, then asks the LLM to emit a complete workflow YAML file.
+#
+# NO writes in this slice. The draft is returned as text for inspection.
+# Slice 4 adds validation + repair; Slice 5 adds write + hot-reload.
+
+workflow: draft_workflow
+description: "Draft a workflow YAML for a target product from a plain-English description. Returns YAML text, no writes."
+version: "0.1.0"
+register_as_tool: true
+
+capabilities:
+  - "ai:complete"
+  - "shell:exec"
+  - "template"
+  - "echo"
+
+input_schema:
+  type: object
+  properties:
+    target_product_dir:
+      type: string
+      description: "Absolute path to the target product's root directory (e.g. /home/bert/Work/orgs/konf-dev-stack/konf/products/repo-manager)."
+    description:
+      type: string
+      description: "Plain-English description of what the workflow should do."
+    slug:
+      type: string
+      description: "Short snake_case identifier — becomes the filename 'auto_<slug>.yaml' and the workflow: 'auto_<slug>' header."
+  required: [target_product_dir, description, slug]
+
+nodes:
+  # Gather style context: target's authoring prompt + every existing workflow.
+  # One shell node so the draft prompt stays small and predictable.
+  gather_context:
+    do: shell:exec
+    with:
+      command: |
+        dir="{{input.target_product_dir}}"
+        if [ ! -d "$dir" ]; then
+          printf 'ERROR: target dir not found: %s\n' "$dir"
+          exit 1
+        fi
+        printf '## Target product authoring prompt (style anchor)\n\n'
+        if [ -f "$dir/prompts/system.md" ]; then
+          cat "$dir/prompts/system.md"
+        else
+          printf '(no prompts/system.md)\n'
+        fi
+        printf '\n## Existing workflows in this target (style samples)\n'
+        wfdir="$dir/config/workflows"
+        if [ -d "$wfdir" ]; then
+          found=0
+          for f in "$wfdir"/*.yaml; do
+            [ -f "$f" ] || continue
+            found=1
+            printf '\n### %s\n\n```yaml\n' "$(basename "$f")"
+            cat "$f"
+            printf '\n```\n'
+          done
+          [ "$found" -eq 0 ] && printf '(no existing workflows)\n'
+        else
+          printf '(no config/workflows dir)\n'
+        fi
+    timeout: "10s"
+    then: draft
+
+  # Ask the LLM to draft the YAML. Ollama default, configurable per call.
+  draft:
+    do: ai:complete
+    with:
+      system: |
+        You draft konf workflow YAML. Output EXACTLY one complete YAML document —
+        the file body — and nothing else. No markdown fences. No prose.
+
+        Mandatory rules:
+        - First line must be `workflow: auto_<slug>` using the slug provided.
+        - `capabilities:` must be an explicit list. Never use "*".
+        - Never grant `config:reload` or `yaml:validate_workflow` to drafted
+          workflows. Those are meta-tools reserved for hand-authored ones.
+        - Every node has `id`, `do`, and `with`. Optional: `then`, `catch`,
+          `join`, `return`, `when`, `timeout`.
+        - Mark exactly one terminal node with `return: true`.
+        - `register_as_tool: true` at top level if the caller will invoke it
+          as an MCP tool; omit otherwise.
+
+        Substrate primitives (use these for `do:`):
+          echo, template, shell:exec, ai:complete,
+          memory:search, memory:store,
+          state:set, state:get, state:delete, state:list, state:clear,
+          http:get, http:post,
+          runner:spawn, runner:status, runner:wait, runner:cancel.
+
+        Template rules (the `template` primitive):
+        - Both `template:` and `vars:` are required in `with:`. Empty
+          `vars: {}` is fine but the key must be present.
+        - Interpolation uses double curly braces around NODE_ID.FIELD
+          (e.g. the stdout of a shell node called `probe` is referenced as
+          double-open-brace probe.stdout double-close-brace). Do not emit
+          the literal descriptive text in your output — emit actual
+          mustache syntax.
+
+        ai:complete returns `.text`, not `.content`.
+
+        `when:` is a bare expression, NOT wrapped in mustache braces.
+
+        Prefer small, flat DAGs. Use `then:` for sequencing and `join:` only
+        when fanning multiple nodes into one sink.
+
+        Output the YAML file body only. Begin immediately with the
+        `workflow:` line.
+      prompt: |
+        Draft a konf workflow that does the following:
+
+        {{input.description}}
+
+        ## File identity
+        - target_product_dir: {{input.target_product_dir}}
+        - filename: {{input.target_product_dir}}/config/workflows/auto_{{input.slug}}.yaml
+        - required header: `workflow: auto_{{input.slug}}`
+
+        ## Style context from the target product
+
+        {{gather_context.stdout}}
+      max_tokens: 3072
+      temperature: 0.2
+    return: true
