@@ -1,0 +1,9 @@
+# direnv + plain-env secrets — never commit.
+.envrc
+.env
+.env.local
+
+# konf runtime state (surreal/rocksdb memory store).
+# Path comes from tools.yaml `memory.config.path`.
+memory.db/
+memory.db.*

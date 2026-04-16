@@ -1,0 +1,38 @@
+# konf-hammer — authoring product.
+#
+# Drafts workflow YAML (and later, whole products) for OTHER konf products.
+# Provider-agnostic by design: the same workflows run on Ollama (default,
+# keyless, local) or Gemini (swap tools.yaml). See README for swap pattern.
+#
+# Analogue: Valve's Hammer Editor authors maps for the Source engine.
+# konf-hammer authors workflows for konf products.
+#
+# See konf/docs/MENTAL_MODEL.md for substrate doctrine.
+
+name: konf-hammer
+description: "Authors workflows for other konf products. Provider-agnostic; defaults to local Ollama."
+version: "0.1.0"
+
+# No external identity required for v0 — konf-hammer reads/writes the local
+# filesystem. When it grows to commit on a product's behalf, the target
+# product's identity seam (PAT or konf-agents App) applies; konf-hammer
+# itself just shells out to git with whatever credentials are in scope.
+identity: "local:filesystem"
+
+roles:
+  # Bert, via MCP stdio session. Full capabilities.
+  owner:
+    capabilities: ["*"]
+
+  # Non-interactive role for workflows. Narrow by intent.
+  agent:
+    capabilities:
+      - "ai:complete"
+      - "shell:exec"
+      - "template"
+      - "echo"
+      - "log"
+      - "memory:*"
+      - "yaml:validate_workflow"
+      - "workflow:*"
+    namespace_suffix: "konf-hammer"

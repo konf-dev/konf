@@ -1,0 +1,72 @@
+# Tool configuration for konf-hammer.
+#
+# Default provider: Ollama (local, keyless, unrationed). To escalate to
+# Gemini for a specific run, copy tools.gemini.yaml over tools.yaml and
+# restart the MCP subprocess. Same workflows, different backend.
+#
+# Models available on host (ollama list):
+#   qwen3-coder:30b   ~18 GB — code-tuned, fits 3090 Ti alone. Default.
+#   devstral:24b      ~14 GB — alternative code model.
+#   deepseek-r1:32b   ~19 GB — reasoning-tuned.
+#   qwen3:8b / deepseek-r1:7b — fast small models for linting/classification.
+#
+# Per-node overrides in workflows can switch model/provider on a single call.
+
+tools:
+  llm:
+    provider: ollama
+    model: "${KONF_MODEL:-qwen3-coder:30b}"
+    temperature: 0.2
+    max_tokens: 4096
+
+  # Embedded SurrealDB for drafting memory (past authoring runs, patterns).
+  memory:
+    backend: surreal
+    config:
+      mode: embedded
+      # Absolute path so konf-mcp's state lives with its config regardless
+      # of the parent process's cwd (Claude Code MCP spawn ignores `cwd`).
+      path: /home/bert/Work/orgs/konf-dev-stack/konf/products/konf-hammer/memory.db
+      namespace: konf
+      database: konf-hammer
+      vector_dimension: 768
+
+  # Host shell — konf-hammer reads target product directories, writes
+  # drafted YAML, and invokes git on the target repo. Tool guards below.
+  shell:
+    container: "host"
+    timeout_ms: 60000
+
+# Tool guards — konf-hammer authors config for other products and must not
+# go off-script into identity, security, or destructive operations.
+tool_guards:
+  shell:exec:
+    rules:
+      - action: deny
+        predicate:
+          type: contains
+          path: command
+          value: "sudo"
+        message: "sudo blocked in konf-hammer"
+
+      - action: deny
+        predicate:
+          type: matches
+          path: command
+          pattern: "rm -rf /"
+        message: "destructive rm on root blocked"
+
+      - action: deny
+        predicate:
+          type: contains
+          path: command
+          value: "git config"
+        message: "git config changes are owner-only"
+
+      - action: deny
+        predicate:
+          type: matches
+          path: command
+          pattern: "git push .* (main|master)\\b"
+        message: "pushes to main/master are owner-only"
+    default: allow

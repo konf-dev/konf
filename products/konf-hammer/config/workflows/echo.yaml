@@ -1,0 +1,30 @@
+# Trivial round-trip smoke workflow.
+#
+# Calls the configured LLM with a short prompt and returns the response.
+# Purpose: prove konf-hammer's MCP entry + tools.yaml wiring are live
+# before building real authoring workflows (Slice 3+).
+
+workflow: echo
+description: "Round-trip check: send a prompt to the configured LLM, return its text."
+version: "0.1.0"
+register_as_tool: true
+
+capabilities:
+  - "ai:complete"
+
+input_schema:
+  type: object
+  properties:
+    message:
+      type: string
+      description: "Prompt to send to the LLM. Defaults to a short self-identify."
+  required: []
+
+nodes:
+  say:
+    do: ai:complete
+    with:
+      prompt: "{{input.message | default('Say exactly: konf-hammer is live. Nothing else.')}}"
+      max_tokens: 64
+      temperature: 0
+    return: true

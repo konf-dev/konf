@@ -1,0 +1,22 @@
+# konf-hammer direnv config — copy to .envrc and fill in values.
+# `.envrc` is gitignored. Run `direnv allow` after editing.
+#
+# Default stack works WITHOUT any API keys — Ollama on localhost:11434 is
+# keyless. Gemini is only needed if you swap tools.yaml to the Gemini variant.
+
+# --- LLM providers (optional for default Ollama flow) ------------------------
+# Only needed if you swap in tools.gemini.yaml:
+# export GEMINI_API_KEY=your_gemini_key_here
+
+# Optional: point Ollama at a non-localhost instance.
+# export OLLAMA_API_BASE_URL=http://your-ollama-host:11434
+
+# --- konf --------------------------------------------------------------------
+# Default model for ai:complete. Per-node overrides in workflows take priority.
+export KONF_MODEL=qwen3-coder:30b
+
+# Where konf-mcp should look for this product's config.
+export KONF_CONFIG_DIR="$(pwd)/config"
+
+# Rust logging — info for most, debug for konf-namespaced crates.
+export RUST_LOG=info,konf=debug
