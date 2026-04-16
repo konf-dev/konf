@@ -1,0 +1,29 @@
+# repo-manager direnv config — copy to .envrc and fill in real values.
+# `.envrc` is gitignored. Run `direnv allow` after editing.
+#
+# When Claude Code spawns `konf-mcp` via MCP, it inherits env from its own
+# process tree, which means either:
+#   (a) you launched Claude Code from a shell where direnv had loaded these, or
+#   (b) you set `env:` explicitly in ~/.claude.json's mcpServers entry for
+#       repo-manager.
+# Simplest: (a). Just `cd` here, `direnv allow`, then launch Claude Code.
+
+# --- GitHub ------------------------------------------------------------------
+# PAT with `repo` + `read:org` (classic) OR fine-grained scoped to konf-dev/konf
+# with Contents/Issues/Pull requests = read-only.
+export GITHUB_PERSONAL_ACCESS_TOKEN=your_pat_here
+
+# --- LLM providers -----------------------------------------------------------
+export GEMINI_API_KEY=your_gemini_key_here
+export ANTHROPIC_API_KEY=your_anthropic_key_here
+
+# --- konf --------------------------------------------------------------------
+# Default model for ai:complete. Workflows can override per-node.
+export KONF_MODEL=gemini-2.5-pro
+
+# Where konf-mcp should look for this product's config. The $(pwd) trick only
+# works because direnv evaluates .envrc from the repo-manager product dir.
+export KONF_CONFIG_DIR="$(pwd)/config"
+
+# Rust logging — info for most crates, debug for konf-namespaced ones.
+export RUST_LOG=info,konf=debug

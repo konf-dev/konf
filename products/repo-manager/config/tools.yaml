@@ -16,7 +16,10 @@ tools:
     backend: surreal
     config:
       mode: embedded
-      path: ./memory.db
+      # Absolute path so konf-mcp's state lives with its config regardless
+      # of the parent process's cwd (Claude Code's MCP spawn ignores the
+      # `cwd` key in ~/.claude.json).
+      path: /home/bert/Work/orgs/konf-dev-stack/konf/products/repo-manager/memory.db
       namespace: konf
       database: repo-manager
       vector_dimension: 768

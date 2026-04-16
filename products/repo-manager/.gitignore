@@ -1,0 +1,10 @@
+# direnv + plain-env secrets — never commit.
+.envrc
+.env
+.env.local
+
+# konf runtime state (rocksdb KV store backing memory + journal).
+# Path comes from tools.yaml `memory.config.path: ./memory.db`, resolved
+# against the MCP server's cwd (set in ~/.claude.json).
+memory.db/
+memory.db.*
