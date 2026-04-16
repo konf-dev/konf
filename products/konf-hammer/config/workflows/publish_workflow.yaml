@@ -1,0 +1,158 @@
+# Slice 5: publish a validated workflow YAML to a target product.
+#
+# Takes output of draft_workflow (after you've reviewed it) and:
+#   1. Re-validates (trust nothing; inputs may have been edited manually)
+#   2. Checks target path is free (no overwrite in v0)
+#   3. Writes the file
+#   4. Git-commits on the target repo (one commit per publish = one revert to rollback)
+#
+# Does NOT hot-reload the target's MCP server. That lives in a separate
+# process; the caller triggers `config:reload` on the target MCP when ready.
+# (See README.)
+
+workflow: publish_workflow
+description: "Write a drafted workflow YAML to a target product, git-commit. Caller triggers target-side config:reload separately."
+version: "0.1.0"
+register_as_tool: true
+
+capabilities:
+  - "yaml:validate_workflow"
+  - "shell:exec"
+
+input_schema:
+  type: object
+  properties:
+    target_product_dir:
+      type: string
+      description: "Absolute path to the target product's root directory."
+    slug:
+      type: string
+      description: "snake_case identifier. Becomes the filename auto_<slug>.yaml and workflow: auto_<slug>."
+    yaml_text:
+      type: string
+      description: "The complete workflow YAML body. First line must be `workflow: auto_<slug>`."
+  required: [target_product_dir, slug, yaml_text]
+
+nodes:
+  # Re-validate. Do not trust the caller — inputs may have been edited.
+  revalidate:
+    do: yaml:validate_workflow
+    with:
+      yaml: "{{input.yaml_text}}"
+    then:
+      - when: "revalidate.valid == true"
+        then: check_collision
+      - else: true
+        then: reject_invalid
+
+  # Target path must not already exist.
+  check_collision:
+    do: shell:exec
+    with:
+      command: |
+        target="{{input.target_product_dir}}/config/workflows/auto_{{input.slug}}.yaml"
+        if [ -e "$target" ]; then
+          echo "COLLISION: $target"
+          exit 1
+        fi
+        echo "ok: $target"
+    timeout: "5s"
+    then:
+      - when: "check_collision.exit_code != 0"
+        then: reject_collision
+      - else: true
+        then: write
+
+  # Write the YAML. Heredoc renders once via konf template resolution and
+  # shell preserves the payload literally (braces inside the drafted YAML
+  # stay as-is, unlike the template tool which double-renders).
+  write:
+    do: shell:exec
+    with:
+      command: |
+        target="{{input.target_product_dir}}/config/workflows/auto_{{input.slug}}.yaml"
+        mkdir -p "$(dirname "$target")"
+        cat > "$target" <<'__KONF_HAMMER_WRITE__'
+        {{input.yaml_text}}
+        __KONF_HAMMER_WRITE__
+        # Ensure trailing newline
+        if [ "$(tail -c1 "$target" | od -An -c | tr -d ' ')" != "\\n" ]; then
+          printf '\n' >> "$target"
+        fi
+        echo "wrote: $target ($(wc -l < "$target") lines)"
+    timeout: "10s"
+    then: git_commit
+
+  # Atomic commit on the target's git repo. `git revert <sha>` = rollback.
+  git_commit:
+    do: shell:exec
+    with:
+      command: |
+        # Walk up from target dir to find the git root (target may live in
+        # a monorepo subtree).
+        cd "{{input.target_product_dir}}"
+        while [ ! -d .git ] && [ "$PWD" != "/" ]; do cd ..; done
+        if [ ! -d .git ]; then
+          echo "ERROR: no .git found walking up from {{input.target_product_dir}}"
+          exit 1
+        fi
+        git_root="$PWD"
+        target="{{input.target_product_dir}}/config/workflows/auto_{{input.slug}}.yaml"
+        rel="${target#$git_root/}"
+        cd "$git_root"
+        git add "$rel"
+        git commit -m "konf-hammer: auto_{{input.slug}}" >/dev/null
+        sha=$(git rev-parse --short HEAD)
+        echo "commit=$sha"
+        echo "file=$rel"
+        echo "git_root=$git_root"
+    timeout: "15s"
+    then: done
+
+  # Terminal — success.
+  done:
+    do: shell:exec
+    with:
+      command: |
+        cat <<'__KONF_HAMMER_RESULT__'
+        status: published
+        slug: {{input.slug}}
+        target_path: {{input.target_product_dir}}/config/workflows/auto_{{input.slug}}.yaml
+
+        ---commit---
+        {{git_commit.stdout}}
+
+        To activate: call the target MCP's `config:reload` tool. For
+        konf-hammer itself that's `mcp__konf-hammer__config_reload`.
+        For repo-manager, `mcp__repo-manager__config_reload`.
+        __KONF_HAMMER_RESULT__
+    timeout: "5s"
+    return: true
+
+  reject_invalid:
+    do: shell:exec
+    with:
+      command: |
+        cat <<'__KONF_HAMMER_RESULT__'
+        status: rejected
+        reason: invalid_yaml
+
+        ---validator_output---
+        {{revalidate}}
+        __KONF_HAMMER_RESULT__
+    timeout: "5s"
+    return: true
+
+  reject_collision:
+    do: shell:exec
+    with:
+      command: |
+        cat <<'__KONF_HAMMER_RESULT__'
+        status: rejected
+        reason: file_already_exists
+
+        ---collision_output---
+        {{check_collision.stdout}}
+        __KONF_HAMMER_RESULT__
+    timeout: "5s"
+    return: true
