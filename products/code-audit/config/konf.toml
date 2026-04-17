@@ -1,0 +1,10 @@
+# code-audit platform config — sibling to _fleet-probe. Own redb file
+# under its own state volume (no shared journal yet — friction #9).
+
+[server]
+host = "0.0.0.0"
+port = 8000  # exposed as host port 8001 by the fleet compose service
+
+[database]
+url = "redb:///var/lib/konf/konf.redb"
+retention_days = 7

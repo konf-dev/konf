@@ -1,0 +1,161 @@
+# code-audit chat workflow — the Phase 1 anchor workload. v0 hardwires
+# the target to konf-tool-llm because:
+#   1. /v1/chat takes only {message, session_id}, so target paths can't
+#      be passed through cleanly without routing logic;
+#   2. konf-tool-llm is a known small target (3 files, 1237 lines)
+#      that fits inside qwen3-coder:30b's context window.
+#
+# Pipeline:
+#   list_files → for each of two files:
+#     read file → ai:complete review → memory:store finding
+#   then memory:search to gather all findings → template summary → done
+#
+# Skipped on this first cut: lib.rs (904 lines — risks blowing qwen3's
+# context window for the smoke run). Will revisit once the pipeline is
+# proven and we know how the model handles 200-line files.
+
+workflow: code_audit
+description: "Read each .rs file in konf-tool-llm, ai:complete a brief review, memory:store findings, template a summary report."
+register_as_tool: false
+
+capabilities:
+  - "echo"
+  - "shell:exec"
+  - "ai:complete"
+  - "memory:store"
+  - "memory:search"
+  - "template"
+
+input_schema:
+  type: object
+  properties:
+    message:
+      type: string
+  required: []
+
+nodes:
+  # Sanity check — confirm the audit target is mounted and list .rs files.
+  list_files:
+    do: shell:exec
+    with:
+      command: "find /audit-target/crates/konf-tool-llm/src -maxdepth 2 -name '*.rs' -printf '%f\\n' | sort"
+    then: read_introspect
+
+  read_introspect:
+    do: shell:exec
+    with:
+      command: "cat /audit-target/crates/konf-tool-llm/src/introspect.rs"
+    then: review_introspect
+
+  review_introspect:
+    do: ai:complete
+    with:
+      system: |
+        You are a senior Rust reviewer. For the file shown, return EXACTLY
+        a bullet list of at most 3 concrete issues (bugs, smells, missing
+        safety, unclear API). No preamble. No closing prose. If the file
+        has no issues, output a single line: "- no issues found".
+      prompt: |
+        File: introspect.rs
+
+        ```rust
+        {{read_introspect.stdout}}
+        ```
+      max_tokens: 600
+      temperature: 0.1
+    then: store_introspect
+
+  store_introspect:
+    do: memory:store
+    with:
+      namespace: "konf:audit:konf-tool-llm:v0"
+      nodes:
+        - content: "{{review_introspect.text}}"
+          node_type: "audit_finding"
+          metadata:
+            file: "introspect.rs"
+            crate: "konf-tool-llm"
+    then: read_validate
+
+  read_validate:
+    do: shell:exec
+    with:
+      command: "cat /audit-target/crates/konf-tool-llm/src/validate.rs"
+    then: review_validate
+
+  review_validate:
+    do: ai:complete
+    with:
+      system: |
+        You are a senior Rust reviewer. For the file shown, return EXACTLY
+        a bullet list of at most 3 concrete issues (bugs, smells, missing
+        safety, unclear API). No preamble. No closing prose. If the file
+        has no issues, output a single line: "- no issues found".
+      prompt: |
+        File: validate.rs
+
+        ```rust
+        {{read_validate.stdout}}
+        ```
+      max_tokens: 600
+      temperature: 0.1
+    then: store_validate
+
+  store_validate:
+    do: memory:store
+    with:
+      namespace: "konf:audit:konf-tool-llm:v0"
+      nodes:
+        - content: "{{review_validate.text}}"
+          node_type: "audit_finding"
+          metadata:
+            file: "validate.rs"
+            crate: "konf-tool-llm"
+    then: gather_findings
+
+  # Persistence smoke — search finds the stored audit_finding nodes.
+  # We only use the count in the summary (passed as a string), not the
+  # array itself, because the workflow's outer template pass stringifies
+  # arrays before handing them to the template tool — so iterating
+  # `{% for f in findings %}` over an array passed via `vars:` is not
+  # currently expressible. New friction (#24).
+  gather_findings:
+    do: memory:search
+    with:
+      namespace: "konf:audit:konf-tool-llm:v0"
+      # Text mode requires a query that's a literal substring of stored
+      # content. The findings are bullet lists of "Missing X / The Y is
+      # not validated / ..." — using "Missing" matches both because
+      # qwen3-coder reliably opens each issue with that verb at t=0.1.
+      # node_type filter is the real intent; query is plumbing.
+      query: "Missing"
+      mode: "text"
+      node_type: "audit_finding"
+      limit: 50
+    then: summarize
+
+  # Template a human-readable report. All vars are strings so the outer
+  # render pass can interpolate them safely. The {% raw %} block keeps
+  # the inner template literal {{intro}} / {{validate}} alive through
+  # the outer pass for the inner pass to substitute.
+  summarize:
+    do: template
+    with:
+      template: |
+        {% raw %}# code-audit report — konf-tool-llm (v0)
+
+        Findings persisted to memory: {{count}}
+
+        ## introspect.rs
+
+        {{intro}}
+
+        ## validate.rs
+
+        {{validate}}
+        {% endraw %}
+      vars:
+        count: "{{gather_findings._meta.count}}"
+        intro: "{{review_introspect.text}}"
+        validate: "{{review_validate.text}}"
+    return: true

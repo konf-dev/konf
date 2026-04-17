@@ -43,5 +43,36 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Phase 1 anchor workload — see ../products/code-audit/README.md.
+  # Sibling container, separate state volume, source bind-mounted
+  # read-only so the workflow can read .rs files without reaching the
+  # host through any mutating path.
+  audit:
+    image: konf-backend:phase0
+    container_name: konf-code-audit
+    environment:
+      KONF_CONFIG_DIR: /etc/konf/products/code-audit/config
+      KONF_DEV_MODE: "1"
+      RUST_LOG: "info,konf=debug"
+      OLLAMA_API_BASE_URL: "http://host.docker.internal:11434"
+      KONF_MODEL: "${KONF_MODEL:-qwen3-coder:30b}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8001:8000"
+    volumes:
+      - ../products/code-audit/config:/etc/konf/products/code-audit/config:ro
+      # Source mount — read-only. Pointed at the konf source tree so the
+      # audit workflow can `cat` files without any write capability.
+      - ..:/audit-target:ro
+      - audit_state:/var/lib/konf
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
 volumes:
   probe_state:
+  audit_state:

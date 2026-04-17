@@ -1,0 +1,60 @@
+# code-audit tools config. Same Ollama wiring as _fleet-probe (host
+# Ollama via host.docker.internal). Memory namespace is product-scoped
+# so audit findings don't collide with the probe's state. Shell is
+# enabled but locked to read-only operations on /audit-target.
+
+tools:
+  llm:
+    provider: ollama
+    # qwen3-coder:30b is heavier but better at reading Rust. Override
+    # with KONF_MODEL for a smaller smoke run.
+    model: "${KONF_MODEL:-qwen3-coder:30b}"
+    temperature: 0.1
+    max_tokens: 1024
+
+  memory:
+    backend: surreal
+    config:
+      mode: embedded
+      path: /var/lib/konf/memory.db
+      namespace: konf
+      database: code-audit
+      vector_dimension: 768
+
+  shell:
+    container: "host"
+    timeout_ms: 30000
+
+# Guards: deny everything that could mutate the audit target or the
+# host. Default deny would be ideal, but we need a few read-only
+# verbs (find, cat, wc, head). Belt-and-braces: deny dangerous
+# patterns explicitly; rely on the read-only bind mount of
+# /audit-target as the actual safety boundary.
+tool_guards:
+  shell:exec:
+    rules:
+      - action: deny
+        predicate: { type: contains, path: command, value: "sudo" }
+        message: "sudo blocked in code-audit"
+      - action: deny
+        predicate: { type: matches, path: command, pattern: "rm *" }
+        message: "rm blocked in code-audit"
+      - action: deny
+        predicate: { type: matches, path: command, pattern: "rm-rf*" }
+        message: "rm-rf blocked in code-audit"
+      - action: deny
+        predicate: { type: contains, path: command, value: "mkfs" }
+        message: "mkfs blocked in code-audit"
+      - action: deny
+        predicate: { type: contains, path: command, value: "dd " }
+        message: "dd blocked in code-audit"
+      - action: deny
+        predicate: { type: contains, path: command, value: "> /" }
+        message: "writes outside /tmp blocked in code-audit"
+      - action: deny
+        predicate: { type: contains, path: command, value: "curl " }
+        message: "network egress blocked in code-audit"
+      - action: deny
+        predicate: { type: contains, path: command, value: "wget " }
+        message: "network egress blocked in code-audit"
+    default: allow
