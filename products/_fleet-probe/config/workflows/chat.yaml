@@ -85,32 +85,76 @@ nodes:
       limit: 5
     return: true
 
-  # Phase 1 step 3 — happy path. Benign read-only command. Should pass
-  # the guard chain and return whoami / kernel info / cwd from inside
-  # the fleet container.
+  # Phase 1 step 3 + step 4 — happy path with output-based when: branching.
+  # shell_ok runs a benign command; the `then:` block routes on the node's
+  # own exit_code, exercising `when:` over a previous node's output (not
+  # just over input.message). Both branches end at echo nodes that emit
+  # structured summaries — proving outputs flow into downstream `with:`.
   shell_ok:
     do: shell:exec
     with:
       command: "whoami && uname -srm && pwd"
+    then:
+      - when: "shell_ok.exit_code == 0"
+        then: shell_ok_succ
+      - else: true
+        then: shell_ok_fail
+
+  shell_ok_succ:
+    do: echo
+    with:
+      ok: true
+      exit_code: "{{shell_ok.exit_code}}"
+      stdout: "{{shell_ok.stdout}}"
     return: true
 
-  # Phase 1 step 3 — must be guard-denied at dispatch by the
-  # `contains: sudo` rule in tools.yaml. Expect an `error` SSE event
-  # with "guard denied: sudo is blocked on the fleet probe".
+  shell_ok_fail:
+    do: echo
+    with:
+      ok: false
+      exit_code: "{{shell_ok.exit_code}}"
+      stderr: "{{shell_ok.stderr}}"
+    return: true
+
+  # Phase 1 step 3 + step 4 — guard denial converted into a graceful
+  # `done` event via `catch:`. Without catch, the SSE stream would emit
+  # a top-level `error` event and the run would terminate with no usable
+  # output. With catch, the failing node's error routes to a recovery
+  # echo that returns a structured "denied" payload. Note: the failing
+  # node's own output is NOT set (executor.rs:432–464 ErrorAction::Goto
+  # only jumps; it does not stash the error in outputs), so the recovery
+  # node can only emit a static description of what was blocked. This is
+  # why we use one recovery node per blocked route, not a shared one.
   shell_sudo:
     do: shell:exec
     with:
       command: "sudo whoami"
+    catch: denied_sudo
+    return: true  # only reached on the impossible-success path
+
+  denied_sudo:
+    do: echo
+    with:
+      denied: true
+      blocked_rule: "contains:sudo"
+      attempted: "sudo whoami"
+      note: "caught by chat_router.shell_sudo.catch — guard fired at dispatch"
     return: true
 
-  # Phase 1 step 3 — must be guard-denied at dispatch by the
-  # `matches: rm -rf*` glob rule. The path /tmp/konf-fleet-probe-canary
-  # is intentionally bogus; the guard is supposed to reject the call
-  # before bash ever runs, so the path's existence doesn't matter.
   shell_rm:
     do: shell:exec
     with:
       command: "rm -rf /tmp/konf-fleet-probe-canary"
+    catch: denied_rm
+    return: true
+
+  denied_rm:
+    do: echo
+    with:
+      denied: true
+      blocked_rule: "matches:rm -rf*"
+      attempted: "rm -rf /tmp/konf-fleet-probe-canary"
+      note: "caught by chat_router.shell_rm.catch — guard fired at dispatch"
     return: true
 
   # Phase 1 step 1 fallback — anything that's not a control word goes to
