@@ -5,9 +5,12 @@
 # &&, ||, !, exists, is empty, dotted refs. No string methods, no slicing.
 # So the prove-it-works strategy is "send a known control word":
 #
-#   POST /v1/chat {"message":"store"}    → memory:store the canary node
-#   POST /v1/chat {"message":"search"}   → memory:search for the canary
-#   POST /v1/chat {"message":"<text>"}   → ai:complete (Phase 1 step 1 behavior)
+#   POST /v1/chat {"message":"store"}       → memory:store the canary node
+#   POST /v1/chat {"message":"search"}      → memory:search for the canary
+#   POST /v1/chat {"message":"shell"}       → shell:exec benign whoami+uname
+#   POST /v1/chat {"message":"shell-sudo"}  → shell:exec "sudo whoami" (must be guard-denied)
+#   POST /v1/chat {"message":"shell-rm"}    → shell:exec "rm -rf /tmp/x" (must be guard-denied)
+#   POST /v1/chat {"message":"<text>"}      → ai:complete (Phase 1 step 1 behavior)
 #
 # Cross-run persistence is proven by issuing `store` and `search` in two
 # separate /v1/chat turns: each turn is a fresh root run, so a search hit
@@ -23,6 +26,7 @@ capabilities:
   - "ai:complete"
   - "memory:store"
   - "memory:search"
+  - "shell:exec"
 
 input_schema:
   type: object
@@ -43,6 +47,12 @@ nodes:
         then: store_canary
       - when: "input.message == 'search'"
         then: search_canary
+      - when: "input.message == 'shell'"
+        then: shell_ok
+      - when: "input.message == 'shell-sudo'"
+        then: shell_sudo
+      - when: "input.message == 'shell-rm'"
+        then: shell_rm
       - else: true
         then: llm_passthrough
 
@@ -73,6 +83,34 @@ nodes:
       query: "alpha-bravo-charlie-delta"
       mode: "text"
       limit: 5
+    return: true
+
+  # Phase 1 step 3 — happy path. Benign read-only command. Should pass
+  # the guard chain and return whoami / kernel info / cwd from inside
+  # the fleet container.
+  shell_ok:
+    do: shell:exec
+    with:
+      command: "whoami && uname -srm && pwd"
+    return: true
+
+  # Phase 1 step 3 — must be guard-denied at dispatch by the
+  # `contains: sudo` rule in tools.yaml. Expect an `error` SSE event
+  # with "guard denied: sudo is blocked on the fleet probe".
+  shell_sudo:
+    do: shell:exec
+    with:
+      command: "sudo whoami"
+    return: true
+
+  # Phase 1 step 3 — must be guard-denied at dispatch by the
+  # `matches: rm -rf*` glob rule. The path /tmp/konf-fleet-probe-canary
+  # is intentionally bogus; the guard is supposed to reject the call
+  # before bash ever runs, so the path's existence doesn't matter.
+  shell_rm:
+    do: shell:exec
+    with:
+      command: "rm -rf /tmp/konf-fleet-probe-canary"
     return: true
 
   # Phase 1 step 1 fallback — anything that's not a control word goes to

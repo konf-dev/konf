@@ -1,9 +1,15 @@
-# Fleet probe tools config — Phase 1 step 1: ai:complete enabled against
-# host Ollama, embedded surreal memory, shell still disabled.
+# Fleet probe tools config — Phase 1 step 3: shell:exec enabled with
+# deny-rules, ai:complete still wired to host Ollama, embedded surreal
+# memory persists across restarts (see chat_router workflow).
 #
-# Ollama URL: container reaches the host via `host.docker.internal`, which
-# fleet-compose maps to the host gateway. Default model is small (qwen3:8b)
-# so the smoke roundtrip stays cheap; override per-run with KONF_MODEL.
+# Ollama URL: container reaches the host via `host.docker.internal`,
+# which fleet-compose maps to the host gateway. Default model is small
+# (qwen3:8b) so the smoke roundtrip stays cheap; override with KONF_MODEL.
+#
+# Shell `container: "host"` means "run bash directly in this process",
+# which from inside the fleet container = inside the fleet container
+# (no nested docker, no sock mount). The deny rules below are the
+# substrate's safety net regardless of where the bash actually lands.
 
 tools:
   llm:
@@ -20,3 +26,39 @@ tools:
       namespace: konf
       database: fleet-probe
       vector_dimension: 768
+
+  shell:
+    container: "host"
+    timeout_ms: 10000
+
+# Tool guards — evaluated BEFORE the tool runs, on the raw input the
+# caller (workflow node or LLM) submitted. First match wins; default is
+# `allow` only because the probe's whole point is to also exercise the
+# happy path. A real product would use `default: deny` with explicit
+# allowlist.
+tool_guards:
+  shell:exec:
+    rules:
+      - action: deny
+        predicate:
+          type: contains
+          path: command
+          value: "sudo"
+        message: "sudo is blocked on the fleet probe"
+
+      # Glob — substrate's glob_matches supports * and ? only (guard.rs:230).
+      # `rm -rf*` matches `rm -rf /`, `rm -rf /tmp/...`, etc.
+      - action: deny
+        predicate:
+          type: matches
+          path: command
+          pattern: "rm -rf*"
+        message: "rm -rf is blocked on the fleet probe"
+
+      - action: deny
+        predicate:
+          type: matches
+          path: command
+          pattern: "rm -fr*"
+        message: "rm -fr is blocked on the fleet probe"
+    default: allow
