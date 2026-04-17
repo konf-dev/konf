@@ -40,22 +40,23 @@ The same Rust binary runs every product. Switching LLM providers, memory backend
      └──────────┬───────────┘
                 │
      ┌──────────▼───────────┐
-     │   konflux-core       │         Engine: tools, resources, prompts
+     │  konflux-substrate   │         Engine: tools, resources, prompts
      └──────────┬───────────┘
                 │
      ┌──────────┴──────────┐
      │   konf-tool-*       │         Plugin crates (http, llm, embed,
-     │                     │          memory, mcp-client, shell, secret)
+     │                     │          memory, mcp-client, shell, secret,
+     │                     │          runner)
      └─────────────────────┘
 ```
 
 ## Crates
 
-13 crates in this workspace:
+14 crates in this workspace:
 
 | Crate | Role |
 |-------|------|
-| `konflux-core` | Workflow execution engine with tool/resource/prompt registries. Zero I/O. |
+| `konflux-substrate` | Workflow execution engine with tool/resource/prompt registries. Zero I/O. |
 | `konf-runtime` | Process lifecycle, `ExecutionScope`, capability-based security, namespace injection |
 | `konf-init` | Config-driven bootstrap — reads YAML, registers tools, wires runtime |
 | `konf-mcp` | MCP server — exposes products to MCP clients (Claude Desktop, Cursor, etc.) |
@@ -64,7 +65,9 @@ The same Rust binary runs every product. Switching LLM providers, memory backend
 | `konf-tool-llm` | LLM completion via rig-core (OpenAI, Anthropic, Google, Ollama) |
 | `konf-tool-embed` | Local text embeddings via fastembed (ONNX) |
 | `konf-tool-memory` | `MemoryBackend` trait for pluggable storage |
+| `konf-tool-memory-surreal` | SurrealDB-backed memory backend — embedded (RocksDB) or remote (WebSocket) |
 | `konf-tool-mcp` | MCP client — consume external MCP servers |
+| `konf-tool-runner` | Async workflow runs — `runner:spawn/status/wait/cancel`, backed by `RunnerIntentStore` |
 | `konf-tool-shell` | Sandboxed shell execution |
 | `konf-tool-secret` | Secret retrieval with allowlist |
 
