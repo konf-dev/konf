@@ -1,0 +1,35 @@
+# LLM probe workflow — Phase 1 step 1.
+#
+# Named `chat.yaml` so /v1/chat picks it deterministically as the default
+# entry workflow (konf-backend prefers `workflows/chat.yaml`, otherwise the
+# first yaml in the dir). Workflow id is `llm_probe` to match its purpose:
+# prove ai:complete roundtrips host Ollama through the container.
+
+workflow: llm_probe
+description: "Single ai:complete roundtrip against host Ollama. Proves LLM substrate inside the fleet container."
+# NOT registered as a tool: ai:complete already excludes itself from the inner
+# tool set (konf-tool-llm/src/lib.rs:185) but does NOT exclude the enclosing
+# workflow tool. With register_as_tool: true, the LLM sees `workflow:llm_probe`
+# and can call its own enclosing workflow — observed once on the first run
+# (qwen3:8b, iterations=2). Disabled to keep the probe single-shot.
+register_as_tool: false
+
+capabilities:
+  - "ai:complete"
+
+input_schema:
+  type: object
+  properties:
+    message:
+      type: string
+      description: "User prompt forwarded to the LLM. Defaults to a short self-identify."
+  required: []
+
+nodes:
+  ask:
+    do: ai:complete
+    with:
+      prompt: "{{input.message | default('Reply with exactly: konf fleet probe LLM ok')}}"
+      max_tokens: 64
+      temperature: 0
+    return: true

@@ -1,7 +1,17 @@
-# Fleet probe tools config — no LLM (boot gate only), surreal memory
-# in embedded mode, shell disabled. The hello workflow uses `echo` only.
+# Fleet probe tools config — Phase 1 step 1: ai:complete enabled against
+# host Ollama, embedded surreal memory, shell still disabled.
+#
+# Ollama URL: container reaches the host via `host.docker.internal`, which
+# fleet-compose maps to the host gateway. Default model is small (qwen3:8b)
+# so the smoke roundtrip stays cheap; override per-run with KONF_MODEL.
 
 tools:
+  llm:
+    provider: ollama
+    model: "${KONF_MODEL:-qwen3:8b}"
+    temperature: 0
+    max_tokens: 128
+
   memory:
     backend: surreal
     config:

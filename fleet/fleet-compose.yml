@@ -19,6 +19,16 @@ services:
       KONF_CONFIG_DIR: /etc/konf/products/_fleet-probe/config
       KONF_DEV_MODE: "1"  # bypass JWT — sandbox only, never network-exposed
       RUST_LOG: "info,konf=debug"
+      # Phase 1 step 1: reach host Ollama from inside the container.
+      # `host.docker.internal` is mapped via extra_hosts below; rig's ollama
+      # provider reads this base URL when the env var is set.
+      OLLAMA_API_BASE_URL: "http://host.docker.internal:11434"
+      # Optional: pin a specific model. Falls back to qwen3:8b in tools.yaml.
+      KONF_MODEL: "${KONF_MODEL:-qwen3:8b}"
+    extra_hosts:
+      # Linux Docker doesn't auto-resolve host.docker.internal — map it
+      # to the host gateway so the container can reach host services.
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     volumes:
