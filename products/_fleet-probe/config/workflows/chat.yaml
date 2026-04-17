@@ -1,35 +1,86 @@
-# LLM probe workflow — Phase 1 step 1.
+# Phase 1 chat workflow — three substrate probes routed by input.message.
 #
-# Named `chat.yaml` so /v1/chat picks it deterministically as the default
-# entry workflow (konf-backend prefers `workflows/chat.yaml`, otherwise the
-# first yaml in the dir). Workflow id is `llm_probe` to match its purpose:
-# prove ai:complete roundtrips host Ollama through the container.
+# Routing is exact-match on input.message because the konflux expression
+# engine (executor.rs:736) evaluates a deliberately small subset: ==, !=,
+# &&, ||, !, exists, is empty, dotted refs. No string methods, no slicing.
+# So the prove-it-works strategy is "send a known control word":
+#
+#   POST /v1/chat {"message":"store"}    → memory:store the canary node
+#   POST /v1/chat {"message":"search"}   → memory:search for the canary
+#   POST /v1/chat {"message":"<text>"}   → ai:complete (Phase 1 step 1 behavior)
+#
+# Cross-run persistence is proven by issuing `store` and `search` in two
+# separate /v1/chat turns: each turn is a fresh root run, so a search hit
+# in turn 2 means the embedded surreal backend on the probe_state volume
+# survived between runs.
 
-workflow: llm_probe
-description: "Single ai:complete roundtrip against host Ollama. Proves LLM substrate inside the fleet container."
-# NOT registered as a tool: ai:complete already excludes itself from the inner
-# tool set (konf-tool-llm/src/lib.rs:185) but does NOT exclude the enclosing
-# workflow tool. With register_as_tool: true, the LLM sees `workflow:llm_probe`
-# and can call its own enclosing workflow — observed once on the first run
-# (qwen3:8b, iterations=2). Disabled to keep the probe single-shot.
-register_as_tool: false
+workflow: chat_router
+description: "Routes /v1/chat to ai:complete OR memory:store/search probes by exact-match on input.message."
+register_as_tool: false  # see STAGE_13 friction #12
 
 capabilities:
+  - "echo"
   - "ai:complete"
+  - "memory:store"
+  - "memory:search"
 
 input_schema:
   type: object
   properties:
     message:
       type: string
-      description: "User prompt forwarded to the LLM. Defaults to a short self-identify."
-  required: []
+  required: [message]
 
 nodes:
-  ask:
+  # Branch on the literal control word. Cheap echo gives the router a node
+  # id to live on — branching attaches to a node, not to the workflow root.
+  route:
+    do: echo
+    with:
+      mode: "{{input.message}}"
+    then:
+      - when: "input.message == 'store'"
+        then: store_canary
+      - when: "input.message == 'search'"
+        then: search_canary
+      - else: true
+        then: llm_passthrough
+
+  # Phase 1 step 2 — write a deterministic canary node into the embedded
+  # surreal memory. Namespace is product-scoped so the search side knows
+  # exactly where to look without depending on the chat handler's default
+  # `konf:default:${user_id}` template.
+  store_canary:
+    do: memory:store
+    with:
+      namespace: "konf:fleet-probe:phase1-step2"
+      nodes:
+        - content: "phase1-step2 canary alpha-bravo-charlie-delta"
+          node_type: "memory"
+          metadata:
+            origin: "fleet-probe"
+            phase: "1.2"
+            tag: "canary"
+    return: true
+
+  # Phase 1 step 2 — text search for the canary. Uses surreal's "text"
+  # mode (no embedding model needed). A non-empty hit list in turn 2
+  # proves the data survived the first run.
+  search_canary:
+    do: memory:search
+    with:
+      namespace: "konf:fleet-probe:phase1-step2"
+      query: "alpha-bravo-charlie-delta"
+      mode: "text"
+      limit: 5
+    return: true
+
+  # Phase 1 step 1 fallback — anything that's not a control word goes to
+  # the LLM, preserving the existing /v1/chat conversational behavior.
+  llm_passthrough:
     do: ai:complete
     with:
-      prompt: "{{input.message | default('Reply with exactly: konf fleet probe LLM ok')}}"
+      prompt: "{{input.message}}"
       max_tokens: 64
       temperature: 0
     return: true
