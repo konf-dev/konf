@@ -1,7 +1,9 @@
-# Phase 1 step 10 — workflow added to disk AFTER container boot.
-# Used to prove config:reload actually re-scans the workflows directory
-# and registers new files. Must NOT be loaded at boot — should appear
-# only after a `config:reload` call.
+# Phase 1 step 10 — originally added to disk AFTER container boot to
+# prove config:reload actually re-scans the workflows directory.
+# Retained here as a minimal echo-only sample workflow. To reproduce
+# the reload test: remove this file, restart the probe, confirm the
+# tool list drops by one, then recreate this file and call the
+# `reload` route on chat_router.
 
 workflow: probe_added
 description: "Smoke workflow added post-boot. Visible only after config:reload."
