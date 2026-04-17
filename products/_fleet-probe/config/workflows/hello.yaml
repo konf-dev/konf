@@ -1,0 +1,11 @@
+workflow: hello
+description: "Boot-gate echo — proves engine + workflow registry without any LLM or external tool."
+register_as_tool: true
+capabilities:
+  - echo
+nodes:
+  greet:
+    do: echo
+    with:
+      message: "Hello from the konf fleet probe."
+    return: true

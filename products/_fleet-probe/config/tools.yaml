@@ -1,0 +1,12 @@
+# Fleet probe tools config — no LLM (boot gate only), surreal memory
+# in embedded mode, shell disabled. The hello workflow uses `echo` only.
+
+tools:
+  memory:
+    backend: surreal
+    config:
+      mode: embedded
+      path: /var/lib/konf/memory.db
+      namespace: konf
+      database: fleet-probe
+      vector_dimension: 768

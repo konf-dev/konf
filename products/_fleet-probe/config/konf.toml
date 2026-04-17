@@ -1,0 +1,10 @@
+# Fleet probe platform config — minimal redb setup for a single backend.
+# redb file lives under a mounted volume so state survives container restarts.
+
+[server]
+host = "0.0.0.0"
+port = 8000
+
+[database]
+url = "redb:///var/lib/konf/konf.redb"
+retention_days = 7

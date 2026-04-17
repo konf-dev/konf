@@ -1,0 +1,37 @@
+# konf fleet — one container per product.
+#
+# Phase 0: single `_fleet-probe` service. Proves the container boots,
+# /v1/health responds, and the monitor stream opens.
+#
+# As real products land, add them as sibling services. Each gets:
+#   - its own volume for redb + memory.db (state isolation)
+#   - its own port (explicit, no dynamic allocation)
+#   - its own product config dir (read-only bind mount)
+#
+# Not using the root konf/docker-compose.yml — that still assumes
+# Postgres + Supabase from the pre-redb architecture.
+
+services:
+  probe:
+    image: konf-backend:phase0
+    container_name: konf-fleet-probe
+    environment:
+      KONF_CONFIG_DIR: /etc/konf/products/_fleet-probe/config
+      KONF_DEV_MODE: "1"  # bypass JWT — sandbox only, never network-exposed
+      RUST_LOG: "info,konf=debug"
+    ports:
+      - "8000:8000"
+    volumes:
+      # Product config: read-only, so a misbehaving container can't trash it.
+      - ../products/_fleet-probe/config:/etc/konf/products/_fleet-probe/config:ro
+      # State volume: redb journal + surreal memory live here.
+      - probe_state:/var/lib/konf
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  probe_state:
