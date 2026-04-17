@@ -73,11 +73,12 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # Sovereign agent container — see ../products/konf-prime/README.md.
-  # Key difference from probe/audit: the product config dir is mounted
-  # WRITABLE so the agent can edit its own workflows/prompts and call
-  # config:reload. No tool guards; the container boundary is the
-  # safety boundary.
+  # Sovereign agent — ollama variant. See ../products/konf-prime/README.md.
+  # The product config dir is mounted WRITABLE so the agent edits its own
+  # workflows/prompts/tools and calls config:reload. The /src volume is
+  # the agent's own git clone (not the host working tree). Docker socket
+  # lets the agent rebuild + restart itself. No tool guards; the container
+  # boundary is the safety boundary.
   prime:
     image: konf-backend:phase0
     container_name: konf-prime
@@ -85,19 +86,80 @@ services:
       KONF_CONFIG_DIR: /etc/konf/products/konf-prime/config
       KONF_DEV_MODE: "1"
       RUST_LOG: "info,konf=debug"
+      # Big-GPU ollama endpoint (RTX 3090 Ti, port 11434).
       OLLAMA_API_BASE_URL: "http://host.docker.internal:11434"
       KONF_MODEL: "${KONF_MODEL:-qwen3-coder:30b}"
+      KONF_GITHUB_TOKEN: "${KONF_GITHUB_TOKEN:-}"
+      KONF_PRIME_GIT_REMOTE: "${KONF_PRIME_GIT_REMOTE:-}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "8002:8000"
     volumes:
-      # WRITABLE — the agent edits its own workflows + prompts + tools.
       - ../products/konf-prime/config:/etc/konf/products/konf-prime/config:rw
-      # Read-only source tree, same as code-audit.
-      - ..:/audit-target:ro
-      # State volume.
+      - prime_src:/src:rw
+      - /var/run/docker.sock:/var/run/docker.sock
       - prime_state:/var/lib/konf
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # All-Gemini variant. Paid tier; requires GEMINI_API_KEY in host env.
+  prime-gemini:
+    image: konf-backend:phase0
+    container_name: konf-prime-gemini
+    environment:
+      KONF_CONFIG_DIR: /etc/konf/products/konf-prime-gemini/config
+      KONF_DEV_MODE: "1"
+      RUST_LOG: "info,konf=debug"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:?set GEMINI_API_KEY in your shell before starting this variant}"
+      KONF_MODEL: "${KONF_GEMINI_MODEL:-gemini-2.5-pro}"
+      KONF_GITHUB_TOKEN: "${KONF_GITHUB_TOKEN:-}"
+      KONF_PRIME_GIT_REMOTE: "${KONF_PRIME_GIT_REMOTE:-}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8003:8000"
+    volumes:
+      - ../products/konf-prime-gemini/config:/etc/konf/products/konf-prime-gemini/config:rw
+      - prime_gemini_src:/src:rw
+      - /var/run/docker.sock:/var/run/docker.sock
+      - prime_gemini_state:/var/lib/konf
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Hybrid: Gemini for orchestration + Ollama (small GPU) for bulk.
+  # Default provider is ollama; agent overrides to gemini per ai:complete
+  # call for the hardest reasoning.
+  prime-hybrid:
+    image: konf-backend:phase0
+    container_name: konf-prime-hybrid
+    environment:
+      KONF_CONFIG_DIR: /etc/konf/products/konf-prime-hybrid/config
+      KONF_DEV_MODE: "1"
+      RUST_LOG: "info,konf=debug"
+      # Small-GPU ollama endpoint (RTX 2070 Super, port 11435).
+      OLLAMA_API_BASE_URL: "http://host.docker.internal:11435"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:?set GEMINI_API_KEY in your shell before starting this variant}"
+      KONF_MODEL: "${KONF_HYBRID_MODEL:-gemma4:e4b}"
+      KONF_GITHUB_TOKEN: "${KONF_GITHUB_TOKEN:-}"
+      KONF_PRIME_GIT_REMOTE: "${KONF_PRIME_GIT_REMOTE:-}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8004:8000"
+    volumes:
+      - ../products/konf-prime-hybrid/config:/etc/konf/products/konf-prime-hybrid/config:rw
+      - prime_hybrid_src:/src:rw
+      - /var/run/docker.sock:/var/run/docker.sock
+      - prime_hybrid_state:/var/lib/konf
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8000/v1/health || exit 1"]
       interval: 10s
@@ -109,3 +171,8 @@ volumes:
   probe_state:
   audit_state:
   prime_state:
+  prime_src:
+  prime_gemini_state:
+  prime_gemini_src:
+  prime_hybrid_state:
+  prime_hybrid_src:

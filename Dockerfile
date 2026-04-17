@@ -37,9 +37,28 @@ RUN cargo build --release --bin konf-backend
 # Stage 4: Runtime
 # trixie to match the chef stage's glibc (prebuilt ORT binaries link against it).
 FROM debian:trixie-slim
-# curl is needed for the compose healthcheck; ca-certificates for TLS egress.
-RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
-RUN useradd -r -s /bin/false konf
+# Baseline for the backend + coding-agent toolkit.
+#   curl, ca-certificates: healthcheck + HTTPS.
+#   git: konf-prime clones its own source tree into /src and works on branches.
+#   ripgrep, fd-find, jq: standard agent search/JSON toolkit.
+#   nodejs, npm: runs any MCP server published on npm (`npx -y <server>`).
+#   python3 + pip + pipx + python3-yaml: python-based MCP servers + agent-side
+#     validation of YAML edits before atomic swap.
+#   docker.io client CLI: with the socket mounted, the agent can `docker build`
+#     + `docker restart` itself. (We install only the client, daemon stays on host.)
+#   sudo: konf user is non-root; agent needs NOPASSWD sudo to apt-install
+#     anything else it decides it needs post-boot.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl \
+    git ripgrep fd-find jq \
+    nodejs npm \
+    python3 python3-pip python3-yaml pipx \
+    docker-cli \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd -r -m -s /bin/bash konf \
+    && echo 'konf ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/konf \
+    && chmod 0440 /etc/sudoers.d/konf
 # Pre-create the state dir with correct ownership BEFORE switching to konf user,
 # so volume mounts at /var/lib/konf inherit konf:konf (not root:root).
 RUN mkdir -p /var/lib/konf && chown konf:konf /var/lib/konf

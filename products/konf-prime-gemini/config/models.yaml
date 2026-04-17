@@ -1,0 +1,51 @@
+# konf-prime-gemini — available model catalog.
+#
+# Paid tier; GEMINI_API_KEY required. Thinking tokens are billed as
+# output tokens, not separately.
+#
+# Default in tools.yaml is gemini-2.5-pro for this variant because the
+# goal is reasoning ceiling. For daily/bulk work you may want to
+# override to flash via ai:complete `model:` field.
+#
+# Rig 0.34 supports ThinkingConfig (thinking_budget for 2.5,
+# thinking_level for 3) but konf's ai:complete does not yet pipe these
+# through. Gemini 2.5 Pro defaults to dynamic thinking anyway — good
+# enough without a code change. If you want explicit control, pipe
+# thinking_config through crates/konf-tool-llm/src/lib.rs
+# CompletionConfig → rig GenerationConfig.
+#
+# Known issue: Gemini returns 400 on some tool schemas. If you see
+# repeated 400s from `ai:complete` when tools are in the whitelist,
+# try a simpler tool set for that call.
+
+providers:
+  gemini:
+    default: true
+    models:
+      - name: gemini-2.5-pro
+        good_for: "strongest reasoning; default orchestrator for this variant"
+        context_window: 2000000
+        thinking: "dynamic by default; can't disable"
+        price_in_per_1m: 1.25
+        price_out_per_1m: 10.00
+      - name: gemini-2.5-flash
+        good_for: "fast, cheap bulk work; still reasons"
+        thinking: "configurable 0-24576 tokens (not wired yet)"
+        price_in_per_1m: 0.30
+        price_out_per_1m: 2.50
+      - name: gemini-2.5-flash-lite
+        good_for: "cheapest tier; simple passes where reasoning isn't needed"
+      - name: gemini-3-pro-preview
+        good_for: "frontier capability test; newest Gemini reasoning model"
+        thinking: "thinking_level high default; can't disable"
+        stability: preview
+      - name: gemini-3-flash-preview
+        good_for: "frontier preview at flash price point"
+        thinking: "thinking_level minimal default"
+        stability: preview
+    verified_available: "2026-04-16; re-verify on first boot"
+
+# Heuristic:
+#   Routine drafts/lint/classify → override to gemini-2.5-flash (cheap)
+#   Design decisions, deep review → default gemini-2.5-pro
+#   Frontier experiments            → override to gemini-3-pro-preview

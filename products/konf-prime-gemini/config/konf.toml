@@ -1,0 +1,10 @@
+# konf-prime platform config. Sovereign-agent container sibling to
+# _fleet-probe and code-audit. Own redb journal, own state volume.
+
+[server]
+host = "0.0.0.0"
+port = 8000  # exposed as host port 8002 by fleet-compose
+
+[database]
+url = "redb:///var/lib/konf/konf.redb"
+retention_days = 30

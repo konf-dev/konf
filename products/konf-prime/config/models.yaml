@@ -1,0 +1,53 @@
+# konf-prime (ollama variant) — available model catalog.
+#
+# Default provider is set in tools.yaml (`ollama`, pointed at
+# OLLAMA_API_BASE_URL which this container receives as the big-GPU
+# endpoint on port 11434 / RTX 3090 Ti).
+#
+# Per-call override via ai:complete `model:` field. The `provider`
+# override is wired too but the current container is set up for a
+# single ollama endpoint — for a second endpoint, call it via
+# shell:exec curl or add a second provider alias (requires a small
+# Rust patch; see konf-prime-gemini/config/tools.yaml comment).
+
+providers:
+  ollama:
+    endpoint: "${OLLAMA_API_BASE_URL}"
+    default: true
+    models:
+      - name: qwen3-coder:30b
+        good_for: "code-heavy reasoning and tool calls; default orchestrator"
+        gpu: big
+        size_gb: 18
+      - name: gemma4:31b
+        good_for: "alternative heavy reasoning, try when qwen3-coder loops"
+        gpu: big
+        size_gb: 19
+      - name: gemma4:26b
+        good_for: "slightly smaller gemma4; faster turnaround than 31b"
+        gpu: big
+        size_gb: 17
+      - name: deepseek-r1:32b
+        good_for: "reasoning-first model; strong for multi-step plans"
+        gpu: big
+        size_gb: 19
+
+  # Small-GPU endpoint (port 11435 / RTX 2070 Super). Not reachable
+  # via the default ai:complete provider; see tools.yaml comment.
+  ollama-small:
+    endpoint: "http://host.docker.internal:11435"
+    default: false
+    reachable_via: "shell:exec curl"
+    models:
+      - name: gemma4:e4b
+        good_for: "fast local for simple tool loops and small summaries"
+        gpu: small
+        size_gb: 10
+      - name: qwen3:8b
+        good_for: "fast local fallback"
+        gpu: small
+        size_gb: 5
+      - name: nomic-embed-text
+        good_for: "embeddings, not chat"
+        gpu: small
+        size_gb: 0.3

@@ -1,21 +1,25 @@
-# konf-prime (ollama variant) — tools config.
+# konf-prime-gemini — tools config.
 #
-# Agent-as-container model: the container boundary IS the safety boundary.
-# Inside the container, shell:exec is unrestricted — the agent is root in
-# its own namespace, can edit its own workflows, call config:reload,
-# introspect itself.
+# Variant: all-Gemini. Orchestration, reasoning, and tool-call loops
+# all run against the Gemini API. Paid tier; requires GEMINI_API_KEY
+# in the container env (see fleet-compose.yml).
 #
-# Default LLM: host ollama on the big-GPU endpoint (OLLAMA_API_BASE_URL
-# is set per-container in fleet-compose.yml). See models.yaml for the
-# full catalog; ai:complete accepts per-call `provider` + `model`
-# overrides so the agent picks the right tool for each subtask.
+# See models.yaml for the Gemini model catalog; ai:complete accepts
+# per-call `provider` + `model` overrides so the agent can switch
+# within the Gemini family per subtask.
+#
+# Thinking budgets (rig 0.34 supports ThinkingConfig with
+# thinking_budget for Gemini 2.5 and thinking_level for Gemini 3) are
+# NOT yet piped through ai:complete. To control reasoning depth
+# explicitly, add the field to konf-tool-llm's CompletionConfig —
+# that's a good first Rust patch for this agent to make.
 
 tools:
   llm:
-    provider: ollama
-    model: "${KONF_MODEL:-qwen3-coder:30b}"
+    provider: gemini
+    model: "${KONF_MODEL:-gemini-2.5-pro}"
     temperature: 0.2
-    max_tokens: 2048
+    max_tokens: 4096
 
   memory:
     backend: surreal
@@ -23,15 +27,13 @@ tools:
       mode: embedded
       path: /var/lib/konf/memory.db
       namespace: konf
-      database: konf-prime
+      database: konf-prime-gemini
       vector_dimension: 768
 
   shell:
     container: "host"
     timeout_ms: 120000
 
-  # Pre-wired MCP servers. All stdio transport, all off-the-shelf.
-  # Agent adds more post-boot by editing this block + config:reload.
   mcp_servers:
     mcp_servers:
       - name: filesystem
@@ -41,7 +43,7 @@ tools:
           - -y
           - "@modelcontextprotocol/server-filesystem"
           - /src
-          - /etc/konf/products/konf-prime
+          - /etc/konf/products/konf-prime-gemini
         idle_timeout: 600
       - name: git
         transport: stdio
@@ -73,5 +75,3 @@ tools:
           - -y
           - "@modelcontextprotocol/server-fetch"
         idle_timeout: 600
-
-# No tool guards — the container boundary is the safety boundary.
