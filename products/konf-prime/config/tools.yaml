@@ -1,0 +1,36 @@
+# konf-prime tools config.
+#
+# Agent-as-container model: the container boundary IS the safety boundary.
+# Inside the container, shell:exec is unrestricted — the agent is root in
+# its own namespace, can edit its own workflows, call config:reload,
+# introspect itself. Mounts decide what the agent can see/touch:
+#   - /audit-target      read-only source of whatever we want audited
+#   - /workflows-editable writable bind to products/konf-prime/config/workflows
+#   - /prompts-editable   writable bind to products/konf-prime/config/prompts
+#   - /var/lib/konf       state volume (redb + surreal)
+
+tools:
+  llm:
+    provider: ollama
+    # Prime agent uses qwen3-coder for richer reasoning + tool-call quality.
+    # Override per-run with KONF_MODEL.
+    model: "${KONF_MODEL:-qwen3-coder:30b}"
+    temperature: 0.2
+    max_tokens: 2048
+
+  memory:
+    backend: surreal
+    config:
+      mode: embedded
+      path: /var/lib/konf/memory.db
+      namespace: konf
+      database: konf-prime
+      vector_dimension: 768
+
+  shell:
+    container: "host"
+    timeout_ms: 60000
+
+# No tool guards — the container namespace is the safety boundary.
+# If we shrink the blast radius later (multi-tenant prime containers,
+# shared state), we'll reintroduce scoped guards here.

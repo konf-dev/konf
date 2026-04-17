@@ -7,3 +7,4 @@ docs
 .env*
 .idea
 .vscode
+konf-backend.bin

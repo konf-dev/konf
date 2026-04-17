@@ -73,6 +73,39 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Sovereign agent container — see ../products/konf-prime/README.md.
+  # Key difference from probe/audit: the product config dir is mounted
+  # WRITABLE so the agent can edit its own workflows/prompts and call
+  # config:reload. No tool guards; the container boundary is the
+  # safety boundary.
+  prime:
+    image: konf-backend:phase0
+    container_name: konf-prime
+    environment:
+      KONF_CONFIG_DIR: /etc/konf/products/konf-prime/config
+      KONF_DEV_MODE: "1"
+      RUST_LOG: "info,konf=debug"
+      OLLAMA_API_BASE_URL: "http://host.docker.internal:11434"
+      KONF_MODEL: "${KONF_MODEL:-qwen3-coder:30b}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8002:8000"
+    volumes:
+      # WRITABLE — the agent edits its own workflows + prompts + tools.
+      - ../products/konf-prime/config:/etc/konf/products/konf-prime/config:rw
+      # Read-only source tree, same as code-audit.
+      - ..:/audit-target:ro
+      # State volume.
+      - prime_state:/var/lib/konf
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
 volumes:
   probe_state:
   audit_state:
+  prime_state:

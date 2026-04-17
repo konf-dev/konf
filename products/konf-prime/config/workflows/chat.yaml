@@ -1,0 +1,180 @@
+# konf-prime smoke + chat.
+#
+# Single workflow, routes on `input.message` to prove the substrate
+# capabilities konf-prime needs. Once every route is green we replace
+# the smoke routes with a single agent node whose system prompt tells
+# the LLM to use state:* for memory and shell:exec for self-authoring.
+#
+# Smoke routes (set up and tested in this session):
+#   probe:smoke-state         state:set + state:get round-trip within a run
+#   probe:smoke-passthrough   prove the #24 fix — array passthrough to ai:complete messages
+#   probe:smoke-author        agent writes a new workflow file + config:reload + invoke
+#   probe:smoke-self-intro    ai:complete with pre-built 2-turn history, checks continuity
+#
+# Chat route (default, anything else):
+#   single ai:complete with tools: shell:exec + state:* + memory:* + config:reload,
+#   system prompt telling it to manage its own history via state:*
+
+workflow: konf_prime
+description: "konf-prime: sovereign agent container. Smoke routes verify substrate; default route is the agent loop itself."
+register_as_tool: false  # friction #12 workaround — no self-dispatch
+
+capabilities:
+  - "echo"
+  - "list:append"
+  - "ai:complete"
+  - "shell:exec"
+  - "state:get"
+  - "state:set"
+  - "state:delete"
+  - "memory:store"
+  - "memory:search"
+  - "config:reload"
+  # Lets the agent invoke any workflow it authors via runner:spawn
+  # without needing to amend its own capabilities list each time.
+  - "workflow:*"
+  - "runner:spawn"
+  - "runner:wait"
+  - "runner:status"
+
+input_schema:
+  type: object
+  properties:
+    message:    { type: string }
+    session_id: { type: string }
+  required: [message]
+
+nodes:
+  route:
+    do: echo
+    with:
+      mode: "{{input.message}}"
+    then:
+      - when: "input.message == 'probe:smoke-state'"
+        then: smoke_state_set
+      - when: "input.message == 'probe:smoke-passthrough'"
+        then: smoke_pass_build_history
+      - when: "input.message == 'probe:smoke-author'"
+        then: smoke_author_write
+      - when: "input.message == 'probe:smoke-self-intro'"
+        then: smoke_self_intro
+      - else: true
+        then: agent_turn
+
+  # ----------------------------------------------------------------
+  # Smoke 1: state round-trip within a single run.
+  # Writes a key, reads it back, returns both — proves state:* plumbing.
+  # ----------------------------------------------------------------
+  smoke_state_set:
+    do: state:set
+    with:
+      key: "smoke_probe"
+      value: "hello-from-smoke"
+      session_id: "{{input.session_id}}"
+    then: smoke_state_get
+
+  smoke_state_get:
+    do: state:get
+    with:
+      key: "smoke_probe"
+      session_id: "{{input.session_id}}"
+    return: true
+
+  # ----------------------------------------------------------------
+  # Smoke 2: prove pure-ref passthrough (#24 fix).
+  # Build a 2-message history as a literal ARRAY in echo's output, then
+  # hand that array to ai:complete via `messages: "{{smoke.value}}"`.
+  # Without the fix this stringifies and ai:complete rejects. With it,
+  # the LLM sees the structured history.
+  # ----------------------------------------------------------------
+  smoke_pass_build_history:
+    do: echo
+    with:
+      value:
+        - role: "user"
+          content: "My favorite color is green."
+        - role: "assistant"
+          content: "Got it — green."
+    then: smoke_pass_call
+
+  smoke_pass_call:
+    do: ai:complete
+    with:
+      system: |
+        You are a test harness. Answer in one word.
+      messages: "{{smoke_pass_build_history.value}}"
+      prompt: "What is my favorite color?"
+      max_tokens: 16
+      temperature: 0
+    return: true
+
+  # ----------------------------------------------------------------
+  # Smoke 3: self-authoring. Agent writes a new workflow file into
+  # /workflows-editable, calls config:reload, verifies the new tool
+  # appears. Proves the "propagation" primitive end-to-end.
+  # ----------------------------------------------------------------
+  smoke_author_write:
+    do: shell:exec
+    with:
+      command: |
+        mkdir -p /etc/konf/products/konf-prime/config/workflows
+        cat > /etc/konf/products/konf-prime/config/workflows/authored.yaml <<'EOF'
+        workflow: authored_by_prime
+        description: "Authored by konf-prime at runtime via shell:exec + config:reload."
+        register_as_tool: true
+        capabilities:
+          - echo
+        nodes:
+          greet:
+            do: echo
+            with:
+              message: "authored_by_prime ran"
+            return: true
+        EOF
+        ls -la /etc/konf/products/konf-prime/config/workflows/
+    then: smoke_author_reload
+
+  smoke_author_reload:
+    do: config:reload
+    with: {}
+    return: true
+
+  # ----------------------------------------------------------------
+  # Smoke 4: multi-turn continuity within one ai:complete call.
+  # Builds a 3-message history where the user identifies themselves,
+  # and asks a follow-up. Tests whether qwen3-coder actually uses the
+  # messages array we pass. Combined with smoke 2, proves the full
+  # multi-turn path is workable even before the LLM manages its own
+  # state via tools.
+  # ----------------------------------------------------------------
+  smoke_self_intro:
+    do: ai:complete
+    with:
+      system: |
+        You are a concise test harness. Answer in at most 8 words.
+      messages:
+        - role: "user"
+          content: "Hi, my name is Bert. Remember this."
+        - role: "assistant"
+          content: "Hello Bert, got it."
+        - role: "user"
+          content: "What is my name?"
+      max_tokens: 32
+      temperature: 0
+    return: true
+
+  # ----------------------------------------------------------------
+  # Default: the agent turn. For now a plain passthrough — we'll
+  # replace this with the real agent prompt + tool access in the
+  # orchestrator session.
+  # ----------------------------------------------------------------
+  agent_turn:
+    do: ai:complete
+    with:
+      system: |
+        You are konf-prime, a sovereign agent running in your own container.
+        For now, answer briefly. (Richer system prompt + tools come next.)
+      prompt: "{{input.message}}"
+      max_tokens: 256
+      temperature: 0.2
+    return: true
