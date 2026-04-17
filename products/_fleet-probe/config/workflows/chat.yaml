@@ -10,6 +10,7 @@
 #   POST /v1/chat {"message":"shell"}       → shell:exec benign whoami+uname
 #   POST /v1/chat {"message":"shell-sudo"}  → shell:exec "sudo whoami" (must be guard-denied)
 #   POST /v1/chat {"message":"shell-rm"}    → shell:exec "rm -rf /tmp/x" (must be guard-denied)
+#   POST /v1/chat {"message":"template"}    → template render with {% raw %} escape (step 5)
 #   POST /v1/chat {"message":"<text>"}      → ai:complete (Phase 1 step 1 behavior)
 #
 # Cross-run persistence is proven by issuing `store` and `search` in two
@@ -27,6 +28,12 @@ capabilities:
   - "memory:store"
   - "memory:search"
   - "shell:exec"
+  - "template"
+  - "runner:spawn"
+  - "runner:wait"
+  - "schedule:create"
+  - "workflow:attenuation_target"
+  - "config:reload"
 
 input_schema:
   type: object
@@ -53,6 +60,18 @@ nodes:
         then: shell_sudo
       - when: "input.message == 'shell-rm'"
         then: shell_rm
+      - when: "input.message == 'template'"
+        then: render_template
+      - when: "input.message == 'runner'"
+        then: runner_spawn_hello
+      - when: "input.message == 'schedule'"
+        then: schedule_hello
+      - when: "input.message == 'attenuate-ok'"
+        then: attenuate_ok
+      - when: "input.message == 'attenuate-deny'"
+        then: attenuate_deny
+      - when: "input.message == 'reload'"
+        then: do_reload
       - else: true
         then: llm_passthrough
 
@@ -155,6 +174,101 @@ nodes:
       blocked_rule: "matches:rm -rf*"
       attempted: "rm -rf /tmp/konf-fleet-probe-canary"
       note: "caught by chat_router.shell_rm.catch — guard fired at dispatch"
+    return: true
+
+  # Phase 1 step 5 — `template` primitive with the canonical workaround
+  # for the double-render footgun. The workflow renderer pre-resolves
+  # `{{...}}` in every `with:` value BEFORE the tool runs (template
+  # substitution against the outputs map). Then `template` renders again
+  # against `vars`. So if the template literal contains `{{who}}` the
+  # outer pass strict-fails on missing `who`. Workaround: wrap the
+  # template body in `{% raw %}…{% endraw %}` so the outer pass emits
+  # the literal `{{who}}` for the inner pass to substitute.
+  render_template:
+    do: template
+    with:
+      template: "{% raw %}Hello {{who}} from {{where}} at {{when}}.{% endraw %}"
+      vars:
+        who: "bert"
+        where: "konf fleet probe"
+        when: "phase 1 step 5"
+    return: true
+
+  # Phase 1 step 6 — runner:spawn + runner:wait async pattern. Spawns the
+  # already-registered `hello` workflow (which is `register_as_tool: true`,
+  # so the runner sees `workflow:hello`) via the inline runner backend,
+  # then blocks on its run_id until terminal. The final `done` payload is
+  # the run record (state=succeeded, output=hello workflow's return).
+  runner_spawn_hello:
+    do: runner:spawn
+    with:
+      workflow: "hello"
+      input: {}
+    then: runner_wait_hello
+
+  runner_wait_hello:
+    do: runner:wait
+    with:
+      run_id: "{{runner_spawn_hello.run_id}}"
+      timeout_secs: 10
+    return: true
+
+  # Phase 1 step 7 — schedule:create durable timer. Fires the `hello`
+  # workflow once after a 2 s delay (min allowed is 1 s). The scheduler
+  # poll loop logs the fire; we verify by tailing container logs after
+  # the chat call returns.
+  schedule_hello:
+    do: schedule:create
+    with:
+      workflow: "hello"
+      delay_ms: 2000
+      repeat: false
+      input: {}
+    return: true
+
+  # Phase 1 step 9 — capability attenuation via per-node `grant:`.
+  # Both routes call the same child workflow (attenuation_target.yaml,
+  # registered as workflow:attenuation_target). The child runs one
+  # shell:exec.
+  #
+  # attenuate_ok grants the child what it needs → success.
+  # attenuate_deny grants only `echo`, withholding shell:exec → the
+  # child must fail at the shell:exec dispatch (caught by `catch:`
+  # so the SSE stream still terminates cleanly with a structured
+  # "denied" payload).
+  attenuate_ok:
+    do: workflow:attenuation_target
+    with: {}
+    grant:
+      - "echo"
+      - "shell:exec"
+    return: true
+
+  attenuate_deny:
+    do: workflow:attenuation_target
+    with: {}
+    grant:
+      - "echo"
+    catch: attenuate_denied_summary
+    return: true
+
+  attenuate_denied_summary:
+    do: echo
+    with:
+      attenuated: true
+      withheld: "shell:exec"
+      note: "child workflow denied shell:exec because parent node grant: [echo]"
+    return: true
+
+  # Phase 1 step 10 — config hot-reload. konf-init does NOT install a
+  # filesystem watcher (no notify crate in konf-init); the matrix entry
+  # is aspirational. What does exist is the `config:reload` tool, which
+  # re-scans workflows/, re-parses every yaml, and re-registers workflow
+  # tools in the engine. Useful for picking up workflow files added or
+  # edited on the bind-mounted product config dir.
+  do_reload:
+    do: config:reload
+    with: {}
     return: true
 
   # Phase 1 step 1 fallback — anything that's not a control word goes to

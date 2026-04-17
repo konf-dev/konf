@@ -1,0 +1,30 @@
+# Phase 1 step 9 — child workflow used to prove capability attenuation.
+#
+# This workflow declares `capabilities: [echo, shell:exec]` and runs a
+# trivial shell command. Registered as a tool so the parent chat_router
+# can dispatch it via `workflow:attenuation_target`.
+#
+# When called WITH full caps (e.g. ["*"]) it succeeds and returns the
+# shell output. When called from a node with `grant: ["echo"]`, the
+# child workflow's runtime check on shell:exec must fail with a
+# CapabilityDenied — proving the substrate attenuates and never
+# amplifies (capability.rs invariant).
+
+workflow: attenuation_target
+description: "Probe child workflow for capability attenuation. Runs one shell:exec; succeeds with full caps, denied under attenuated grant."
+register_as_tool: true
+
+capabilities:
+  - "echo"
+  - "shell:exec"
+
+input_schema:
+  type: object
+  properties: {}
+
+nodes:
+  run_shell:
+    do: shell:exec
+    with:
+      command: "echo attenuation_target_ran"
+    return: true

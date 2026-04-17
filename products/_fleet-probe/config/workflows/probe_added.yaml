@@ -1,0 +1,18 @@
+# Phase 1 step 10 — workflow added to disk AFTER container boot.
+# Used to prove config:reload actually re-scans the workflows directory
+# and registers new files. Must NOT be loaded at boot — should appear
+# only after a `config:reload` call.
+
+workflow: probe_added
+description: "Smoke workflow added post-boot. Visible only after config:reload."
+register_as_tool: true
+
+capabilities:
+  - "echo"
+
+nodes:
+  greet:
+    do: echo
+    with:
+      message: "probe_added workflow loaded via config:reload"
+    return: true
