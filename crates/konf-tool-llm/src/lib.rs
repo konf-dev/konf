@@ -306,6 +306,11 @@ impl Tool for AiCompleteTool {
         let input = &env.payload;
         let prompt = input.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
         let system = input.get("system").and_then(|v| v.as_str());
+        // Multi-turn history: caller passes [{role, content}, …]. Pre-pended to
+        // the messages vec inside react_loop, in front of the current user
+        // prompt. Without this, ai:complete is single-turn — the schema
+        // declares `messages` but the implementation used to ignore it.
+        let prior_messages = parse_prior_messages(input);
 
         // Parse optional tool whitelist from input
         let tool_whitelist: Option<Vec<String>> =
@@ -324,7 +329,16 @@ impl Tool for AiCompleteTool {
         let node_id = env.target.0.clone();
         let start = std::time::Instant::now();
 
-        let result = react_loop(&config, system, prompt, inner_tools, &node_id, &sender).await?;
+        let result = react_loop(
+            &config,
+            system,
+            &prior_messages,
+            prompt,
+            inner_tools,
+            &node_id,
+            &sender,
+        )
+        .await?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
         info!(
@@ -348,6 +362,51 @@ impl Tool for AiCompleteTool {
             }
         })))
     }
+}
+
+/// Parse the `messages` field of `ai:complete`'s input into rig Messages.
+///
+/// Expected JSON shape (matches the input_schema):
+/// ```json
+/// [
+///   {"role": "user",      "content": "…"},
+///   {"role": "assistant", "content": "…"},
+///   {"role": "system",    "content": "…"}
+/// ]
+/// ```
+///
+/// Roles outside `user`/`assistant`/`system` and entries missing either
+/// field are silently dropped — the alternative is failing the whole
+/// completion on a malformed history entry, which makes for poor agent
+/// ergonomics. Callers that care can validate upstream.
+fn parse_prior_messages(input: &Value) -> Vec<rig::completion::Message> {
+    use rig::completion::Message;
+    use rig::message::{AssistantContent, UserContent};
+    use rig::one_or_many::OneOrMany;
+
+    let Some(arr) = input.get("messages").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+
+    arr.iter()
+        .filter_map(|m| {
+            let role = m.get("role").and_then(|v| v.as_str())?;
+            let content = m.get("content").and_then(|v| v.as_str())?;
+            Some(match role {
+                "user" => Message::User {
+                    content: OneOrMany::one(UserContent::text(content.to_string())),
+                },
+                "assistant" => Message::Assistant {
+                    id: None,
+                    content: OneOrMany::one(AssistantContent::text(content.to_string())),
+                },
+                "system" => Message::System {
+                    content: content.to_string(),
+                },
+                _ => return None,
+            })
+        })
+        .collect()
 }
 
 // ============================================================
@@ -374,6 +433,7 @@ struct ReactResult {
 async fn react_loop(
     config: &LlmConfig,
     system: Option<&str>,
+    prior_messages: &[rig::completion::Message],
     prompt: &str,
     inner_tools: Vec<Box<dyn rig::tool::ToolDyn>>,
     node_id: &str,
@@ -404,13 +464,17 @@ async fn react_loop(
         .map(|(i, t)| (t.name(), i))
         .collect();
 
-    // Chat history starts with the user prompt
-    let mut messages: Vec<Message> = Vec::new();
+    // Chat history: optional system prompt → caller-supplied prior turns →
+    // current user prompt. The prior turns let workflows do multi-turn chat
+    // by reading history out of state:* (or memory:*) and threading it
+    // through here.
+    let mut messages: Vec<Message> = Vec::with_capacity(prior_messages.len() + 2);
     if let Some(sys) = system {
         messages.push(Message::System {
             content: sys.to_string(),
         });
     }
+    messages.extend(prior_messages.iter().cloned());
     messages.push(Message::User {
         content: OneOrMany::one(UserContent::text(prompt)),
     });

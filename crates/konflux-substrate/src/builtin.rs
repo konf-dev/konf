@@ -167,6 +167,67 @@ impl Tool for ConcatTool {
 }
 
 // ============================================================
+// List Append Tool
+// ============================================================
+
+/// Append one or more items to a list, returning the new list. Used by
+/// workflows that need to extend an accumulator (e.g. chat history) in
+/// YAML without an LLM round-trip.
+///
+/// `items` is always an array; if you have a single element wrap it in
+/// `[...]` at the call site. Keeps the semantics unambiguous — no
+/// "single value vs array" branching in the tool.
+pub struct ListAppendTool;
+
+#[async_trait]
+impl Tool for ListAppendTool {
+    fn info(&self) -> ToolInfo {
+        ToolInfo {
+            name: "list:append".into(),
+            description: "Append items to a list and return the new list. \
+                 `list` may be null/absent (treated as empty). `items` must be an array; \
+                 its elements are appended in order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "list":  { "description": "Existing list; null or absent treated as []" },
+                    "items": { "type": "array", "description": "Items to append" }
+                },
+                "required": ["items"]
+            }),
+            output_schema: None,
+            capabilities: vec![],
+            supports_streaming: false,
+            annotations: BUILTIN_ANNOTATIONS,
+        }
+    }
+
+    async fn invoke(&self, env: Envelope<Value>) -> Result<Envelope<Value>, ToolError> {
+        let mut out: Vec<Value> = match env.payload.get("list") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(arr)) => arr.clone(),
+            Some(other) => {
+                return Err(ToolError::InvalidInput {
+                    message: format!("'list' must be an array or null, got {other}"),
+                    field: Some("list".into()),
+                });
+            }
+        };
+        let items = env
+            .payload
+            .get("items")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| ToolError::InvalidInput {
+                message: "'items' must be an array".into(),
+                field: Some("items".into()),
+            })?;
+        out.extend(items.iter().cloned());
+        Ok(env.respond(Value::Array(out)))
+    }
+}
+
+// ============================================================
 // Log Tool
 // ============================================================
 
@@ -256,6 +317,79 @@ pub fn register_builtins(engine: &Engine) {
     engine.register_tool(Arc::new(EchoTool));
     engine.register_tool(Arc::new(JsonGetTool));
     engine.register_tool(Arc::new(ConcatTool));
+    engine.register_tool(Arc::new(ListAppendTool));
     engine.register_tool(Arc::new(LogTool));
     engine.register_tool(Arc::new(TemplateTool));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::envelope::Envelope;
+
+    #[tokio::test]
+    async fn list_append_extends_existing_list() {
+        let tool = ListAppendTool;
+        let env = Envelope::test(json!({
+            "list": [{"role":"user","content":"hi"}],
+            "items": [{"role":"assistant","content":"hello"}]
+        }));
+        let result = tool.invoke(env).await.unwrap();
+        assert_eq!(
+            result.payload,
+            json!([
+                {"role":"user","content":"hi"},
+                {"role":"assistant","content":"hello"}
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn list_append_treats_null_list_as_empty() {
+        let tool = ListAppendTool;
+        let env = Envelope::test(json!({
+            "list": null,
+            "items": [1, 2, 3]
+        }));
+        let result = tool.invoke(env).await.unwrap();
+        assert_eq!(result.payload, json!([1, 2, 3]));
+    }
+
+    #[tokio::test]
+    async fn list_append_treats_missing_list_as_empty() {
+        let tool = ListAppendTool;
+        let env = Envelope::test(json!({ "items": ["first"] }));
+        let result = tool.invoke(env).await.unwrap();
+        assert_eq!(result.payload, json!(["first"]));
+    }
+
+    #[tokio::test]
+    async fn list_append_accepts_empty_items() {
+        let tool = ListAppendTool;
+        let env = Envelope::test(json!({
+            "list": [1, 2],
+            "items": []
+        }));
+        let result = tool.invoke(env).await.unwrap();
+        assert_eq!(result.payload, json!([1, 2]));
+    }
+
+    #[tokio::test]
+    async fn list_append_rejects_non_array_list() {
+        let tool = ListAppendTool;
+        let env = Envelope::test(json!({
+            "list": "not an array",
+            "items": [1]
+        }));
+        let result = tool.invoke(env).await;
+        assert!(result.is_err(), "expected error, got {result:?}");
+    }
+
+    #[tokio::test]
+    async fn list_append_rejects_missing_items() {
+        let tool = ListAppendTool;
+        let env = Envelope::test(json!({ "list": [1, 2] }));
+        let result = tool.invoke(env).await;
+        assert!(result.is_err(), "expected error, got {result:?}");
+    }
 }

@@ -1,4 +1,21 @@
 //! Template rendering using minijinja for {{ }} expressions.
+//!
+//! ## Pure-reference passthrough
+//!
+//! When a string value in a workflow's `with:` block is ONLY a single
+//! reference expression — e.g. `"{{ prior.messages }}"` with no
+//! surrounding text, filters, or additional expressions — we bypass
+//! minijinja and return the referenced value directly, preserving its
+//! original JSON type (array, object, number, bool, string, null).
+//!
+//! Without this, minijinja stringifies the value as its Python-like
+//! repr, so arrays and objects can't be passed from one node's output
+//! to another node's structured input. That blocked multi-turn chat
+//! patterns like `ai:complete with messages: "{{history.value}}"`.
+//!
+//! Strings that are NOT pure refs (have surrounding text, filters,
+//! multiple expressions, or block tags like `{% raw %}`) continue
+//! through minijinja exactly as before — no backward-compat break.
 
 use minijinja::Environment;
 use serde_json::Value as JsonValue;
@@ -19,6 +36,47 @@ pub fn render(template: &str, vars: &HashMap<String, JsonValue>) -> Result<Strin
 /// Check if a string contains template expressions.
 pub fn has_templates(s: &str) -> bool {
     s.contains("{{") && s.contains("}}")
+}
+
+/// If `s` is exactly a single reference expression `{{ path.to.ref }}`
+/// (with optional whitespace, no surrounding text, no filters, no
+/// pipe operators, no block tags), return the path. Otherwise None.
+///
+/// "path" is one or more dot-separated identifier segments. Identifiers
+/// are the usual alphanumeric + underscore set used by konflux's
+/// `resolve_ref`. Anything outside that — `[0]` array indexing, `|`
+/// filters, function calls, etc. — falls through to minijinja.
+fn try_pure_ref(s: &str) -> Option<&str> {
+    let trimmed = s.trim();
+    let inner = trimmed.strip_prefix("{{")?.strip_suffix("}}")?.trim();
+
+    // No nested `{{` or `}}` — that would mean multiple expressions.
+    if inner.contains("{{") || inner.contains("}}") {
+        return None;
+    }
+    // No block tags, filters, comparisons, function calls, arithmetic.
+    if inner.chars().any(|c| {
+        matches!(
+            c,
+            '|' | '(' | ')' | '[' | ']' | '+' | '-' | '=' | '<' | '>' | ','
+        )
+    }) {
+        return None;
+    }
+    // Path must be non-empty and composed of identifier characters
+    // and dots. Every dot must separate non-empty identifier segments.
+    if inner.is_empty() {
+        return None;
+    }
+    let valid = inner.split('.').all(|seg| {
+        !seg.is_empty()
+            && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && !seg.chars().next().is_some_and(|c| c.is_ascii_digit())
+    });
+    if !valid {
+        return None;
+    }
+    Some(inner)
 }
 
 /// Resolve all Expr values in a HashMap, rendering templates against state.
@@ -74,6 +132,17 @@ fn resolve_json_templates(
 ) -> Result<JsonValue, String> {
     match val {
         JsonValue::String(s) if has_templates(s) => {
+            // Pure-ref passthrough: if the string is exactly a single
+            // `{{ path.to.ref }}` expression and the path resolves,
+            // return the referenced JsonValue with its original type.
+            // This unblocks passing arrays/objects between nodes.
+            if let Some(path) = try_pure_ref(s) {
+                if let Some(value) = resolve_ref(path, state) {
+                    return Ok(value);
+                }
+                // Path didn't resolve — fall through so minijinja's
+                // strict-undefined raises a clear error.
+            }
             let rendered = render(s, state)?;
             Ok(JsonValue::String(rendered))
         }
