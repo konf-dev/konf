@@ -1,0 +1,58 @@
+# konf-prime-hybrid — available model catalog.
+#
+# Two providers wired. Default is `ollama` pointed at the small-GPU
+# endpoint (port 11435 / RTX 2070 Super) for bulk work. Gemini is
+# available per-call via `provider: gemini` override in ai:complete
+# when the orchestration reasoning justifies the cloud cost.
+#
+# Cost posture: default Gemini choice when invoked should be
+# gemini-2.5-flash (cheap). Reach for gemini-2.5-pro only when the
+# reasoning depth of a single turn actually matters. Announce heavy
+# Gemini use in chat responses so the operator can see it.
+#
+# Thinking token control: not wired (see konf-prime-gemini/models.yaml
+# for the note). Gemini 2.5 Pro uses dynamic thinking by default.
+
+providers:
+  ollama:
+    endpoint: "${OLLAMA_API_BASE_URL}"  # compose sets this to :11435 (small GPU)
+    default: true
+    models:
+      - name: gemma4:e4b
+        good_for: "default bulk; fast tool loops on small GPU"
+        gpu: small
+      - name: qwen3:8b
+        good_for: "fallback local"
+        gpu: small
+
+  gemini:
+    default: false
+    reachable_via: "ai:complete with `provider: gemini`"
+    models:
+      - name: gemini-2.5-flash
+        good_for: "first choice for cloud when local isn't enough; cheap"
+      - name: gemini-2.5-pro
+        good_for: "escalation: hardest reasoning, planning; expensive"
+      - name: gemini-3-pro-preview
+        good_for: "frontier test; use sparingly"
+        stability: preview
+
+  # Reachable via shell:exec curl (not native ai:complete) — the rig
+  # ollama client is pinned to one OLLAMA_API_BASE_URL at container
+  # start. If you need big-GPU local reasoning without paying, call
+  # it with raw curl. Patching konf-tool-llm to allow per-call
+  # endpoint override is a good first Rust self-mod task.
+  ollama-big:
+    endpoint: "http://host.docker.internal:11434"
+    default: false
+    reachable_via: "shell:exec curl"
+    models:
+      - name: gemma4:31b
+      - name: qwen3-coder:30b
+      - name: deepseek-r1:32b
+
+# Heuristic:
+#   Every turn's first LLM pass              → ollama/gemma4:e4b
+#   Orchestration step mid-chat (planning)   → gemini/gemini-2.5-flash
+#   "This turn really needs to think"        → gemini/gemini-2.5-pro
+#   Local heavy reasoning, no cloud cost     → shell:exec curl 11434
