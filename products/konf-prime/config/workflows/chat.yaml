@@ -202,7 +202,7 @@ nodes:
       prompt: "{{input.message}}"
       max_tokens: 2048
       temperature: 0.2
-      max_iterations: 20
+      max_iterations: 50
       tools:
         - "shell:exec"
         - "state:get"

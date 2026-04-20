@@ -8,3 +8,12 @@ port = 8000  # exposed as host port 8002 by fleet-compose
 [database]
 url = "redb:///var/lib/konf/konf.redb"
 retention_days = 30
+
+# Engine timeouts. Default ai:complete calls on gemma4:31b take 5–20s
+# cold and can chain several iterations inside a ReAct loop; the
+# upstream default of 30s per tool invocation is too tight for real
+# autonomous work. 180s per tool + 10min per workflow gives headroom
+# without masking genuine hangs.
+[engine]
+default_timeout_ms = 180000
+max_workflow_timeout_ms = 600000
