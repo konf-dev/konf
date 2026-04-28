@@ -19,7 +19,7 @@ konf-init = { path = "../konf-init", default-features = false, features = ["memo
 konf-runtime = { path = "../konf-runtime" }
 konflux-substrate = { path = "../konflux-substrate" }
 
-rmcp = { version = "1.3", features = ["server", "transport-io", "transport-streamable-http-server"] }
+rmcp = { version = "1.5", features = ["server", "transport-io", "transport-streamable-http-server"] }
 tokio = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
