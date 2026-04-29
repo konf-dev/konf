@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Konf — An operating system for AI agents</title>
+    <meta
+      name="description"
+      content="Konf is a self-hostable, local-first operating system for AI agents. Products are configurations (YAML + markdown), not code."
+    />
+    <link rel="canonical" href="https://konf.dev/" />
+
+    <meta property="og:title" content="Konf" />
+    <meta property="og:description" content="An operating system for AI agents. Self-hostable, local-first. Products are configurations, not code." />
+    <meta property="og:url" content="https://konf.dev/" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Konf" />
+    <meta name="twitter:description" content="An operating system for AI agents." />
+
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2300d7a0'/%3E%3Ctext x='32' y='44' text-anchor='middle' font-family='ui-monospace,monospace' font-size='36' font-weight='700' fill='%230a0c10'%3EK%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <a class="brand" href="/">
+        <span class="logo" aria-hidden="true">K</span>
+        <span>konf</span>
+      </a>
+      <nav class="nav-links">
+        <a href="https://github.com/konf-dev/konf#what-is-konf">What</a>
+        <a href="https://github.com/konf-dev/konf/blob/main/docs/MENTAL_MODEL.md">Mental model</a>
+        <a href="https://github.com/konf-dev/konf/blob/main/docs/getting-started/quickstart.md">Quickstart</a>
+        <a href="https://github.com/konf-dev/konf">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Open source · BSL-1.1</p>
+        <h1>An operating system <br />for AI agents.</h1>
+        <p class="lede">
+          Self-hostable. Local-first. Products are configurations
+          (<code>YAML</code> + markdown), not code. The same Rust binary runs
+          every product.
+        </p>
+        <div class="cta">
+          <a class="btn primary" href="https://github.com/konf-dev/konf/blob/main/docs/getting-started/quickstart.md">Get started</a>
+          <a class="btn ghost" href="https://github.com/konf-dev/konf">View on GitHub →</a>
+        </div>
+
+<pre class="snippet" aria-label="quickstart"><span class="c"># clone, build, run — single embedded redb file</span>
+git clone https://github.com/konf-dev/konf.git
+cd konf &amp;&amp; cargo build --release --workspace
+
+KONF_CONFIG_DIR=./config ./target/release/konf-backend &amp;
+curl http://localhost:8000/v1/health</pre>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h3>Config, not code</h3>
+          <p>
+            A <em>product</em> is a directory of YAML and markdown that defines
+            a complete agent: workflows, tools, memory, prompts. No application
+            code required.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Local-first &amp; self-hostable</h3>
+          <p>
+            Runs as a single Rust binary against an embedded
+            <code>redb</code> file. No Postgres, no Docker, no cloud. Bring
+            your own LLM keys.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Capability-based runtime</h3>
+          <p>
+            Process table, capability enforcement, and namespace injection.
+            Tools run inside an <code>ExecutionScope</code> — least-privilege
+            by default.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Pluggable tools</h3>
+          <p>
+            Compiled Rust, MCP, HTTP, and (soon) WASM tool adapters all
+            implement one <code>Tool</code> trait. Add a tool, don't fork the
+            engine.
+          </p>
+        </article>
+        <article class="card">
+          <h3>MCP &amp; HTTP shells</h3>
+          <p>
+            Expose products to Claude Desktop, Cursor, and other MCP clients
+            via <code>konf-mcp</code>, or to apps via the
+            <code>konf-backend</code> REST + SSE API.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Open by default</h3>
+          <p>
+            BSL-1.1 today, Apache-2.0 on 2030-04-01. Free for personal,
+            development, and internal production use.
+          </p>
+        </article>
+      </section>
+
+      <section class="arch">
+        <h2>Architecture</h2>
+<pre>┌──────────────┐     ┌──────────┐
+│ konf-backend │     │ konf-mcp │      Transport shells (HTTP / stdio-MCP)
+└──────┬───────┘     └────┬─────┘
+       └────────┬─────────┘
+                │
+     ┌──────────▼───────────┐
+     │      konf-init       │         Bootstrap (config → engine)
+     └──────────┬───────────┘
+                │
+     ┌──────────▼───────────┐
+     │    konf-runtime      │         Process table, capabilities, namespaces
+     └──────────┬───────────┘
+                │
+     ┌──────────▼───────────┐
+     │  konflux-substrate   │         Engine: tools, resources, prompts
+     └──────────┬───────────┘
+                │
+     ┌──────────┴──────────┐
+     │   konf-tool-*       │         Plugin crates (http, llm, embed,
+     │                     │          memory, mcp-client, shell, secret,
+     │                     │          runner)
+     └─────────────────────┘</pre>
+      </section>
+    </main>
+
+    <footer>
+      <div>
+        <span class="logo small" aria-hidden="true">K</span> konf · BSL-1.1
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/konf-dev/konf">GitHub</a>
+        <a href="https://github.com/konf-dev/konf/blob/main/LICENSE">License</a>
+        <a href="https://github.com/konf-dev/konf/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/konf-dev/konf/blob/main/CONTRIBUTING.md">Contributing</a>
+      </div>
+    </footer>
+  </body>
+</html>
