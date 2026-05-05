@@ -23,12 +23,12 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 tracing = { version = "0.1", features = ["attributes"] }
 futures = { workspace = true }
-sha2 = "0.10"
+sha2 = "0.11"
 
 # Optional telemetry (for Langfuse, Jaeger, Datadog via OTEL collector)
-tracing-opentelemetry = { version = "0.27", optional = true }
-opentelemetry = { version = "0.27", optional = true }
-opentelemetry-otlp = { version = "0.27", optional = true }
+tracing-opentelemetry = { version = "0.32", optional = true }
+opentelemetry = { version = "0.31", optional = true }
+opentelemetry-otlp = { version = "0.31", optional = true }
 
 [features]
 default = []
